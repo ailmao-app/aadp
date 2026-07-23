@@ -9,7 +9,7 @@ patch releases within `0.1.x` MUST NOT break schema or wire compatibility.
 ### Changed
 
 - Renamed the protocol from "AI Data Discovery Protocol (AIDP)" to
-  "AI Application Discovery Protocol (AADP)": package name (`aadp`),
+  "AI Application Discovery Protocol (AADP)": package name (`ail-aadp`),
   validator CLI (`aadp-validate`), exported types (`Aadp*`) and the
   conformance env var (`AADP_BASE_URL`).
 - Renamed the v0.1 wire contract to match: the `aidp_version` field is now
@@ -22,7 +22,7 @@ patch releases within `0.1.x` MUST NOT break schema or wire compatibility.
   identifier to remember instead of two. Updated everywhere the field
   appears: `spec/v0.1/`, `schemas/v0.1/`, `examples/v0.1/`, `tests/`,
   `src/client/index.ts`, and all docs/ADRs.
-- `ailmao-landing`'s adapter now consumes the `aadp` package instead of the
+- `ailmao-landing`'s adapter now consumes the `ail-aadp` package instead of the
   old `aidp` tarball; adapter directory renamed `lib/aidp/` → `lib/aadp/`.
 
 ## [0.1.0] - Phase A (pending release gate)

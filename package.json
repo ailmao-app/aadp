@@ -1,5 +1,5 @@
 {
-  "name": "aadp",
+  "name": "ail-aadp",
   "version": "0.1.0",
   "description": "AI Application Discovery Protocol (AADP) — specification, schemas, validator, reference client and conformance suite",
   "type": "module",

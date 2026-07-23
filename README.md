@@ -18,7 +18,7 @@ The typed relation and graph traversal design is at [`docs/RELATIONS_MODULE_DESI
 - JSON Schema, valid examples, and contract tests.
 - A validator and conformance test suite usable by any application.
 - A reference client demonstrating the discovery flow independently of Ailmao.
-- `ailmao-landing` implements an adapter (`lib/aadp/`) consuming the `aadp` package.
+- `ailmao-landing` implements an adapter (`lib/aadp/`) consuming the `ail-aadp` package.
 
 ## Structure
 

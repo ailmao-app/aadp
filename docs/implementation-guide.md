@@ -51,7 +51,7 @@ just this repo's mock server).
 ## Using the reference client
 
 ```ts
-import { discoverAllEntities } from "aadp"; // or "aadp/client" for a narrower import
+import { discoverAllEntities } from "ail-aadp"; // or "ail-aadp/client" for a narrower import
 
 for await (const entity of discoverAllEntities("https://your-domain.example")) {
   console.log(entity.id, entity.checksum);
