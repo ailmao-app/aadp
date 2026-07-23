@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.claude/
+
+# Internal Ailmao integration plan — not part of the public AADP protocol,
+# kept local only.
+docs/IMPLEMENTATION_PLAN.md

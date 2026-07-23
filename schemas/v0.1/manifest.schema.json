@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aidp.dev/schemas/v0.1/manifest.schema.json",
+  "title": "AIDP Manifest v0.1",
+  "type": "object",
+  "required": ["aidp_version", "default_locale", "available_locales", "sitemap_index"],
+  "properties": {
+    "aidp_version": { "const": "0.1" },
+    "default_locale": { "type": "string", "minLength": 2 },
+    "available_locales": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 2 },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "sitemap_index": { "type": "string", "format": "uri" },
+    "entity_base": {
+      "type": "string",
+      "format": "uri",
+      "description": "URI construction prefix for building an entity URL as {entity_base}/{type}/{id}.json when a client already knows a canonical id. NOT a dereferenceable endpoint by itself — GET on entity_base alone is undefined behavior. sitemap.items[].url remains the authoritative entity URL. See spec §3.1."
+    },
+    "capabilities": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    }
+  },
+  "patternProperties": {
+    "^x_[a-zA-Z0-9_]*$": {}
+  },
+  "additionalProperties": false
+}

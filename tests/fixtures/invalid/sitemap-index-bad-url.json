@@ -1,0 +1,10 @@
+{
+  "aidp_version": "0.1",
+  "generated_at": "2026-07-21T09:30:00Z",
+  "sitemaps": [
+    {
+      "type": "example",
+      "url": "not-a-valid-uri"
+    }
+  ]
+}

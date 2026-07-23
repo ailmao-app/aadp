@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aidp.dev/schemas/v0.1/sitemap.schema.json",
+  "title": "AIDP Sitemap v0.1",
+  "type": "object",
+  "required": ["aidp_version", "type", "generated_at", "checksum", "items"],
+  "properties": {
+    "aidp_version": { "const": "0.1" },
+    "type": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "checksum": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "items": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "required": ["id", "url", "updated_at", "checksum"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$" },
+          "url": { "type": "string", "format": "uri" },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "checksum": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+        },
+        "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+        "additionalProperties": false
+      }
+    },
+    "cursor": {
+      "type": "object",
+      "required": ["next"],
+      "properties": {
+        "next": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    }
+  },
+  "patternProperties": {
+    "^x_[a-zA-Z0-9_]*$": {}
+  },
+  "additionalProperties": false
+}
