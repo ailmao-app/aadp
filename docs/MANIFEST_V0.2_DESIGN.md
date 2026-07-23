@@ -319,9 +319,10 @@ Khi `policies`, HTTP header và resource metadata mâu thuẫn, client phải á
 
 ## 8. Compatibility và migration từ v0.1
 
+`aadp_version` đã là tên field trong wire contract v0.1 (rename từ `aidp_version` được áp dụng ngay trong v0.1, không đợi đến v0.2 — xem [CHANGELOG.md](../CHANGELOG.md)). Bảng dưới đây chỉ còn liệt kê các thay đổi cấu trúc thực sự khác biệt giữa v0.1 và v0.2 draft.
+
 | v0.1 | v0.2 draft | Migration |
 |---|---|---|
-| `aidp_version` | `aadp_version` | Rename field theo tên protocol mới (AADP); v0.1 giữ nguyên `aidp_version` |
 | `default_locale` | `usage_guidance.default_language` | Copy và validate membership |
 | `available_locales` | `usage_guidance.available_languages` | Copy array |
 | `sitemap_index` | `discovery.sitemap_index` | Chuyển vào discovery object |
@@ -333,7 +334,7 @@ Migration phải additive ở giai đoạn transition:
 
 1. AADP v0.1 endpoint tiếp tục trả manifest v0.1.
 2. AADP v0.2 có base path/manifest version riêng theo quyết định versioning.
-3. Client đọc version field trước khi parse (`aidp_version` với v0.1, `aadp_version` với v0.2).
+3. Client đọc field `aadp_version` (cùng tên ở cả v0.1 và v0.2) trước khi parse, và rẽ nhánh theo giá trị (`"0.1"` hoặc `"0.2"`).
 4. Không trả payload v0.2 dưới URL tuyên bố v0.1.
 
 ## 9. Conformance plan

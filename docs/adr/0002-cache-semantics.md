@@ -68,7 +68,7 @@ weak/strong pair that represents the same checksum never matched —
 `304` only ever fired for uncompressed requests, which is not what most
 real clients send. Fixed at the origin by implementing RFC 9110 §8.8.3.2
 weak comparison (strip an optional `W/` from both sides before
-comparing) — see `ailmao-landing/lib/aidp/http.ts`'s `ifNoneMatchHits()`.
+comparing) — see `ailmao-landing/lib/aadp/http.ts`'s `ifNoneMatchHits()`.
 The conformance suite's ETag assertion does the same stripping when
 reading the *response* ETag for comparison against the declared
 checksum.

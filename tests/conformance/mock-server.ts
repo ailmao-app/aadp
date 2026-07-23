@@ -104,7 +104,7 @@ export async function startMockServer(): Promise<MockServerHandle> {
 
     if (url.pathname === "/.well-known/ai-manifest.json") {
       const manifest = {
-        aidp_version: "0.1",
+        aadp_version: "0.1",
         default_locale: "en",
         available_locales: ["en"],
         sitemap_index: `http://${req.headers.host}/ai/v0.1/sitemap-index.json`,
@@ -132,7 +132,7 @@ export async function startMockServer(): Promise<MockServerHandle> {
       const checksum = checksumOf(sitemaps);
       respondCacheable(
         200,
-        { aidp_version: "0.1", generated_at: generatedAt, checksum, sitemaps },
+        { aadp_version: "0.1", generated_at: generatedAt, checksum, sitemaps },
         checksum,
         generatedAt
       );
@@ -157,7 +157,7 @@ export async function startMockServer(): Promise<MockServerHandle> {
         const checksum = checksumOf(items);
         respondCacheable(
           200,
-          { aidp_version: "0.1", type: "note", generated_at: generatedAt, checksum, items },
+          { aadp_version: "0.1", type: "note", generated_at: generatedAt, checksum, items },
           checksum,
           generatedAt
         );
@@ -183,7 +183,7 @@ export async function startMockServer(): Promise<MockServerHandle> {
       respondCacheable(
         200,
         {
-          aidp_version: "0.1",
+          aadp_version: "0.1",
           type: "example",
           generated_at: generatedAt,
           checksum,
@@ -212,7 +212,7 @@ export async function startMockServer(): Promise<MockServerHandle> {
       }
       const checksum = entityChecksum(item);
       const body = {
-        aidp_version: "0.1",
+        aadp_version: "0.1",
         id: item.id,
         type,
         checksum,

@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aidp.dev/schemas/v0.1/sitemap-index.schema.json",
-  "title": "AIDP Sitemap Index v0.1",
+  "$id": "https://aadp.dev/schemas/v0.1/sitemap-index.schema.json",
+  "title": "AADP Sitemap Index v0.1",
   "type": "object",
-  "required": ["aidp_version", "generated_at", "checksum", "sitemaps"],
+  "required": ["aadp_version", "generated_at", "checksum", "sitemaps"],
   "properties": {
-    "aidp_version": { "const": "0.1" },
+    "aadp_version": { "const": "0.1" },
     "generated_at": { "type": "string", "format": "date-time" },
     "checksum": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
     "sitemaps": {

@@ -10,7 +10,7 @@ interface ExtensionFields {
 }
 
 export interface Manifest extends ExtensionFields {
-  aidp_version: string;
+  aadp_version: string;
   default_locale: string;
   available_locales: string[];
   sitemap_index: string;
@@ -25,7 +25,7 @@ export interface Manifest extends ExtensionFields {
 }
 
 export interface SitemapIndex extends ExtensionFields {
-  aidp_version: string;
+  aadp_version: string;
   generated_at: string;
   /** sha256:<hex> of canonical `sitemaps` — see spec §6. */
   checksum: string;
@@ -40,7 +40,7 @@ export interface SitemapItem extends ExtensionFields {
 }
 
 export interface Sitemap extends ExtensionFields {
-  aidp_version: string;
+  aadp_version: string;
   type: string;
   generated_at: string;
   /** sha256:<hex> of canonical `items` — see spec §6. */
@@ -50,7 +50,7 @@ export interface Sitemap extends ExtensionFields {
 }
 
 export interface Entity<T = unknown> extends ExtensionFields {
-  aidp_version: string;
+  aadp_version: string;
   id: string;
   type: string;
   checksum: string;

@@ -15,7 +15,7 @@ hardcoding per-deployment assumptions or trial-and-erroring endpoints.
 ## Decision
 
 - The manifest (`/.well-known/ai-manifest.json`) is the single capability
-  discovery surface. It MUST list `aidp_version` and MAY list a
+  discovery surface. It MUST list `aadp_version` and MAY list a
   `capabilities` array of string tokens.
 - v0.1 defines no optional capability tokens — a v0.1 server that
   publishes a manifest is assumed to support manifest → sitemap index →

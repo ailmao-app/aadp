@@ -1,11 +1,11 @@
 {
-  "aidp_version": "0.1",
+  "aadp_version": "0.1",
   "type": "example",
   "generated_at": "2026-07-21T09:30:00Z",
   "items": [
     {
       "id": "example:sample/1",
-      "url": "https://example.aidp.dev/ai/v0.1/entities/example/sample-1.json",
+      "url": "https://example.aadp.dev/ai/v0.1/entities/example/sample-1.json",
       "updated_at": "2026-07-20T08:00:00Z",
       "checksum": "sha256:c5e9971fd0fc46cc6d4e3b43dd4bac0bf2126492c05e6f71f515781afb49f928"
     }

@@ -1,5 +1,5 @@
 {
   "default_locale": "en",
   "available_locales": ["en"],
-  "sitemap_index": "https://example.aidp.dev/ai/v0.1/sitemap-index.json"
+  "sitemap_index": "https://example.aadp.dev/ai/v0.1/sitemap-index.json"
 }

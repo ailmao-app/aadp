@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aidp.dev/schemas/v0.1/manifest.schema.json",
-  "title": "AIDP Manifest v0.1",
+  "$id": "https://aadp.dev/schemas/v0.1/manifest.schema.json",
+  "title": "AADP Manifest v0.1",
   "type": "object",
-  "required": ["aidp_version", "default_locale", "available_locales", "sitemap_index"],
+  "required": ["aadp_version", "default_locale", "available_locales", "sitemap_index"],
   "properties": {
-    "aidp_version": { "const": "0.1" },
+    "aadp_version": { "const": "0.1" },
     "default_locale": { "type": "string", "minLength": 2 },
     "available_locales": {
       "type": "array",

@@ -82,7 +82,7 @@ describe("every example file in examples/v0.1 validates", () => {
 });
 
 describe("negative fixtures fail schema validation", () => {
-  it("manifest missing aidp_version is invalid", () => {
+  it("manifest missing aadp_version is invalid", () => {
     const result = validateManifest(
       readJson(path.join(invalidDir, "manifest-missing-version.json"))
     );

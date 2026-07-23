@@ -1,11 +1,11 @@
 {
-  "aidp_version": "0.1",
+  "aadp_version": "0.1",
   "generated_at": "2026-07-21T09:30:00Z",
-  "checksum": "sha256:f16394c062d71993c87e3c9c89fea4f3c110ba32a284f7459994dc1b9bfc0216",
+  "checksum": "sha256:c6e5253a4264b584dfe4a099f4a10997937da5d19ea28fbf6c8dce26e6928307",
   "sitemaps": [
     {
       "type": "example",
-      "url": "https://example.aidp.dev/ai/v0.1/sitemaps/example.json",
+      "url": "https://example.aadp.dev/ai/v0.1/sitemaps/example.json",
       "count": 2
     }
   ]
