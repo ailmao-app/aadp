@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aidp.dev/schemas/v0.1/error.schema.json",
-  "title": "AIDP Error Envelope v0.1",
+  "$id": "https://aadp.dev/schemas/v0.1/error.schema.json",
+  "title": "AADP Error Envelope v0.1",
   "type": "object",
   "required": ["error"],
   "properties": {

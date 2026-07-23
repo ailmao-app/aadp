@@ -290,7 +290,7 @@ Rollout:
 7. `series/part_of` chỉ khi có canonical series model public.
 8. `followers/follows` hoãn tới khi privacy policy được duyệt.
 
-Adapter nằm trong `ailmao-landing/lib/aidp/relations`; route chỉ validate request, gọi service và trả response/cache headers.
+Adapter nằm trong `ailmao-landing/lib/aadp/relations`; route chỉ validate request, gọi service và trả response/cache headers.
 
 ## 16. Release gate
 

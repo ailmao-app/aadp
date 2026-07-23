@@ -15,10 +15,10 @@ servers.
 ## Decision
 
 - AADP versions follow `MAJOR.MINOR` (e.g. `0.1`, `0.2`, `1.0`); the
-  `aidp_version` field in every payload pins the wire contract version
+  `aadp_version` field in every payload pins the wire contract version
   the payload was produced under.
 - **Patch changes** (documentation, non-normative clarification, bug fixes
-  in reference implementation code) do not bump `aidp_version` and MUST
+  in reference implementation code) do not bump `aadp_version` and MUST
   NOT alter schema validation results for any previously-valid payload.
 - **Minor version** bumps (e.g. `0.1` → `0.2`) MAY add new optional
   fields, new capability tokens, or new resource types. They MUST NOT

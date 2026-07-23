@@ -1,14 +1,14 @@
 {
-  "aidp_version": "0.1",
+  "aadp_version": "0.1",
   "id": "example:sample-2",
   "type": "example",
-  "checksum": "sha256:6d578fd3d18c5a0bf51de813d8aac9575bb35729adacc6d3b3c5077483c769f3",
+  "checksum": "sha256:aa3936dc9c757107c5cfdacbf1fc783621daa4f0e10fd2f934c1124be422012a",
   "updated_at": "2026-07-21T09:30:00Z",
-  "canonical_url": "https://example.aidp.dev/e/sample-2",
+  "canonical_url": "https://example.aadp.dev/e/sample-2",
   "locale": "en",
   "data": {
     "title": "Sample Entity Two",
-    "description": "A second generic AIDP example entity, used to exercise sitemap pagination.",
-    "tags": ["sample", "aidp", "second"]
+    "description": "A second generic AADP example entity, used to exercise sitemap pagination.",
+    "tags": ["sample", "aadp", "second"]
   }
 }

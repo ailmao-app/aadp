@@ -63,7 +63,7 @@ Ranh giới layer:
 - Relations là module graph linking dùng chung cho Answer và Evidence modules; thiết kế chi tiết nằm tại [`RELATIONS_MODULE_DESIGN.md`](RELATIONS_MODULE_DESIGN.md).
 - Answer và Evidence/Provenance là module chính thức trong cùng AADP package; mỗi module có semantic contract nhưng không chứa type riêng của Ailmao.
 - Adapter Ailmao mapping domain data sang module AADP tương ứng.
-- Landing route chỉ làm HTTP boundary; business mapping nằm trong `lib/aidp`.
+- Landing route chỉ làm HTTP boundary; business mapping nằm trong `lib/aadp`.
 - HTML/JSON-LD và AADP dùng chung content service, không duplicate nội dung trong route.
 
 ## 4. AADP Answer Module (AEO)
@@ -323,7 +323,7 @@ ailmao-landing/lib/content/
 - Manifest công bố các AADP module đã version.
 - Sitemap index bổ sung `answer`, `claim`, `evidence`, `source` khi mỗi type có dữ liệu thật.
 - Mỗi sitemap item trỏ thẳng tới entity detail; không quảng bá base URL luôn 404.
-- Route handler mỏng, gọi `lib/aidp` service/serializer.
+- Route handler mỏng, gọi `lib/aadp` service/serializer.
 - Conformance suite AADP transport core và module đều phải xanh.
 
 ### Phase B4 — Freshness notification

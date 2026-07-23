@@ -1,7 +1,7 @@
 {
-  "aidp_version": "0.1",
+  "aadp_version": "0.1",
   "default_locale": "en",
   "available_locales": ["en"],
-  "sitemap_index": "https://example.aidp.dev/ai/v0.1/sitemap-index.json",
+  "sitemap_index": "https://example.aadp.dev/ai/v0.1/sitemap-index.json",
   "vendor_secret_field": "not allowed without x_ prefix"
 }

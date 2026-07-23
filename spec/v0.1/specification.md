@@ -13,9 +13,9 @@ discovery and retrieval contract that lets an AI client find and fetch
 structured data directly from an application, without HTML crawling.
 
 > **Naming note.** AADP was formerly named "AI Data Discovery Protocol
-> (AIDP)". The v0.1 wire contract predates the rename, so the
-> `aidp_version` field and the published v0.1 schema `$id` URLs under
-> `https://aidp.dev/schemas/v0.1/` keep the `aidp` prefix and MUST NOT be
+> (AADP)". The v0.1 wire contract predates the rename, so the
+> `aadp_version` field and the published v0.1 schema `$id` URLs under
+> `https://aadp.dev/schemas/v0.1/` keep the `aadp` prefix and MUST NOT be
 > changed within `0.1.x`. Renamed wire identifiers (`aadp_version`,
 > `aadp:*` module IDs) apply from v0.2.
 
@@ -64,7 +64,7 @@ Required fields:
 
 | Field | Type | Description |
 |---|---|---|
-| `aidp_version` | string | Protocol version, e.g. `"0.1"`. |
+| `aadp_version` | string | Protocol version, e.g. `"0.1"`. |
 | `default_locale` | string | BCP-47-ish locale tag, e.g. `"vi"`. |
 | `available_locales` | string[] | Non-empty list including `default_locale`. |
 | `sitemap_index` | string (absolute URI) | URL of the sitemap index. |
@@ -92,7 +92,7 @@ offer that shortcut MAY omit the field entirely.
 Servers MUST publish a sitemap index at the URL given in
 `manifest.sitemap_index`, base path convention `/ai/v0.1/sitemap-index.json`.
 
-Required fields: `aidp_version`, `generated_at` (RFC 3339 timestamp),
+Required fields: `aadp_version`, `generated_at` (RFC 3339 timestamp),
 `checksum` (`sha256:<hex>` of canonical `sitemaps`, see §6),
 `sitemaps` (array of `{ type, url, count? }`).
 
@@ -101,7 +101,7 @@ Each `sitemaps[].url` points to a per-type sitemap, conventionally at
 
 ### 3.3 Sitemap
 
-Required fields: `aidp_version`, `type`, `generated_at`, `checksum`
+Required fields: `aadp_version`, `type`, `generated_at`, `checksum`
 (`sha256:<hex>` of canonical `items`, see §6), `items` (array).
 
 Each item:
@@ -129,7 +129,7 @@ Required fields:
 
 | Field | Type | Description |
 |---|---|---|
-| `aidp_version` | string | Protocol version. |
+| `aadp_version` | string | Protocol version. |
 | `id` | string | Canonical ID, matches sitemap. |
 | `type` | string | Resource type. |
 | `checksum` | string | `sha256:<hex>` of canonical `data`, see §6. |
@@ -229,7 +229,7 @@ header a server happens to set on them.
 
 ## 8. Versioning
 
-See ADR-0004. `aidp_version` pins the wire contract. AADP v0.1 base path
+See ADR-0004. `aadp_version` pins the wire contract. AADP v0.1 base path
 is `/ai/v0.1`. A server MUST NOT serve a payload under `/ai/v0.1/*` that
 fails `schemas/v0.1/*` validation.
 

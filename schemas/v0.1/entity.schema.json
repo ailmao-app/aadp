@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aidp.dev/schemas/v0.1/entity.schema.json",
-  "title": "AIDP Entity Envelope v0.1",
+  "$id": "https://aadp.dev/schemas/v0.1/entity.schema.json",
+  "title": "AADP Entity Envelope v0.1",
   "type": "object",
-  "required": ["aidp_version", "id", "type", "checksum", "updated_at", "data"],
+  "required": ["aadp_version", "id", "type", "checksum", "updated_at", "data"],
   "properties": {
-    "aidp_version": { "const": "0.1" },
+    "aadp_version": { "const": "0.1" },
     "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$" },
     "type": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
     "checksum": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
