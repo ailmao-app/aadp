@@ -159,7 +159,7 @@ Module gồm ba type chuẩn có thể liên kết:
 
 ## 6. Discovery và module capability
 
-Thiết kế chi tiết của application identity, links, resources, interfaces, security, policies và usage guidance nằm tại [`MANIFEST_V0.2_DESIGN.md`](MANIFEST_V0.2_DESIGN.md). Answer/Evidence là module built-in được manifest công bố; chúng không phải protocol tách rời.
+Thiết kế chi tiết của application identity, links, resources, interfaces, security, policies và usage guidance nằm tại [`MANIFEST_V1.0_DESIGN.md`](MANIFEST_V1.0_DESIGN.md). Answer/Evidence là module built-in được manifest công bố; chúng không phải protocol tách rời.
 
 Manifest công bố module bằng identifier chuẩn, không dùng nhãn marketing mơ hồ. Wire contract mục tiêu:
 

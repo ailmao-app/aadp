@@ -1,10 +1,10 @@
-# Thiết kế AADP Manifest v0.2
+# Thiết kế AADP Manifest v1.0
 
 > Trạng thái: Design Draft. Tài liệu này chưa thay thế manifest v0.1 đang được pilot sử dụng.
 
 ## 1. Mục tiêu
 
-Manifest v0.2 là **application discovery document** giúp AI client trả lời các câu hỏi sau trước khi đọc dữ liệu:
+Manifest v1.0 là **application discovery document** giúp AI client trả lời các câu hỏi sau trước khi đọc dữ liệu:
 
 1. Ứng dụng này là gì và do ai vận hành?
 2. Những URL nào dành cho người dùng?
@@ -50,7 +50,7 @@ AADP Manifest
 
 ```json
 {
-  "aadp_version": "0.2",
+  "aadp_version": "1.0",
   "application": {
     "name": "Example Application",
     "description": "A short factual description.",
@@ -68,7 +68,7 @@ AADP Manifest
     "profiles": "https://example.com/profiles"
   },
   "discovery": {
-    "sitemap_index": "https://example.com/ai/v0.2/sitemap-index.json"
+    "sitemap_index": "https://example.com/ai/v1.0/sitemap-index.json"
   },
   "modules": [
     {
@@ -91,7 +91,7 @@ AADP Manifest
     {
       "type": "character",
       "media_types": ["text", "image", "video"],
-      "sitemap": "https://example.com/ai/v0.2/sitemaps/character.json",
+      "sitemap": "https://example.com/ai/v1.0/sitemaps/character.json",
       "security": "guest"
     }
   ],
@@ -176,6 +176,8 @@ Quy tắc:
 
 ### 5.3 `discovery`
 
+- Manifest v1.0 được publish tại URL canonical `/.well-known/ai-manifest.json`.
+- URL well-known trả trực tiếp manifest có `aadp_version: "1.0"`; không dùng version index hoặc content negotiation.
 - `sitemap_index` là entry point authoritative cho AADP enumeration.
 - Không quảng bá base URL luôn trả 404.
 - Entity URL authoritative nằm trong `sitemap.items[].url`.
@@ -317,25 +319,25 @@ Việc khai báo interface/module không chứng minh endpoint đúng. Conforman
 
 Khi `policies`, HTTP header và resource metadata mâu thuẫn, client phải áp dụng policy hạn chế hơn và ghi nhận conflict; manifest không được tự ghi đè `robots.txt` hoặc `X-Robots-Tag`.
 
-## 8. Compatibility và migration từ v0.1
+## 8. Versioning và tham chiếu v0.1
 
-`aadp_version` đã là tên field trong wire contract v0.1 (rename từ `aidp_version` được áp dụng ngay trong v0.1, không đợi đến v0.2 — xem [CHANGELOG.md](../CHANGELOG.md)). Bảng dưới đây chỉ còn liệt kê các thay đổi cấu trúc thực sự khác biệt giữa v0.1 và v0.2 draft.
+`aadp_version` đã là tên field trong wire contract v0.1 (rename từ `aidp_version` được áp dụng ngay trong v0.1 — xem [CHANGELOG.md](../CHANGELOG.md)). Manifest v1.0 là major version mới vì có breaking changes về cấu trúc. Theo [ADR-0004](adr/0004-backward-compatibility.md), client phải chọn schema/parser theo `aadp_version`.
 
-| v0.1 | v0.2 draft | Migration |
+AADP chưa có consumer production phụ thuộc v0.1, vì vậy:
+
+- `/.well-known/ai-manifest.json` trả trực tiếp manifest v1.0.
+- Không yêu cầu chạy song song endpoint manifest v0.1.
+- Schema, fixture và specification v0.1 được giữ làm lịch sử thiết kế và tài liệu tham chiếu; chúng không phải compatibility target của rollout v1.0.
+- Không phục vụ payload v1.0 dưới base path `/ai/v0.1`.
+
+| v0.1 reference | v1.0 draft | Thay đổi |
 |---|---|---|
-| `default_locale` | `usage_guidance.default_language` | Copy và validate membership |
-| `available_locales` | `usage_guidance.available_languages` | Copy array |
+| `default_locale` | `usage_guidance.default_language` | Chuyển vào publisher preference |
+| `available_locales` | `usage_guidance.available_languages` | Chuyển vào publisher preference |
 | `sitemap_index` | `discovery.sitemap_index` | Chuyển vào discovery object |
 | `entity_base` | Loại bỏ | Dùng `sitemap.items[].url` |
-| `capabilities` | `modules` hoặc `interfaces` | Mapping theo semantic, không copy token mù |
+| `capabilities` | `modules` hoặc `interfaces` | Phân loại theo semantic |
 | `x_*` | Vẫn hỗ trợ tại extension points | Giữ namespaced extension |
-
-Migration phải additive ở giai đoạn transition:
-
-1. AADP v0.1 endpoint tiếp tục trả manifest v0.1.
-2. AADP v0.2 có base path/manifest version riêng theo quyết định versioning.
-3. Client đọc field `aadp_version` (cùng tên ở cả v0.1 và v0.2) trước khi parse, và rẽ nhánh theo giá trị (`"0.1"` hoặc `"0.2"`).
-4. Không trả payload v0.2 dưới URL tuyên bố v0.1.
 
 ## 9. Conformance plan
 
@@ -386,22 +388,20 @@ Không thêm một route collection rỗng chỉ để một URL trong manifest 
 
 ## 11. Release gate
 
-- Manifest v0.2 schema và semantic validator xanh.
+- Manifest v1.0 schema và semantic validator xanh.
 - Reference client không coi `usage_guidance` là executable instruction.
 - Không có URL được quảng bá trả generic 404 trong reference server.
 - Module/resource/interface/security reference nhất quán.
-- Migration v0.1 → v0.2 có fixtures và tests.
 - AADP core + Answer/Evidence module conformance vẫn xanh.
 - Security review SSRF, prompt injection và credential leakage hoàn tất.
 
 ## 12. Issue đề xuất
 
 1. `AADP-MANIFEST-001`: ADR application discovery manifest.
-2. `AADP-MANIFEST-002`: Manifest v0.2 JSON Schema.
+2. `AADP-MANIFEST-002`: Manifest v1.0 JSON Schema.
 3. `AADP-MANIFEST-003`: Semantic validator.
 4. `AADP-MANIFEST-004`: Reference client security policy.
 5. `AADP-MANIFEST-005`: HTTP/dead-link conformance.
-6. `AADP-MANIFEST-006`: v0.1 → v0.2 migration fixtures.
-7. `AILMAO-MANIFEST-001`: Ailmao identity/link/policy inventory.
-8. `AILMAO-MANIFEST-002`: Ailmao v0.2 adapter.
-9. `AILMAO-MANIFEST-003`: Staging conformance và rollout.
+6. `AILMAO-MANIFEST-001`: Ailmao identity/link/policy inventory.
+7. `AILMAO-MANIFEST-002`: Ailmao v1.0 adapter.
+8. `AILMAO-MANIFEST-003`: Staging conformance và rollout.
