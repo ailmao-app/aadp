@@ -17,6 +17,12 @@ const addFormats = require("ajv-formats") as (ajv: Ajv2020) => void;
 
 export type { ResourceKind, AadpVersion };
 export { SUPPORTED_VERSIONS, KINDS };
+export {
+  checkManifestSemantics,
+  hasSemanticErrors,
+  type SemanticIssue,
+  type SemanticIssueLevel,
+} from "./semantic.js";
 
 export interface ValidationResult {
   valid: boolean;
