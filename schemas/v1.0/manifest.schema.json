@@ -1,0 +1,221 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/v1.0/manifest.schema.json",
+  "title": "AADP Manifest v1.0",
+  "description": "Application discovery document. See docs/MANIFEST_V1.0_DESIGN.md and ADR-0005 for design rationale.",
+  "type": "object",
+  "required": ["aadp_version", "application", "discovery", "policies"],
+  "properties": {
+    "aadp_version": { "const": "1.0" },
+
+    "application": {
+      "type": "object",
+      "required": ["name", "description", "publisher"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "mission": { "type": "string", "minLength": 1 },
+        "categories": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^(x_[a-zA-Z0-9_]*|[a-z][a-z0-9_-]*)$" },
+          "uniqueItems": true
+        },
+        "publisher": {
+          "type": "object",
+          "required": ["name", "url"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "url": { "type": "string", "format": "uri" }
+          },
+          "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+          "additionalProperties": false
+        }
+      },
+      "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+      "additionalProperties": false
+    },
+
+    "links": {
+      "type": "object",
+      "properties": {
+        "homepage": { "type": "string", "format": "uri" },
+        "feed": { "type": "string", "format": "uri" },
+        "search": { "type": "string", "format": "uri" },
+        "profiles": { "type": "string", "format": "uri" }
+      },
+      "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+      "additionalProperties": false
+    },
+
+    "discovery": {
+      "type": "object",
+      "required": ["sitemap_index"],
+      "properties": {
+        "sitemap_index": { "type": "string", "format": "uri" }
+      },
+      "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+      "additionalProperties": false
+    },
+
+    "modules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "version", "schema"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$" },
+          "version": { "type": "string", "minLength": 1 },
+          "schema": { "type": "string", "format": "uri" }
+        },
+        "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+        "additionalProperties": false
+      }
+    },
+
+    "resources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+          "media_types": {
+            "type": "array",
+            "items": { "enum": ["text", "image", "video", "audio", "file"] },
+            "uniqueItems": true
+          },
+          "security": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" }
+        },
+        "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+        "additionalProperties": false
+      }
+    },
+
+    "interfaces": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "type"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+          "type": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+          "version": { "type": "string", "minLength": 1 },
+          "endpoint": { "type": "string", "format": "uri" },
+          "documentation": { "type": "string", "format": "uri" },
+          "security": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" }
+        },
+        "anyOf": [
+          { "properties": { "endpoint": { "type": "string" } }, "required": ["endpoint"] },
+          { "properties": { "documentation": { "type": "string" } }, "required": ["documentation"] }
+        ],
+        "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+        "additionalProperties": false
+      }
+    },
+
+    "security_schemes": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^[a-z][a-z0-9_-]*$": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["type"],
+              "properties": {
+                "type": { "const": "none" }
+              },
+              "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["type", "in", "name"],
+              "properties": {
+                "type": { "const": "api_key" },
+                "in": { "enum": ["header", "query"] },
+                "name": { "type": "string", "minLength": 1 }
+              },
+              "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["type", "authorization_url"],
+              "properties": {
+                "type": { "const": "oauth2" },
+                "authorization_url": { "type": "string", "format": "uri" },
+                "token_url": { "type": "string", "format": "uri" },
+                "scopes": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1 },
+                  "uniqueItems": true
+                }
+              },
+              "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "policies": {
+      "type": "object",
+      "required": ["robots", "terms"],
+      "properties": {
+        "robots": { "type": "string", "format": "uri" },
+        "terms": { "type": "string", "format": "uri" },
+        "privacy": { "type": "string", "format": "uri" },
+        "content_license": {
+          "type": "object",
+          "required": ["id", "url"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "url": { "type": "string", "format": "uri" }
+          },
+          "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+          "additionalProperties": false
+        },
+        "adult_content": { "enum": ["not_published", "published"] },
+        "copyright": { "type": "string", "format": "uri" }
+      },
+      "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+      "additionalProperties": false
+    },
+
+    "usage_guidance": {
+      "type": "object",
+      "properties": {
+        "default_language": { "type": "string", "minLength": 2 },
+        "available_languages": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 2 },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "summary_preference": { "type": "string", "minLength": 1 },
+        "citation_preference": { "type": "string", "minLength": 1 },
+        "attribution": {
+          "type": "object",
+          "properties": {
+            "preferred_text": { "type": "string", "minLength": 1 },
+            "publisher_url": { "type": "string", "format": "uri" }
+          },
+          "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+          "additionalProperties": false
+        }
+      },
+      "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+      "additionalProperties": false
+    }
+  },
+  "patternProperties": {
+    "^x_[a-zA-Z0-9_]*$": {}
+  },
+  "additionalProperties": false
+}

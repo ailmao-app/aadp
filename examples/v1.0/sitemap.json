@@ -1,0 +1,23 @@
+{
+  "aadp_version": "1.0",
+  "type": "example",
+  "generated_at": "2026-07-25T09:30:00Z",
+  "checksum": "sha256:7b0508cdae13fc9d1dd9be9b50672fe6f91f281b4a2514c9e5897877d314cb4d",
+  "items": [
+    {
+      "id": "example:sample-1",
+      "url": "https://example.aadp.dev/ai/v1.0/entities/example/sample-1.json",
+      "updated_at": "2026-07-25T08:00:00Z",
+      "checksum": "sha256:b0c501e8c9cdc5d4d6e8cabfd220f47eba81f2f2c7f35147aefe6bd84b0af4e4"
+    },
+    {
+      "id": "example:sample-2",
+      "url": "https://example.aadp.dev/ai/v1.0/entities/example/sample-2.json",
+      "updated_at": "2026-07-25T09:30:00Z",
+      "checksum": "sha256:637ac18a7718a6f0291c4053675cc6838e54f5e4b32f79eb8130e91816c13a68"
+    }
+  ],
+  "cursor": {
+    "next": null
+  }
+}

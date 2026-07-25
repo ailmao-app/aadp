@@ -1,9 +1,17 @@
 {
   "name": "ail-aadp",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "AI Application Discovery Protocol (AADP) — specification, schemas, validator, reference client and conformance suite",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ailmao-app/aadp.git"
+  },
+  "homepage": "https://github.com/ailmao-app/aadp#readme",
+  "bugs": {
+    "url": "https://github.com/ailmao-app/aadp/issues"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -15,6 +23,14 @@
       "types": "./dist/client/index.d.ts",
       "import": "./dist/client/index.js"
     },
+    "./client/v0.1": {
+      "types": "./dist/client/v0.1/index.d.ts",
+      "import": "./dist/client/v0.1/index.js"
+    },
+    "./client/v1.0": {
+      "types": "./dist/client/v1.0/index.d.ts",
+      "import": "./dist/client/v1.0/index.js"
+    },
     "./validator": {
       "types": "./dist/validator/index.d.ts",
       "import": "./dist/validator/index.js"
@@ -23,6 +39,8 @@
       "types": "./dist/canonical-json/index.d.ts",
       "import": "./dist/canonical-json/index.js"
     },
+    "./schemas/v0.1/*": "./schemas/v0.1/*",
+    "./schemas/v1.0/*": "./schemas/v1.0/*",
     "./schemas/*": "./schemas/v0.1/*",
     "./package.json": "./package.json"
   },
@@ -30,6 +48,7 @@
     "dist",
     "schemas",
     "spec",
+    "examples",
     "CHANGELOG.md",
     "README.md"
   ],

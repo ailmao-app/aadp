@@ -1,0 +1,19 @@
+{
+  "aadp_version": "1.0",
+  "application": {
+    "name": "Example Application",
+    "description": "Has a non-namespaced extra root field.",
+    "publisher": {
+      "name": "Example Publisher",
+      "url": "https://example.aadp.dev"
+    }
+  },
+  "discovery": {
+    "sitemap_index": "https://example.aadp.dev/ai/v1.0/sitemap-index.json"
+  },
+  "policies": {
+    "robots": "https://example.aadp.dev/robots.txt",
+    "terms": "https://example.aadp.dev/terms"
+  },
+  "not_a_real_field": true
+}

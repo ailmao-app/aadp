@@ -1,0 +1,406 @@
+import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  discover,
+  fetchSitemapIndex,
+  fetchSitemap,
+  fetchEntity,
+  iterateSitemap,
+  discoverAllEntities,
+  AadpSchemaValidationError,
+  AadpSemanticValidationError,
+  UnsupportedAadpVersionError,
+  BlockedUrlError,
+  TimeoutError,
+  TooManyRedirectsError,
+  ResponseTooLargeError,
+  InvalidContentTypeError,
+  MalformedJsonError,
+  createPermissiveUrlPolicy,
+  type ClientOptions,
+} from "../../src/client/v1.0/index.js";
+import { checksumOf } from "../../src/canonical-json/checksum.js";
+
+/**
+ * Phase-4 reference-client tests: acceptance criteria from
+ * `docs/IMPLEMENTATION_PLAN.md` §"Phase 4" — unsupported version,
+ * malformed JSON/content type, redirect loop, oversized response,
+ * timeout, private-network blocked in strict mode, cursor cycle, and
+ * invalid documents never being used to continue traversal.
+ *
+ * All servers here bind to 127.0.0.1, which the default strict
+ * `UrlPolicy` blocks as a loopback address — every test except the
+ * dedicated "private network" one below opts into
+ * `createPermissiveUrlPolicy()` to reach its own local fixture server,
+ * exactly like a caller intentionally pointing this client at a trusted
+ * local/offline deployment would (see `url-policy.ts` docstring).
+ */
+
+type Handler = (req: IncomingMessage, res: ServerResponse, url: URL) => void;
+
+interface TestServer {
+  baseUrl: string;
+  requestLog: string[];
+  close: () => Promise<void>;
+}
+
+async function startServer(handler: Handler): Promise<TestServer> {
+  const requestLog: string[] = [];
+  const server: Server = createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    requestLog.push(url.pathname);
+    handler(req, res, url);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Failed to bind test server");
+  }
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    requestLog,
+    close: () =>
+      new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
+  };
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown, contentType = "application/json") {
+  const json = typeof body === "string" ? body : JSON.stringify(body);
+  res.writeHead(status, { "Content-Type": contentType });
+  res.end(json);
+}
+
+const ENTITIES = [
+  { id: "example:sample-1", data: { title: "Sample One" }, updatedAt: "2026-07-25T08:00:00Z" },
+  { id: "example:sample-2", data: { title: "Sample Two" }, updatedAt: "2026-07-25T09:00:00Z" },
+];
+
+function entityChecksum(item: (typeof ENTITIES)[number]): string {
+  return checksumOf(item.data);
+}
+
+function buildManifest(host: string, overrides: Record<string, unknown> = {}) {
+  return {
+    aadp_version: "1.0",
+    application: {
+      name: "Test App",
+      description: "A test AADP v1.0 application.",
+      publisher: { name: "Test Publisher", url: `http://${host}` },
+    },
+    discovery: { sitemap_index: `http://${host}/ai/v1.0/sitemap-index.json` },
+    policies: { robots: `http://${host}/robots.txt`, terms: `http://${host}/terms` },
+    ...overrides,
+  };
+}
+
+function buildSitemapIndex(host: string, sitemaps?: unknown[]) {
+  const resolved = sitemaps ?? [
+    { type: "example", url: `http://${host}/ai/v1.0/sitemaps/example.json`, count: ENTITIES.length },
+  ];
+  return {
+    aadp_version: "1.0",
+    generated_at: "2026-07-25T09:30:00Z",
+    checksum: checksumOf(resolved),
+    sitemaps: resolved,
+  };
+}
+
+function buildSitemapItem(host: string, item: (typeof ENTITIES)[number]) {
+  const [type, localId] = item.id.split(":");
+  return {
+    id: item.id,
+    url: `http://${host}/ai/v1.0/entities/${type}/${localId}.json`,
+    updated_at: item.updatedAt,
+    checksum: entityChecksum(item),
+  };
+}
+
+function buildEntity(host: string, item: (typeof ENTITIES)[number]) {
+  const [type] = item.id.split(":");
+  return {
+    aadp_version: "1.0",
+    id: item.id,
+    type,
+    checksum: entityChecksum(item),
+    updated_at: item.updatedAt,
+    data: item.data,
+  };
+}
+
+const PERMISSIVE: ClientOptions = { urlPolicy: createPermissiveUrlPolicy() };
+
+let server: TestServer | undefined;
+
+afterEach(async () => {
+  await server?.close();
+  server = undefined;
+});
+
+describe("discoverAllEntities — happy path", () => {
+  it("walks manifest -> sitemap index -> sitemap -> every entity", async () => {
+    server = await startServer((req, res, url) => {
+      const host = req.headers.host!;
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        return sendJson(res, 200, buildManifest(host));
+      }
+      if (url.pathname === "/ai/v1.0/sitemap-index.json") {
+        return sendJson(res, 200, buildSitemapIndex(host));
+      }
+      if (url.pathname === "/ai/v1.0/sitemaps/example.json") {
+        const items = ENTITIES.map((item) => buildSitemapItem(host, item));
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          type: "example",
+          generated_at: "2026-07-25T09:30:00Z",
+          checksum: checksumOf(items),
+          items,
+          cursor: { next: null },
+        });
+      }
+      const entityMatch = url.pathname.match(/^\/ai\/v1\.0\/entities\/example\/(.+)\.json$/);
+      if (entityMatch) {
+        const item = ENTITIES.find((e) => e.id === `example:${entityMatch[1]}`)!;
+        return sendJson(res, 200, buildEntity(host, item));
+      }
+      sendJson(res, 404, { error: { code: "not_found", message: "no route", request_id: "req_1" } });
+    });
+
+    const entities = [];
+    for await (const entity of discoverAllEntities(server.baseUrl, PERMISSIVE)) {
+      entities.push(entity);
+    }
+    expect(entities.map((e) => e.id)).toEqual(["example:sample-1", "example:sample-2"]);
+  });
+});
+
+describe("unsupported version", () => {
+  it("throws UnsupportedAadpVersionError when the manifest declares a different aadp_version", async () => {
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        return sendJson(res, 200, { ...buildManifest(req.headers.host!), aadp_version: "0.1" });
+      }
+      sendJson(res, 404, {});
+    });
+
+    await expect(discover(server.baseUrl, PERMISSIVE)).rejects.toThrow(UnsupportedAadpVersionError);
+  });
+});
+
+describe("malformed JSON / content type", () => {
+  it("throws MalformedJsonError for a body that is not valid JSON", async () => {
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end("{ this is not json");
+        return;
+      }
+      sendJson(res, 404, {});
+    });
+
+    await expect(discover(server.baseUrl, PERMISSIVE)).rejects.toThrow(MalformedJsonError);
+  });
+
+  it("throws InvalidContentTypeError for a non-JSON content type", async () => {
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        return sendJson(res, 200, buildManifest(req.headers.host!), "text/html");
+      }
+      sendJson(res, 404, {});
+    });
+
+    await expect(discover(server.baseUrl, PERMISSIVE)).rejects.toThrow(InvalidContentTypeError);
+  });
+});
+
+describe("redirect handling", () => {
+  it("throws TooManyRedirectsError on a redirect loop", async () => {
+    server = await startServer((_req, res) => {
+      res.writeHead(302, { Location: "/.well-known/ai-manifest.json" });
+      res.end();
+    });
+
+    await expect(discover(server.baseUrl, PERMISSIVE)).rejects.toThrow(TooManyRedirectsError);
+  });
+});
+
+describe("oversized response", () => {
+  it("throws ResponseTooLargeError when the body exceeds maxResponseBytes", async () => {
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        return sendJson(res, 200, buildManifest(req.headers.host!, { x_padding: "a".repeat(10_000) }));
+      }
+      sendJson(res, 404, {});
+    });
+
+    await expect(
+      discover(server.baseUrl, { ...PERMISSIVE, maxResponseBytes: 100 })
+    ).rejects.toThrow(ResponseTooLargeError);
+  });
+});
+
+describe("timeout", () => {
+  it("throws TimeoutError when the server does not respond in time", async () => {
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        setTimeout(() => sendJson(res, 200, {}), 200);
+        return;
+      }
+      sendJson(res, 404, {});
+    });
+
+    await expect(discover(server.baseUrl, { ...PERMISSIVE, timeoutMs: 20 })).rejects.toThrow(
+      TimeoutError
+    );
+  });
+});
+
+describe("private-network URL policy", () => {
+  it("blocks a loopback origin by default (strict mode)", async () => {
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        return sendJson(res, 200, buildManifest(req.headers.host!));
+      }
+      sendJson(res, 404, {});
+    });
+
+    // No urlPolicy override: the default strict policy applies.
+    await expect(discover(server.baseUrl)).rejects.toThrow(BlockedUrlError);
+  });
+
+  it("allows the same loopback origin once an explicit permissive policy is supplied", async () => {
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        return sendJson(res, 200, buildManifest(req.headers.host!));
+      }
+      sendJson(res, 404, {});
+    });
+
+    await expect(discover(server.baseUrl, PERMISSIVE)).resolves.toMatchObject({
+      aadp_version: "1.0",
+    });
+  });
+});
+
+describe("cursor cycle detection", () => {
+  it("throws when a sitemap page's cursor.next repeats a previously seen cursor", async () => {
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/ai/v1.0/sitemaps/example.json") {
+        const cursor = url.searchParams.get("cursor");
+        const items = [buildSitemapItem(req.headers.host!, ENTITIES[0])];
+        // Every page (regardless of the cursor supplied) points to the
+        // same "next" token, forcing an infinite loop if undetected.
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          type: "example",
+          generated_at: "2026-07-25T09:30:00Z",
+          checksum: checksumOf(items),
+          items,
+          cursor: { next: cursor === "page-2" ? "page-2" : "page-2" },
+        });
+      }
+      sendJson(res, 404, {});
+    });
+
+    const sitemapUrl = `${server.baseUrl}/ai/v1.0/sitemaps/example.json`;
+    async function drain() {
+      for await (const _item of iterateSitemap(sitemapUrl, PERMISSIVE)) {
+        // consume
+      }
+    }
+    await expect(drain()).rejects.toThrow(/Cursor cycle detected/);
+  });
+});
+
+describe("invalid documents never extend traversal", () => {
+  it("a schema-invalid sitemap index is rejected and its sitemaps are never fetched", async () => {
+    server = await startServer((req, res, url) => {
+      const host = req.headers.host!;
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        return sendJson(res, 200, buildManifest(host));
+      }
+      if (url.pathname === "/ai/v1.0/sitemap-index.json") {
+        // Missing required "checksum" -> schema-invalid.
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          generated_at: "2026-07-25T09:30:00Z",
+          sitemaps: [{ type: "example", url: `http://${host}/ai/v1.0/sitemaps/example.json` }],
+        });
+      }
+      sendJson(res, 200, { unexpected: "should never be requested" });
+    });
+
+    await expect(
+      (async () => {
+        for await (const _e of discoverAllEntities(server.baseUrl, PERMISSIVE)) {
+          // consume
+        }
+      })()
+    ).rejects.toThrow(AadpSchemaValidationError);
+
+    expect(server.requestLog).not.toContain("/ai/v1.0/sitemaps/example.json");
+  });
+
+  it("a semantically-invalid manifest is rejected and the sitemap index is never fetched", async () => {
+    server = await startServer((req, res, url) => {
+      const host = req.headers.host!;
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        // Schema-valid, but two modules share the same id -> semantic error.
+        return sendJson(
+          res,
+          200,
+          buildManifest(host, {
+            modules: [
+              { id: "aadp:relations", version: "0.1", schema: `http://${host}/schemas/a.json` },
+              { id: "aadp:relations", version: "0.2", schema: `http://${host}/schemas/b.json` },
+            ],
+          })
+        );
+      }
+      sendJson(res, 200, { unexpected: "should never be requested" });
+    });
+
+    await expect(discover(server.baseUrl, PERMISSIVE)).rejects.toThrow(AadpSemanticValidationError);
+    expect(server.requestLog).not.toContain("/ai/v1.0/sitemap-index.json");
+  });
+});
+
+describe("fetchSitemapIndex / fetchSitemap / fetchEntity individually validate", () => {
+  it("fetchEntity rejects a document declaring the wrong aadp_version", async () => {
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/ai/v1.0/entities/example/sample-1.json") {
+        return sendJson(res, 200, { ...buildEntity("host", ENTITIES[0]), aadp_version: "0.1" });
+      }
+      sendJson(res, 404, {});
+    });
+
+    await expect(
+      fetchEntity(`${server.baseUrl}/ai/v1.0/entities/example/sample-1.json`, PERMISSIVE)
+    ).rejects.toThrow(UnsupportedAadpVersionError);
+  });
+
+  it("fetchSitemapIndex and fetchSitemap round-trip valid documents", async () => {
+    server = await startServer((req, res, url) => {
+      const host = req.headers.host!;
+      if (url.pathname === "/ai/v1.0/sitemap-index.json") {
+        return sendJson(res, 200, buildSitemapIndex(host));
+      }
+      if (url.pathname === "/ai/v1.0/sitemaps/example.json") {
+        const items = ENTITIES.map((item) => buildSitemapItem(host, item));
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          type: "example",
+          generated_at: "2026-07-25T09:30:00Z",
+          checksum: checksumOf(items),
+          items,
+          cursor: { next: null },
+        });
+      }
+      sendJson(res, 404, {});
+    });
+
+    const index = await fetchSitemapIndex(`${server.baseUrl}/ai/v1.0/sitemap-index.json`, PERMISSIVE);
+    expect(index.sitemaps).toHaveLength(1);
+    const sitemap = await fetchSitemap(index.sitemaps[0].url, null, PERMISSIVE);
+    expect(sitemap.items.map((i) => i.id)).toEqual(["example:sample-1", "example:sample-2"]);
+  });
+});

@@ -6,6 +6,40 @@ patch releases within `0.1.x` MUST NOT break schema or wire compatibility.
 
 ## [Unreleased]
 
+### Added
+
+- AADP v1.0 wire contract and normative specification
+  (`spec/v1.0/specification.md`), accepted via
+  [ADR-0005](docs/adr/0005-manifest-v1-discovery.md). v1.0 is a clean break
+  from v0.1 — no dual manifest, content negotiation, or migration runtime
+  (`docs/IMPLEMENTATION_PLAN.md` §1).
+- JSON Schema Draft 2020-12 for the v1.0 manifest, sitemap index, sitemap,
+  entity and error envelopes (`schemas/v1.0/`), plus valid/invalid example
+  fixtures (`examples/v1.0/`, `tests/fixtures/invalid/v1.0/`).
+- Version-aware schema validator registry: `validateDocument({ version,
+  kind, data })` throws a distinct `UnsupportedAadpVersionError` for an
+  unregistered version instead of silently falling back to a different
+  version's schema (`src/validator/schemas.ts`, `src/validator/index.ts`).
+  The CLI accepts `--version` or reads `aadp_version` from the document.
+- Pure semantic validator (`src/validator/semantic.ts`) for rules JSON
+  Schema cannot express: module/resource/interface ID uniqueness, security
+  scheme reference integrity, placeholder-URL and secret-shaped-value
+  detection, and an advisory (never blocking) "looks like an instruction"
+  heuristic on `usage_guidance`.
+- v1.0 reference client (`src/client/v1.0/`, exported as
+  `ail-aadp/client/v1.0` and as the `v1` namespace on `ail-aadp/client`):
+  SSRF-aware `UrlPolicy` blocking private/loopback/link-local destinations
+  by default, a bounded fetch layer (streamed response-size cap, timeout,
+  manually-capped redirects), and schema+semantic validation gating every
+  document before its URLs are trusted for further discovery traversal.
+- v1.0 conformance suite (`tests/conformance/v1.0/`) with its own mock
+  server, runnable against the bundled fixture server or an external
+  deployment via `AADP_BASE_URL`.
+- Per-version package exports: `ail-aadp/client/v0.1`, `ail-aadp/client/v1.0`,
+  `ail-aadp/schemas/v0.1/*`, `ail-aadp/schemas/v1.0/*`. The pre-existing
+  unversioned `ail-aadp/client` and `ail-aadp/schemas/*` continue to resolve
+  to v0.1 unchanged, so no existing consumer is silently repointed to v1.0.
+
 ### Changed
 
 - Renamed the protocol from "AI Data Discovery Protocol (AIDP)" to
