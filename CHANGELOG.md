@@ -1,87 +1,65 @@
 # Changelog
 
-All notable changes to AADP are documented here. AADP follows its own
-[backward compatibility policy](docs/adr/0004-backward-compatibility.md):
-patch releases within `0.1.x` MUST NOT break schema or wire compatibility.
+All notable changes to `ail-aadp` are documented in this file.
 
-## [Unreleased]
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Protocol compatibility follows [ADR-0004](docs/adr/0004-backward-compatibility.md); released schemas are immutable and wire-breaking changes require a new protocol version.
 
-### Added
-
-- AADP v1.0 wire contract and normative specification
-  (`spec/v1.0/specification.md`), accepted via
-  [ADR-0005](docs/adr/0005-manifest-v1-discovery.md). v1.0 is a clean break
-  from v0.1 — no dual manifest, content negotiation, or migration runtime
-  (`docs/IMPLEMENTATION_PLAN.md` §1).
-- JSON Schema Draft 2020-12 for the v1.0 manifest, sitemap index, sitemap,
-  entity and error envelopes (`schemas/v1.0/`), plus valid/invalid example
-  fixtures (`examples/v1.0/`, `tests/fixtures/invalid/v1.0/`).
-- Version-aware schema validator registry: `validateDocument({ version,
-  kind, data })` throws a distinct `UnsupportedAadpVersionError` for an
-  unregistered version instead of silently falling back to a different
-  version's schema (`src/validator/schemas.ts`, `src/validator/index.ts`).
-  The CLI accepts `--version` or reads `aadp_version` from the document.
-- Pure semantic validator (`src/validator/semantic.ts`) for rules JSON
-  Schema cannot express: module/resource/interface ID uniqueness, security
-  scheme reference integrity, placeholder-URL and secret-shaped-value
-  detection, and an advisory (never blocking) "looks like an instruction"
-  heuristic on `usage_guidance`.
-- v1.0 reference client (`src/client/v1.0/`, exported as
-  `ail-aadp/client/v1.0` and as the `v1` namespace on `ail-aadp/client`):
-  SSRF-aware `UrlPolicy` blocking private/loopback/link-local destinations
-  by default, a bounded fetch layer (streamed response-size cap, timeout,
-  manually-capped redirects), and schema+semantic validation gating every
-  document before its URLs are trusted for further discovery traversal.
-- v1.0 conformance suite (`tests/conformance/v1.0/`) with its own mock
-  server, runnable against the bundled fixture server or an external
-  deployment via `AADP_BASE_URL`.
-- Per-version package exports: `ail-aadp/client/v0.1`, `ail-aadp/client/v1.0`,
-  `ail-aadp/schemas/v0.1/*`, `ail-aadp/schemas/v1.0/*`. The pre-existing
-  unversioned `ail-aadp/client` and `ail-aadp/schemas/*` continue to resolve
-  to v0.1 unchanged, so no existing consumer is silently repointed to v1.0.
+## Unreleased
 
 ### Changed
 
-- Renamed the protocol from "AI Data Discovery Protocol (AIDP)" to
-  "AI Application Discovery Protocol (AADP)": package name (`ail-aadp`),
-  validator CLI (`aadp-validate`), exported types (`Aadp*`) and the
-  conformance env var (`AADP_BASE_URL`).
-- Renamed the v0.1 wire contract to match: the `aidp_version` field is now
-  `aadp_version` in every payload (manifest, sitemap index, sitemap, entity,
-  error), and the published v0.1 schema `$id` URLs moved from
-  `https://aidp.dev/schemas/v0.1/` to `https://aadp.dev/schemas/v0.1/`.
-  Originally planned for v0.2 (see ADR-0004), but pulled forward into v0.1
-  while it is still pre-release (`0.1.0`, pending release gate — no consumer
-  has shipped against the old field name), so there is exactly one wire
-  identifier to remember instead of two. Updated everywhere the field
-  appears: `spec/v0.1/`, `schemas/v0.1/`, `examples/v0.1/`, `tests/`,
-  `src/client/index.ts`, and all docs/ADRs.
-- `ailmao-landing`'s adapter now consumes the `ail-aadp` package instead of the
-  old `aidp` tarball; adapter directory renamed `lib/aidp/` → `lib/aadp/`.
+- Reworked the README around installation, client usage, validation, server implementation, conformance, versioning, and security.
+- Moved Vietnamese design documents under `docs/vi/` and kept public documentation paths in English.
+- Normalized the `aadp-validate` binary path in `package.json` for npm publishing.
 
-## [0.1.0] - Phase A (pending release gate)
+## 1.0.0 - 2026-07-25
 
 ### Added
 
-- Normative specification v0.1 (`spec/v0.1/specification.md`).
-- JSON Schema Draft 2020-12 for `manifest`, `sitemap-index`, `sitemap`, `entity`
-  envelope and `error` envelope (`schemas/v0.1/`).
-- Canonical JSON serialization and SHA-256 checksum implementation
-  (`src/canonical-json/`).
-- Validator library and CLI (`src/validator/`).
-- Reference client implementing discovery → sitemap → entity flow
-  (`src/client/`).
-- Positive/negative fixtures and checksum test vectors (`examples/v0.1/`,
-  `tests/fixtures/`).
-- Mock reference server and conformance suite exercising status codes,
-  cache headers, checksum stability and pagination limits
-  (`tests/conformance/`).
-- ADRs for checksum algorithm, cache semantics, capability discovery and
-  backward compatibility (`docs/adr/`).
+- Added the normative AADP v1.0 specification and JSON Schemas for manifests, sitemap indexes, sitemaps, entities, and error envelopes.
+- Added the application discovery manifest with application identity, human-facing links, resources, interfaces, security schemes, policies, and untrusted publisher preferences.
+- Added a version-aware schema registry through `validateDocument({ version, kind, data })`.
+- Added semantic manifest validation for reference integrity, uniqueness, language membership, placeholder URLs, secret-shaped values, and instruction-like text.
+- Added the versioned v1.0 reference client at `ail-aadp/client/v1.0`.
+- Added bounded HTTP fetching with timeout, redirect, response-size, and SSRF-aware URL policies.
+- Added a v1.0 conformance suite that can run against the bundled mock server or an external deployment through `AADP_BASE_URL`.
+- Added versioned client and schema exports for v0.1 and v1.0.
 
-### Notes
+### Changed
 
-- Core does not import or reference any Ailmao-specific type, hostname or
-  policy. See [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) §2.
-- Release gate defined in `docs/IMPLEMENTATION_PLAN.md` §8 (Phase A3) must
-  be green before Chặng B (Ailmao adapter) starts.
+- Redefined the manifest as an application discovery document.
+- Moved the sitemap index URL from `sitemap_index` to `discovery.sitemap_index`.
+- Replaced the v0.1 locale fields with AI-output preferences under `usage_guidance`; entity retrieval locale remains part of the core entity request behavior.
+- Replaced the open `capabilities` list with structured `modules`, `resources`, and `interfaces`.
+- Removed `entity_base`; sitemap item URLs are authoritative for entity retrieval.
+- Changed the conventional protocol base path from `/ai/v0.1` to `/ai/v1.0`.
+
+### Security
+
+- Manifest free-text fields are treated as untrusted data and are never executable instructions.
+- The v1.0 client validates each document before following URLs discovered within it.
+- Strict URL policy blocks private, loopback, and link-local destinations by default.
+
+### Breaking changes
+
+- AADP v1.0 is a new wire contract and is not schema-compatible with the v0.1 manifest.
+- The well-known URL returns the v1.0 manifest directly; AADP does not define dual-manifest serving or version negotiation.
+- New integrations must import `ail-aadp/client/v1.0` or use the `v1` namespace from `ail-aadp/client`.
+- The unversioned `ail-aadp/client` and `ail-aadp/schemas/*` exports remain pinned to v0.1 for existing consumers.
+
+## 0.1.0 - 2026-07-23
+
+### Added
+
+- Added the initial AADP protocol envelope for manifest, sitemap index, sitemap, entity, and error documents.
+- Added JSON Schema Draft 2020-12 schemas and positive and negative fixtures.
+- Added RFC 8785 canonical JSON serialization and SHA-256 checksum utilities.
+- Added the schema validator library and `aadp-validate` CLI.
+- Added the initial reference client for manifest-to-entity discovery.
+- Added mock-server conformance tests covering status codes, cache headers, checksum stability, and pagination.
+- Added architecture decisions for checksums, cache semantics, capability discovery, and compatibility.
+
+### Changed
+
+- Renamed the project from AI Data Discovery Protocol to AI Application Discovery Protocol before the first public release.
+- Standardized the wire field as `aadp_version`, the package as `ail-aadp`, the CLI as `aadp-validate`, and the conformance environment variable as `AADP_BASE_URL`.

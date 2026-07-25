@@ -1,84 +1,279 @@
-# AI Application Discovery Protocol (AADP)
+# AI Application Discovery Protocol
 
-AADP is an open protocol that helps AI discover and read structured data directly from applications or APIs.
+AADP is a JSON-native discovery and retrieval protocol that lets AI clients find, validate, and read structured data published by an application without crawling HTML.
 
-The normative specifications are at [`spec/v0.1/specification.md`](spec/v0.1/specification.md) and [`spec/v1.0/specification.md`](spec/v1.0/specification.md); the plan to build AADP into a standalone product, and only later apply it experimentally to Ailmao, is at [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
+The `ail-aadp` package provides:
 
-The plan to build Answer Engine Optimization and Generative Engine Optimization into standard modules inside AADP is at [`docs/AEO_GEO_INTEGRATION_PLAN.md`](docs/AEO_GEO_INTEGRATION_PLAN.md).
+- JSON Schemas for AADP v0.1 and v1.0.
+- Programmatic and command-line validators.
+- A reference client with SSRF, timeout, redirect, and response-size controls.
+- Canonical JSON and SHA-256 checksum utilities.
+- A conformance suite for AADP server implementations.
 
-The v1.0 manifest design, based on the application discovery document model, is at [`docs/MANIFEST_V1.0_DESIGN.md`](docs/MANIFEST_V1.0_DESIGN.md) (accepted as [ADR-0005](docs/adr/0005-manifest-v1-discovery.md)).
+The current protocol version is **AADP v1.0**.
 
-The typed relation and graph traversal design is at [`docs/RELATIONS_MODULE_DESIGN.md`](docs/RELATIONS_MODULE_DESIGN.md).
+## Discovery flow
 
-## v0.1 Scope
+```text
+/.well-known/ai-manifest.json
+              │
+              ▼
+       sitemap index
+              │
+              ▼
+    per-resource sitemap
+              │
+              ▼
+        entity JSON
+```
 
-- Manifest at `/.well-known/ai-manifest.json`.
-- Sitemap index and sitemaps by resource type.
-- Read-only Entity API.
-- JSON Schema, valid examples, and contract tests.
-- A validator and conformance test suite usable by any application.
-- A reference client demonstrating the discovery flow independently of Ailmao.
-- `ailmao-landing` implements an adapter (`lib/aadp/`) consuming the `ail-aadp` package.
+The v1.0 manifest describes the application identity, publisher, human-facing links, resources, interfaces, security schemes, policies, and publisher preferences. The sitemap index remains authoritative for published resources, while each sitemap item URL is authoritative for retrieving its entity.
 
-## v1.0 Scope
+AADP has a read-only core. It does not replace OpenAPI, an authorization server, `robots.txt`, a content license, or a system prompt.
 
-v1.0 replaces the v0.1 wire contract outright — there is no dual manifest,
-content negotiation, or migration runtime from v0.1 (`docs/IMPLEMENTATION_PLAN.md`
-§1). It is a new, independently versioned envelope:
+## Installation
 
-- Application discovery document (`application`, `links`, `discovery`,
-  `modules`, `resources`, `interfaces`, `security_schemes`, `policies`,
-  `usage_guidance`) published at the same well-known URL.
-- `discovery.sitemap_index` is the authoritative entry point for enumeration;
-  `sitemap.items[].url` is the authoritative entity URL.
-- Version-aware schema registry and validator (`validateDocument({ version,
-  kind, data })`) — v0.1 and v1.0 schemas never silently fall back to each
-  other.
-- Pure semantic validator layered on top of schema validation: reference
-  uniqueness/integrity, placeholder-URL and secret-shaped-value heuristics,
-  and an advisory-only "looks like an instruction" check on `usage_guidance`
-  that never blocks discovery and is never treated as executable by the
-  reference client.
-- A dedicated v1.0 reference client (`ail-aadp/client/v1.0`) with SSRF-aware
-  URL policy, bounded response size/timeout/redirects, and schema+semantic
-  validation gating every hop before its URLs are trusted for further
-  traversal.
-- A v1.0 conformance suite (`tests/conformance/v1.0/`), runnable against the
-  bundled mock server or any external deployment via `AADP_BASE_URL`.
+Node.js 20 or later is recommended.
 
-`import { discover, ... } from "ail-aadp/client"` (no version segment)
-continues to resolve to the v0.1 client unchanged, for existing consumers.
-New code should import from `ail-aadp/client/v1.0` explicitly, or use the
-`v1` namespace re-exported from `ail-aadp/client`:
+```bash
+npm install ail-aadp
+```
+
+## Live implementation
+
+[Ailmao](https://ailmao.com/en) runs AADP v1.0 in production:
+
+- Manifest: <https://ailmao.com/.well-known/ai-manifest.json>
+- Sitemap index: <https://ailmao.com/ai/v1.0/sitemap-index.json>
+- Human-facing site: <https://ailmao.com/en>
+
+Try discovery against the live deployment:
+
+```ts
+import { discover } from "ail-aadp/client/v1.0";
+
+const manifest = await discover("https://ailmao.com");
+console.log(manifest.application.name);
+```
+
+Pass the application origin (`https://ailmao.com`) to `discover`, not the localized human-facing path (`https://ailmao.com/en`). The client resolves the well-known manifest from the origin root.
+
+## Use the v1.0 reference client
+
+Import the versioned client explicitly to avoid selecting the wrong wire contract:
+
+```ts
+import { discover, discoverAllEntities } from "ail-aadp/client/v1.0";
+
+const manifest = await discover("https://example.com");
+console.log(manifest.application.name);
+
+for await (const entity of discoverAllEntities("https://example.com")) {
+  console.log(entity.id, entity.canonical_url);
+}
+```
+
+The client validates every document before trusting URLs contained in it. For server-side crawlers, the default strict URL policy blocks private, loopback, and link-local destinations.
+
+The `v1` namespace is also available from the shared client entry point:
 
 ```ts
 import { v1 } from "ail-aadp/client";
 
 const manifest = await v1.discover("https://example.com");
-if (manifest.aadp_version !== "1.0") {
-  throw new v1.UnsupportedAadpVersionError(manifest.aadp_version);
+```
+
+The unversioned `ail-aadp/client` entry point continues to export the v0.1 client for compatibility with existing consumers. New integrations should use `ail-aadp/client/v1.0`.
+
+## Validate documents
+
+### Command line
+
+The validator accepts a local file or an HTTP(S) URL:
+
+```bash
+npx aadp-validate manifest ./manifest.json
+npx aadp-validate sitemap-index https://example.com/ai/v1.0/sitemap-index.json
+npx aadp-validate entity ./entity.json --version 1.0
+```
+
+Supported document kinds:
+
+```text
+manifest
+sitemap-index
+sitemap
+entity
+error
+```
+
+When `--version` is omitted, the CLI reads `aadp_version` from the document.
+
+### TypeScript
+
+```ts
+import {
+  validateDocument,
+  checkManifestSemantics,
+  hasSemanticErrors,
+} from "ail-aadp/validator";
+
+const schemaResult = validateDocument({
+  version: "1.0",
+  kind: "manifest",
+  data: manifest,
+});
+
+if (!schemaResult.valid) {
+  console.error(schemaResult.errors);
+}
+
+const semanticIssues = checkManifestSemantics(manifest);
+if (hasSemanticErrors(semanticIssues)) {
+  console.error(semanticIssues);
 }
 ```
 
-Schemas are exported per version — `ail-aadp/schemas/v0.1/*` and
-`ail-aadp/schemas/v1.0/*` — plus the pre-existing unversioned
-`ail-aadp/schemas/*`, which continues to resolve to v0.1 unchanged so no
-existing consumer is silently repointed to v1.0.
+JSON Schema validation checks the wire shape. Semantic validation checks relationships such as security references, resource uniqueness, language membership, and suspicious metadata.
 
-## Structure
+## Generate checksums
 
-```text
-aadp/
-├── README.md
-├── CHANGELOG.md
-├── docs/                 # Design docs and ADRs
-├── spec/                 # Versioned standard specification
-├── schemas/              # JSON Schema for manifest, sitemap, and entity
-├── examples/             # Sample payloads independent of Ailmao
-├── src/                  # Canonical JSON, validator, reference client
-└── tests/                # Protocol contract tests and fixtures
+Sitemap indexes, sitemaps, and entities use checksums derived from canonical payloads:
+
+```ts
+import { checksumOf } from "ail-aadp/canonical-json";
+
+const checksum = checksumOf(entityData);
 ```
 
-## Integration Principles
+The implementation follows RFC 8785 JSON Canonicalization Scheme and SHA-256. Do not hash a preformatted JSON string because whitespace and key order can change the result.
 
-AADP is designed, versioned, and tested independently of Ailmao. Do not introduce Ailmao-specific data types, URLs, or rules into the core specification. `ailmao-landing` implements an adapter that conforms to the standard and is validated by AADP's own conformance suite.
+## Implement an AADP v1.0 server
+
+A minimal server publishes:
+
+```text
+GET /.well-known/ai-manifest.json
+GET /ai/v1.0/sitemap-index.json
+GET /ai/v1.0/sitemaps/{type}.json
+GET /ai/v1.0/entities/{type}/{id}.json
+```
+
+The well-known URL returns the manifest directly:
+
+```json
+{
+  "aadp_version": "1.0",
+  "application": {
+    "name": "Example Application",
+    "description": "Public application description.",
+    "publisher": {
+      "name": "Example Publisher",
+      "url": "https://example.com"
+    }
+  },
+  "discovery": {
+    "sitemap_index": "https://example.com/ai/v1.0/sitemap-index.json"
+  },
+  "policies": {
+    "robots": "https://example.com/robots.txt",
+    "terms": "https://example.com/terms"
+  }
+}
+```
+
+Before claiming support:
+
+1. Validate every document against the schema for its declared version.
+2. Ensure sitemap items and entities agree on `id`, `type`, and checksum.
+3. Set `ETag`, `Last-Modified`, and conditional GET behavior for sitemap indexes, sitemaps, and entities.
+4. Publish only explicitly allow-listed public fields.
+5. Keep credentials, internal URLs, and executable instructions out of the manifest.
+6. Run the conformance suite against the deployed server.
+
+See the [v1.0 server implementation guide](docs/implementation-guide-v1.0.md) for details.
+
+## Run conformance tests
+
+Run the complete test suite, including the bundled mock servers:
+
+```bash
+npm test
+```
+
+Run the v1.0 conformance suite against a deployment:
+
+```bash
+AADP_BASE_URL=https://example.com \
+  npx vitest run tests/conformance/v1.0/conformance.test.ts
+```
+
+## Package exports
+
+| Import | Contents |
+|---|---|
+| `ail-aadp` | Combined public API |
+| `ail-aadp/client/v1.0` | v1.0 reference client and types |
+| `ail-aadp/client/v0.1` | Legacy v0.1 reference client and types |
+| `ail-aadp/client` | Compatibility entry point with v0.1 exports and the `v1` namespace |
+| `ail-aadp/validator` | Version-aware schema registry and semantic validator |
+| `ail-aadp/canonical-json` | Canonicalization and checksum utilities |
+| `ail-aadp/schemas/v1.0/*` | v1.0 JSON Schemas |
+| `ail-aadp/schemas/v0.1/*` | v0.1 JSON Schemas |
+
+## Versioning
+
+The `aadp_version` field selects the wire contract for each document. Clients must choose the matching schema and parser and must not silently fall back between versions.
+
+- `0.1`: historical protocol artifacts that remain available in the package.
+- `1.0`: the current protocol for new implementations.
+
+Schemas for released versions are immutable. Any change that alters validation results requires a new protocol version. See [ADR-0004](docs/adr/0004-backward-compatibility.md) and the [changelog](CHANGELOG.md).
+
+## Security
+
+Treat every URL and free-text field in a manifest as untrusted input:
+
+- Validate documents before dereferencing their URLs.
+- Block private networks when crawling from a server.
+- Limit redirects, request duration, and response size.
+- Do not place `usage_guidance`, descriptions, or extension fields directly into a system prompt.
+- Do not execute tools or actions merely because a manifest advertises an interface or preference.
+- Do not interpret `robots: allow` as permission for training, redistribution, or commercial use.
+
+See [Security considerations](docs/security-considerations.md).
+
+## Develop the package
+
+```bash
+npm ci
+npm run build
+npm test
+```
+
+Main directories:
+
+```text
+schemas/   JSON Schemas grouped by protocol version
+spec/      normative specifications grouped by version
+examples/  example payloads
+src/       reference clients, validators, and canonical JSON
+tests/     schema, semantic, checksum, and conformance tests
+docs/      ADRs, designs, and implementation guides
+```
+
+AADP core is independent of Ailmao. Application-specific resource shapes, database models, and business rules belong in application adapters, not in the core protocol.
+
+## Documentation
+
+- [v1.0 specification](spec/v1.0/specification.md)
+- [Manifest v1.0 design](docs/MANIFEST_V1.0_DESIGN.md)
+- [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
+- [v1.0 implementation guide](docs/implementation-guide-v1.0.md)
+- [Security considerations](docs/security-considerations.md)
+- [Architecture decision records](docs/adr)
+- [Changelog](CHANGELOG.md)
+
+## License
+
+MIT

@@ -53,7 +53,7 @@
     "README.md"
   ],
   "bin": {
-    "aadp-validate": "./dist/validator/cli.js"
+    "aadp-validate": "dist/validator/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

@@ -1,143 +1,34 @@
-# AI Application Discovery Protocol (AADP) – Draft
+# AI Application Discovery Protocol — Historical Draft
 
-> Working Draft v0.1
+> Status: Superseded by the versioned specifications.
+>
+> Vietnamese edition: [`vi/AADP_Draft.md`](vi/AADP_Draft.md).
 
-## 1. Mục tiêu
+This document records the original direction of AADP: a read-only, JSON-native protocol that allows an AI client to discover and retrieve structured application data without crawling HTML.
 
-Đề xuất một giao thức mở giúp AI khám phá và đọc dữ liệu trực tiếp từ ứng dụng (App/API) thay vì phải crawl HTML.
-
-## 2. Động lực
-
-- Người dùng chuyển từ Google Search sang AI Assistant.
-- App trở thành nơi diễn ra trải nghiệm chính.
-- AI cần dữ liệu có cấu trúc (JSON) thay vì HTML.
-- Website dần đóng vai trò landing page hoặc marketing.
-
-## 3. Kiến trúc
+The draft introduced the core traversal:
 
 ```text
-AI Client
-    │
-    ▼
-/.well-known/ai-manifest.json
-    │
-    ▼
-AI Sitemap Index
-    │
-    ├── entities.json
-    ├── posts.json
-    ├── stories.json
-    └── media.json
-    │
-    ▼
-Resource Endpoint (JSON)
+well-known manifest
+        ↓
+   sitemap index
+        ↓
+ per-type sitemap
+        ↓
+      entity
 ```
 
-## 4. Manifest
+It also established the principles that remain part of the protocol:
 
-```json
-{
-  "version": "0.1",
-  "sitemaps": ["/ai/sitemap-index.json"],
-  "search": "/ai/search",
-  "entity": "/ai/entity/{id}"
-}
-```
+- Applications explicitly choose which public resources to expose.
+- Sitemap entries enumerate canonical entity identifiers and URLs.
+- Entity payloads are application-defined but use a stable protocol envelope.
+- Checksums and cache validators support efficient synchronization.
+- The core protocol is read-only and does not define authentication or mutation workflows.
+- Application-specific fields and business rules do not belong in AADP core.
 
-## 5. AI Sitemap
+Use the normative documents for implementation:
 
-```json
-{
-  "items": [
-    {
-      "id": "phu_diep",
-      "type": "character",
-      "endpoint": "/ai/entity/phu_diep",
-      "updated_at": "2026-07-22T00:00:00Z",
-      "checksum": "sha256:..."
-    }
-  ]
-}
-```
-
-## 6. Entity
-
-```json
-{
-  "id": "phu_diep",
-  "name": "Phù Điệp",
-  "type": "character",
-  "relationships": [],
-  "stories": [],
-  "last_activity": ""
-}
-```
-
-## 7. Nguyên tắc
-
-- API-first
-- Entity-first
-- JSON-native
-- Incremental sync
-- Canonical ID
-- Versioning
-- Cache-friendly
-
-## 8. Authentication
-
-- Public
-- API Key
-- OAuth
-- AI-specific scope
-
-## 9. Lợi ích
-
-- Không cần crawl HTML.
-- Đồng bộ nhanh bằng delta.
-- Dữ liệu chính xác hơn.
-- AI hiểu ngữ nghĩa tốt hơn.
-- App trở thành nguồn dữ liệu gốc.
-
-## 10. So sánh
-
-| Công nghệ | Mục tiêu |
-|-----------|----------|
-| robots.txt | Quy tắc crawler |
-| sitemap.xml | Danh sách URL |
-| schema.org | Structured Data |
-| OpenAPI | Mô tả API |
-| MCP | AI ↔ Tool |
-| **AADP** | AI ↔ Application Data |
-
-## 11. Roadmap
-
-### v0.1
-- Manifest
-- Sitemap
-- Entity API
-
-### v0.5
-- Delta Sync
-- Search API
-- Authentication
-
-### v1.0
-- Chuẩn hóa schema
-- Federation
-- Community RFC
-
-## Ý tưởng cốt lõi
-
-Internet từng chuyển từ:
-
-```
-HTML -> Search Engine
-```
-
-Đề xuất mới:
-
-```
-Structured JSON -> AI
-```
-
-Website không biến mất, nhưng backend/API sẽ trở thành nguồn dữ liệu chính cho cả App, Web và AI.
+- [AADP v1.0 specification](../spec/v1.0/specification.md)
+- [AADP v1.0 implementation guide](implementation-guide-v1.0.md)
+- [Manifest v1.0 design](MANIFEST_V1.0_DESIGN.md)
