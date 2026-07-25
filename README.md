@@ -6,7 +6,7 @@ The normative specification is at [`spec/v0.1/specification.md`](spec/v0.1/speci
 
 The plan to build Answer Engine Optimization and Generative Engine Optimization into standard modules inside AADP is at [`docs/AEO_GEO_INTEGRATION_PLAN.md`](docs/AEO_GEO_INTEGRATION_PLAN.md).
 
-The v0.2 manifest design, based on the application discovery document model, is at [`docs/MANIFEST_V0.2_DESIGN.md`](docs/MANIFEST_V0.2_DESIGN.md).
+The v1.0 manifest design, based on the application discovery document model, is at [`docs/MANIFEST_V1.0_DESIGN.md`](docs/MANIFEST_V1.0_DESIGN.md).
 
 The typed relation and graph traversal design is at [`docs/RELATIONS_MODULE_DESIGN.md`](docs/RELATIONS_MODULE_DESIGN.md).
 
