@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/v1.0/error.schema.json",
+  "title": "AADP Error Envelope v1.0",
+  "type": "object",
+  "required": ["error"],
+  "properties": {
+    "error": {
+      "type": "object",
+      "required": ["code", "message", "request_id"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "message": { "type": "string", "minLength": 1 },
+        "request_id": { "type": "string", "minLength": 1 }
+      },
+      "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

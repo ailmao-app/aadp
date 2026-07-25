@@ -1,0 +1,14 @@
+{
+  "aadp_version": "1.0",
+  "id": "example:sample-2",
+  "type": "example",
+  "checksum": "sha256:637ac18a7718a6f0291c4053675cc6838e54f5e4b32f79eb8130e91816c13a68",
+  "updated_at": "2026-07-25T09:30:00Z",
+  "canonical_url": "https://example.aadp.dev/e/sample-2",
+  "locale": "en",
+  "data": {
+    "title": "Sample Entity Two",
+    "description": "A second generic AADP v1.0 example entity used for schema conformance testing.",
+    "tags": ["sample", "aadp"]
+  }
+}

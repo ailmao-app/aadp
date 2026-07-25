@@ -1,0 +1,15 @@
+{
+  "aadp_version": "1.0",
+  "application": {
+    "name": "Example Application",
+    "description": "Missing discovery object.",
+    "publisher": {
+      "name": "Example Publisher",
+      "url": "https://example.aadp.dev"
+    }
+  },
+  "policies": {
+    "robots": "https://example.aadp.dev/robots.txt",
+    "terms": "https://example.aadp.dev/terms"
+  }
+}

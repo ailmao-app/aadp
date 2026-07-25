@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/v1.0/entity.schema.json",
+  "title": "AADP Entity Envelope v1.0",
+  "type": "object",
+  "required": ["aadp_version", "id", "type", "checksum", "updated_at", "data"],
+  "properties": {
+    "aadp_version": { "const": "1.0" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$" },
+    "type": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+    "checksum": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "canonical_url": { "type": "string", "format": "uri" },
+    "locale": { "type": "string", "minLength": 2 },
+    "data": { "type": "object" }
+  },
+  "patternProperties": {
+    "^x_[a-zA-Z0-9_]*$": {}
+  },
+  "additionalProperties": false
+}

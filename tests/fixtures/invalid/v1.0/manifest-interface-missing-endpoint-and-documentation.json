@@ -1,0 +1,24 @@
+{
+  "aadp_version": "1.0",
+  "application": {
+    "name": "Example Application",
+    "description": "Interface entry has neither endpoint nor documentation.",
+    "publisher": {
+      "name": "Example Publisher",
+      "url": "https://example.aadp.dev"
+    }
+  },
+  "discovery": {
+    "sitemap_index": "https://example.aadp.dev/ai/v1.0/sitemap-index.json"
+  },
+  "interfaces": [
+    {
+      "id": "public-rest",
+      "type": "rest"
+    }
+  ],
+  "policies": {
+    "robots": "https://example.aadp.dev/robots.txt",
+    "terms": "https://example.aadp.dev/terms"
+  }
+}

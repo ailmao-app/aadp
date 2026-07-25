@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "not_found",
+    "message": "Entity example:does-not-exist was not found.",
+    "request_id": "req_9f1c2e7a"
+  }
+}

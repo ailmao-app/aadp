@@ -1,0 +1,63 @@
+{
+  "aadp_version": "1.0",
+  "application": {
+    "name": "Example Application",
+    "description": "A generic AADP v1.0 example application used for schema conformance testing.",
+    "mission": "Demonstrate a fully-populated AADP v1.0 manifest.",
+    "categories": ["example"],
+    "publisher": {
+      "name": "Example Publisher",
+      "url": "https://example.aadp.dev"
+    }
+  },
+  "links": {
+    "homepage": "https://example.aadp.dev",
+    "feed": "https://example.aadp.dev/feed",
+    "search": "https://example.aadp.dev/search"
+  },
+  "discovery": {
+    "sitemap_index": "https://example.aadp.dev/ai/v1.0/sitemap-index.json"
+  },
+  "modules": [
+    {
+      "id": "aadp:relations",
+      "version": "0.1",
+      "schema": "https://aadp.dev/schemas/modules/relations/v0.1/schema.json"
+    }
+  ],
+  "resources": [
+    {
+      "type": "example",
+      "media_types": ["text"],
+      "security": "guest"
+    }
+  ],
+  "interfaces": [
+    {
+      "id": "public-rest",
+      "type": "rest",
+      "version": "v1",
+      "documentation": "https://example.aadp.dev/docs/api",
+      "security": "guest"
+    }
+  ],
+  "security_schemes": {
+    "guest": { "type": "none" }
+  },
+  "policies": {
+    "robots": "https://example.aadp.dev/robots.txt",
+    "terms": "https://example.aadp.dev/terms",
+    "privacy": "https://example.aadp.dev/privacy",
+    "adult_content": "not_published"
+  },
+  "usage_guidance": {
+    "default_language": "en",
+    "available_languages": ["en"],
+    "summary_preference": "Preserve material context and uncertainty.",
+    "citation_preference": "Cite the canonical_url of the referenced resource.",
+    "attribution": {
+      "preferred_text": "Source: Example Publisher",
+      "publisher_url": "https://example.aadp.dev"
+    }
+  }
+}
