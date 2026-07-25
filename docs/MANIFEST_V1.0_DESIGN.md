@@ -1,6 +1,6 @@
 # Thiết kế AADP Manifest v1.0
 
-> Trạng thái: Design Draft. Tài liệu này chưa thay thế manifest v0.1 đang được pilot sử dụng.
+> Trạng thái: Design gate closed (Phase 0, xem [ADR-0005](adr/0005-manifest-v1-discovery.md), Accepted). Tài liệu này chưa thay thế manifest v0.1 đang được pilot sử dụng — schema v1.0 chưa viết (Phase 1).
 
 ## 1. Mục tiêu
 
@@ -45,6 +45,85 @@ AADP Manifest
 | `security_schemes` | Interface dùng auth gì? | Token, secret hoặc session |
 | `policies` | Policy nào áp dụng? | Nội dung pháp lý đầy đủ |
 | `usage_guidance` | Publisher mong muốn cách dùng/cite ra sao? | System/developer instruction |
+
+## 3a. Design gate đã chốt (Phase 0)
+
+Bốn quyết định sau đóng design gate tại `IMPLEMENTATION_PLAN.md` §3. Chi tiết
+rationale nằm ở [ADR-0005](adr/0005-manifest-v1-discovery.md); phần này là
+bản chốt áp dụng trực tiếp cho schema Phase 1.
+
+### 3a.1 Localization
+
+Quyết định: **v1.0 không có `localization` object riêng.** Locale phục vụ
+retrieval tiếp tục là cơ chế core envelope không đổi — entity `locale` field
+và query param `locale` (spec v0.1 §4) — độc lập với manifest.
+
+- `usage_guidance.default_language` / `usage_guidance.available_languages`
+  **chỉ** là publisher preference cho AI output (tóm tắt, trả lời bằng ngôn
+  ngữ nào), **không** điều khiển content negotiation khi fetch entity.
+- Client MUST NOT dùng `usage_guidance.default_language` để chọn `locale`
+  query param khi gọi entity endpoint.
+- Nếu server không localize entity, `usage_guidance.available_languages` MAY
+  chỉ chứa một ngôn ngữ duy nhất — điều này không có nghĩa server hỗ trợ
+  localized retrieval.
+
+### 3a.2 Resource authority
+
+Quyết định: **sitemap index authoritative, `resources[]` không lặp `sitemap`
+URL.**
+
+- `discovery.sitemap_index` → sitemap-index document (`sitemaps[].type`,
+  `sitemaps[].url`) là nguồn duy nhất cho danh sách resource type thực sự
+  được publish và URL sitemap tương ứng.
+- `resources[]` (manifest) chỉ bổ sung metadata theo `type`: `media_types`,
+  `security`. **Không có field `resources[].sitemap`** — ví dụ manifest ở
+  mục 4 đã được cập nhật để bỏ field này.
+- Semantic validator (Phase 3, pure/no-HTTP) chỉ kiểm tra `resources[].type`
+  duy nhất trong danh sách. Việc đối chiếu `resources[].type` với
+  `sitemap-index.sitemaps[].type` thực tế là HTTP check, thuộc conformance
+  suite (Phase 5), không thuộc semantic validator.
+
+### 3a.3 Security metadata
+
+Quyết định: **phương án đầy đủ** — v1.0 định nghĩa 3 security scheme type
+với metadata tối thiểu đủ để client xác định flow:
+
+| `type` | Required fields | Ghi chú |
+|---|---|---|
+| `none` | — | Không auth. |
+| `api_key` | `in` (`"header"` \| `"query"`), `name` | Không chứa key mẫu hay giá trị thật. |
+| `oauth2` | `authorization_url` | `token_url`, `scopes` optional. Không chứa client secret. |
+
+- `security_schemes` dùng discriminated union theo `type` (khớp §5 Phase 1
+  yêu cầu).
+- Không được công bố `interfaces[].security` hoặc `resources[].security`
+  trỏ tới một scheme thiếu required field theo bảng trên — schema Phase 1
+  phải enforce việc này bằng JSON Schema `oneOf`/`if-then`, không chỉ bằng
+  tài liệu.
+- Ailmao pilot (mục 10) chỉ dùng `none` ở giai đoạn đầu; `api_key`/`oauth2`
+  là năng lực core, không bắt buộc mọi adapter phải dùng.
+
+### 3a.4 Root required fields
+
+| Field | Required? | Ghi chú |
+|---|---|---|
+| `aadp_version` | **Required** | `const "1.0"`. |
+| `application` | **Required** | `name`, `description`, `publisher.name`, `publisher.url` required bên trong. |
+| `discovery` | **Required** | `sitemap_index` required bên trong. |
+| `policies` | **Required** | `robots`, `terms` required bên trong; các field còn lại optional (§5.8). |
+| `links` | Optional | Omit nếu không có route nào. |
+| `modules` | Optional | Omit nếu không module nào đạt conformance. |
+| `resources` | Optional | Omit nếu chưa publish resource nào. |
+| `interfaces` | Optional | Omit nếu không có interface ngoài AADP. |
+| `security_schemes` | Optional* | *Required nếu bất kỳ `resources[].security` hoặc `interfaces[].security` tham chiếu tới một scheme ID. |
+| `usage_guidance` | Optional | Omit nếu publisher chưa duyệt preference. |
+
+Quy tắc omit vs rỗng: **mọi field kiểu array cấp top-level (`resources`,
+`modules`, `interfaces`) phải omit hoàn toàn khi không có phần tử nào — MUST
+NOT publish `[]`.** Lý do: JSON Schema không phân biệt được "server cố ý
+không có gì" với "server quên điền"; ép field vắng mặt loại bỏ nhập nhằng đó
+mà không cần thêm field `*_declared: boolean` phụ. Field kiểu object
+(`security_schemes`) áp dụng cùng quy tắc: omit thay vì `{}`.
 
 ## 4. Manifest đề xuất
 
@@ -91,7 +170,6 @@ AADP Manifest
     {
       "type": "character",
       "media_types": ["text", "image", "video"],
-      "sitemap": "https://example.com/ai/v1.0/sitemaps/character.json",
       "security": "guest"
     }
   ],
@@ -183,6 +261,18 @@ Quy tắc:
 - Entity URL authoritative nằm trong `sitemap.items[].url`.
 - Nếu tương lai cần dựng URL, dùng URI Template được chuẩn hóa, không dùng một `entity_base` mơ hồ.
 
+HTTP behavior của manifest (chốt Phase 0, kế thừa ADR-0002 cho v0.1):
+
+- `Content-Type: application/json`, giống v0.1.
+- Server SHOULD set `Cache-Control` (khuyến nghị `max-age=300`); manifest
+  không bắt buộc có checksum-backed `ETag` ở v1.0 — giống quyết định v0.1
+  (ADR-0002 §"manifest có no checksum"), vì đây là tài liệu discovery nhỏ,
+  gần như tĩnh. Một minor version sau MAY thêm validator additive.
+- Response size: server SHOULD giữ manifest dưới 64 KiB. Reference client
+  (Phase 4) MUST từ chối (không parse) response vượt quá **256 KiB** — đây
+  là hard cap bảo vệ client khỏi oversized/malicious response, không phải
+  khuyến nghị kích thước cho server.
+
 ### 5.4 `modules`
 
 Module là thành phần chuẩn bên trong AADP, ví dụ:
@@ -216,6 +306,11 @@ Resource là loại dữ liệu có thể enumeration/retrieval, ví dụ:
 
 `chat` không phải resource; đó là operation/interface và không thuộc AADP read-only core.
 
+Resource authority: `discovery.sitemap_index` là nguồn duy nhất cho danh sách
+type thực publish (xem §3a.2). `resources[]` không có field `sitemap` — chỉ
+bổ sung `media_types` và `security` theo `type` đã xuất hiện trong sitemap
+index.
+
 ### 5.6 `interfaces`
 
 Các type dự kiến:
@@ -238,17 +333,21 @@ Không liệt kê một interface chưa được deploy hoặc luôn trả 404.
 
 ### 5.7 `security_schemes`
 
-Các type ban đầu:
+Ba type, mỗi type có required field tối thiểu (xem bảng đầy đủ ở §3a.3):
 
-- `none`
-- `api_key`
-- `oauth2`
+- `none` — không field bổ sung.
+- `api_key` — `in` (`"header"` \| `"query"`), `name`.
+- `oauth2` — `authorization_url` required; `token_url`, `scopes` optional.
 
 Manifest chỉ chứa metadata public như authorization URL và scope. Không chứa API key, client secret, access token hoặc credential mẫu có hiệu lực.
 
-Mỗi resource/interface tham chiếu scheme theo ID, tránh danh sách auth toàn cục không nói scheme áp dụng ở đâu.
+Mỗi resource/interface tham chiếu scheme theo ID, tránh danh sách auth toàn cục không nói scheme áp dụng ở đâu. Không công bố `api_key` hoặc `oauth2` nếu thiếu required field — schema Phase 1 enforce bằng discriminated union, không chỉ bằng review thủ công.
 
 ### 5.8 `policies`
+
+Required: `robots`, `terms` (xem bảng root field §3a.4).
+
+Optional: `privacy`, `content_license`, `adult_content`, `copyright`.
 
 Tách rõ:
 
@@ -281,6 +380,33 @@ Các field đề xuất:
 - `attribution`
 
 Không dùng tên `ai_instructions` vì dễ bị hiểu thành prompt có quyền điều khiển model.
+
+### 5.10 Extension points (`x_*`)
+
+Kế thừa nguyên tắc ADR-0003 (v0.1) không đổi cho v1.0: field khớp
+`^x_[a-zA-Z0-9_]*$` được phép ở **mọi object** manifest v1.0 định nghĩa —
+root, `application`, `application.publisher`, mỗi phần tử `modules[]`,
+`resources[]`, `interfaces[]`, mỗi entry trong `security_schemes`,
+`policies`, `usage_guidance`, `usage_guidance.attribution`. Schema Phase 1
+áp `patternProperties: { "^x_[a-zA-Z0-9_]*$": {} }` cùng
+`additionalProperties: false` ở từng object đó, giống pattern
+`schemas/v0.1/manifest.schema.json`. Implementer MUST NOT thêm field không
+namespace vào object đã đóng; đây là cơ chế duy nhất được chấp nhận cho nhu
+cầu vendor-specific.
+
+### 5.11 Token grammar
+
+| Token | Grammar | Ví dụ |
+|---|---|---|
+| `modules[].id` | `^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$` (namespace:name); namespace `aadp` chỉ dùng cho module do spec này định nghĩa | `aadp:relations` |
+| `resources[].type` | `^[a-z][a-z0-9_-]*$` — cùng grammar segment với canonical ID v0.1 (spec §2) | `character` |
+| `interfaces[].id` | `^[a-z][a-z0-9_-]*$` | `public-rest` |
+| security scheme ID (key trong `security_schemes`) | `^[a-z][a-z0-9_-]*$` | `guest`, `oauth2` |
+
+Lý do dùng chung grammar segment với canonical ID v0.1: tránh định nghĩa
+thêm một token class mới không cần thiết, và cho phép resource `type` ở
+manifest v1.0 khớp trực tiếp với segment `type` trong canonical ID
+(`{type}:{id}`) mà core envelope đã dùng từ v0.1.
 
 ## 6. Validation ngoài JSON Schema
 
