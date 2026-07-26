@@ -2,6 +2,12 @@
 
 AADP is a JSON-native discovery and retrieval protocol that lets AI clients find, validate, and read structured data published by an application without crawling HTML.
 
+## Why AADP?
+
+AI clients often discover application data by crawling HTML, interpreting page-specific structured data, or relying on proprietary integrations. These approaches make it difficult to identify authoritative resources, detect updates, validate payloads, and apply consistent security controls.
+
+AADP gives applications a standard, machine-readable way to publish an authoritative discovery path and explicitly allow-listed public data. Its core is read-only: clients discover a manifest, enumerate resource sitemaps, and retrieve validated entity documents.
+
 The `ail-aadp` package provides:
 
 - JSON Schemas for AADP v0.1 and v1.0.
@@ -12,22 +18,61 @@ The `ail-aadp` package provides:
 
 The current protocol version is **AADP v1.0**.
 
-## Discovery flow
+## 30-second quick start
+
+```bash
+npm install ail-aadp
+```
+
+```ts
+import { discover, discoverAllEntities } from "ail-aadp/client/v1.0";
+
+const manifest = await discover("https://example.com");
+console.log(manifest.application.name);
+
+for await (const entity of discoverAllEntities("https://example.com")) {
+  console.log(entity.id, entity.data);
+}
+```
+
+The application must publish its manifest at `/.well-known/ai-manifest.json`. The client follows the URLs declared by the manifest and sitemaps, validating each document before use.
+
+## How AADP fits with existing standards
+
+| Standard | Primary responsibility |
+|---|---|
+| `robots.txt` | Rules governing crawler access to URI paths; not authorization or a content license |
+| OpenAPI | Language-agnostic interface descriptions for HTTP APIs |
+| MCP | Runtime exchange of resources, prompts, and tools between AI applications and servers |
+| schema.org | Shared vocabularies for structured data embedded in or associated with web content |
+| AADP | Read-only application discovery, resource enumeration, and structured entity retrieval |
+
+AADP complements these standards. It does not replace an API contract, tool runtime, crawler policy, authorization system, content license, or domain vocabulary.
+
+## Common use cases
+
+- AI assistants discovering authoritative public application data.
+- Knowledge synchronization using checksums and cache validators.
+- Search and directory systems enumerating application-published resources.
+- AI application directories discovering supported resources and interfaces.
+- Aggregators built on top of AADP discovery across multiple applications.
+
+Cross-application aggregation or federation is not an AADP core capability; implementations may build it on top of the protocol's discovery and retrieval contracts.
+
+## Architecture and discovery flow
 
 ```text
-/.well-known/ai-manifest.json
-              │
-              ▼
-       sitemap index
-              │
-              ▼
-    per-resource sitemap
-              │
-              ▼
-        entity JSON
+Application publishes:
+
+Manifest → Sitemap Index → Per-resource Sitemap → Entity
+    ▲                                                ▲
+    │ discovers                                     │ retrieves
+    └────────────────── AI Client ───────────────────┘
 ```
 
 The v1.0 manifest describes the application identity, publisher, human-facing links, resources, interfaces, security schemes, policies, and publisher preferences. The sitemap index remains authoritative for published resources, while each sitemap item URL is authoritative for retrieving its entity.
+
+An entity is a JSON protocol envelope representing one application-defined public resource. It contains a canonical ID, resource type, update metadata, checksum, and an application-defined `data` payload. AADP canonicalizes the `data` payload—not the entire entity document—when calculating its checksum.
 
 AADP has a read-only core. It does not replace OpenAPI, an authorization server, `robots.txt`, a content license, or a system prompt.
 

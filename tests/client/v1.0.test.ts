@@ -9,6 +9,9 @@ import {
   discoverAllEntities,
   AadpSchemaValidationError,
   AadpSemanticValidationError,
+  AadpChecksumMismatchError,
+  AadpIntegrityMismatchError,
+  AadpDiscoveryBudgetExceededError,
   UnsupportedAadpVersionError,
   BlockedUrlError,
   TimeoutError,
@@ -402,5 +405,281 @@ describe("fetchSitemapIndex / fetchSitemap / fetchEntity individually validate",
     expect(index.sitemaps).toHaveLength(1);
     const sitemap = await fetchSitemap(index.sitemaps[0].url, null, PERMISSIVE);
     expect(sitemap.items.map((i) => i.id)).toEqual(["example:sample-1", "example:sample-2"]);
+  });
+});
+
+describe("timeout covers body streaming, not just headers", () => {
+  it("throws TimeoutError when headers arrive promptly but the body stalls past the deadline", async () => {
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.write('{"aadp_versio'); // headers + partial body sent immediately
+        setTimeout(() => res.end('n":"1.0"}'), 100); // rest arrives late
+        return;
+      }
+      sendJson(res, 404, {});
+    });
+
+    await expect(
+      discover(server.baseUrl, { ...PERMISSIVE, timeoutMs: 20 })
+    ).rejects.toThrow(TimeoutError);
+  });
+});
+
+describe("cross-document integrity", () => {
+  it("throws AadpChecksumMismatchError when a sitemap-index's declared checksum does not match its sitemaps", async () => {
+    server = await startServer((req, res, url) => {
+      const host = req.headers.host!;
+      if (url.pathname === "/ai/v1.0/sitemap-index.json") {
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          generated_at: "2026-07-25T09:30:00Z",
+          checksum: `sha256:${"0".repeat(64)}`,
+          sitemaps: [{ type: "example", url: `http://${host}/ai/v1.0/sitemaps/example.json`, count: 1 }],
+        });
+      }
+      sendJson(res, 404, {});
+    });
+
+    await expect(
+      fetchSitemapIndex(`${server.baseUrl}/ai/v1.0/sitemap-index.json`, PERMISSIVE)
+    ).rejects.toThrow(AadpChecksumMismatchError);
+  });
+
+  it("throws AadpChecksumMismatchError when an entity's declared checksum does not match its data", async () => {
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/ai/v1.0/entities/example/sample-1.json") {
+        return sendJson(res, 200, {
+          ...buildEntity("host", ENTITIES[0]),
+          checksum: `sha256:${"0".repeat(64)}`,
+        });
+      }
+      sendJson(res, 404, {});
+    });
+
+    await expect(
+      fetchEntity(`${server.baseUrl}/ai/v1.0/entities/example/sample-1.json`, PERMISSIVE)
+    ).rejects.toThrow(AadpChecksumMismatchError);
+  });
+
+  it("throws AadpIntegrityMismatchError when a sitemap's declared type disagrees with the index entry", async () => {
+    server = await startServer((req, res, url) => {
+      const host = req.headers.host!;
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(host));
+      if (url.pathname === "/ai/v1.0/sitemap-index.json") return sendJson(res, 200, buildSitemapIndex(host));
+      if (url.pathname === "/ai/v1.0/sitemaps/example.json") {
+        const items = ENTITIES.map((item) => buildSitemapItem(host, item));
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          type: "not-example", // disagrees with the index entry's declared type "example"
+          generated_at: "2026-07-25T09:30:00Z",
+          checksum: checksumOf(items),
+          items,
+          cursor: { next: null },
+        });
+      }
+      sendJson(res, 404, {});
+    });
+
+    await expect(
+      (async () => {
+        for await (const _e of discoverAllEntities(server.baseUrl, PERMISSIVE)) {
+          // consume
+        }
+      })()
+    ).rejects.toThrow(AadpIntegrityMismatchError);
+  });
+
+  it("throws AadpIntegrityMismatchError when a fetched entity's id disagrees with its sitemap item", async () => {
+    server = await startServer((req, res, url) => {
+      const host = req.headers.host!;
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(host));
+      if (url.pathname === "/ai/v1.0/sitemap-index.json") return sendJson(res, 200, buildSitemapIndex(host));
+      if (url.pathname === "/ai/v1.0/sitemaps/example.json") {
+        const items = ENTITIES.map((item) => buildSitemapItem(host, item));
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          type: "example",
+          generated_at: "2026-07-25T09:30:00Z",
+          checksum: checksumOf(items),
+          items,
+          cursor: { next: null },
+        });
+      }
+      const entityMatch = url.pathname.match(/^\/ai\/v1\.0\/entities\/example\/(.+)\.json$/);
+      if (entityMatch) {
+        // Always serve sample-1's entity, regardless of which item id was requested.
+        return sendJson(res, 200, buildEntity(host, ENTITIES[0]));
+      }
+      sendJson(res, 404, {});
+    });
+
+    await expect(
+      (async () => {
+        for await (const _e of discoverAllEntities(server.baseUrl, PERMISSIVE)) {
+          // consume
+        }
+      })()
+    ).rejects.toThrow(AadpIntegrityMismatchError);
+  });
+});
+
+describe("discovery traversal budgets", () => {
+  it("throws AadpDiscoveryBudgetExceededError when the walk yields more entities than maxEntities", async () => {
+    server = await startServer((req, res, url) => {
+      const host = req.headers.host!;
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(host));
+      if (url.pathname === "/ai/v1.0/sitemap-index.json") return sendJson(res, 200, buildSitemapIndex(host));
+      if (url.pathname === "/ai/v1.0/sitemaps/example.json") {
+        const items = ENTITIES.map((item) => buildSitemapItem(host, item));
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          type: "example",
+          generated_at: "2026-07-25T09:30:00Z",
+          checksum: checksumOf(items),
+          items,
+          cursor: { next: null },
+        });
+      }
+      const entityMatch = url.pathname.match(/^\/ai\/v1\.0\/entities\/example\/(.+)\.json$/);
+      if (entityMatch) {
+        const item = ENTITIES.find((e) => e.id === `example:${entityMatch[1]}`)!;
+        return sendJson(res, 200, buildEntity(host, item));
+      }
+      sendJson(res, 404, {});
+    });
+
+    await expect(
+      (async () => {
+        for await (const _e of discoverAllEntities(server.baseUrl, { ...PERMISSIVE, maxEntities: 1 })) {
+          // consume
+        }
+      })()
+    ).rejects.toThrow(AadpDiscoveryBudgetExceededError);
+  });
+});
+
+describe("header origin scoping", () => {
+  it("sends Authorization to originBaseUrl's own origin but strips it for a sitemap URL on a different origin", async () => {
+    let sitemapServerReceivedAuth: string | undefined;
+    const sitemapServer = await startServer((req, res) => {
+      sitemapServerReceivedAuth = req.headers.authorization;
+      sendJson(res, 404, {}); // any response is fine — the test only inspects the request header
+    });
+
+    let manifestServerReceivedAuth: string | undefined;
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        manifestServerReceivedAuth = req.headers.authorization;
+        return sendJson(
+          res,
+          200,
+          buildManifest(req.headers.host!, {
+            discovery: { sitemap_index: `${sitemapServer.baseUrl}/ai/v1.0/sitemap-index.json` },
+          })
+        );
+      }
+      sendJson(res, 404, {});
+    });
+
+    try {
+      await expect(
+        (async () => {
+          for await (const _e of discoverAllEntities(server.baseUrl, {
+            ...PERMISSIVE,
+            headers: { Authorization: "Bearer secret" },
+          })) {
+            // consume until the (expected) sitemap-index schema-validation failure
+          }
+        })()
+      ).rejects.toThrow();
+
+      expect(manifestServerReceivedAuth).toBe("Bearer secret");
+      expect(sitemapServerReceivedAuth).toBeUndefined();
+    } finally {
+      await sitemapServer.close();
+    }
+  });
+
+  it("strips a custom header (e.g. X-API-Key) cross-origin by default, but keeps it when allow-listed", async () => {
+    let sitemapServerReceivedApiKey: string | undefined;
+    const sitemapServer = await startServer((req, res) => {
+      sitemapServerReceivedApiKey = req.headers["x-api-key"] as string | undefined;
+      sendJson(res, 404, {});
+    });
+
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        return sendJson(
+          res,
+          200,
+          buildManifest(req.headers.host!, {
+            discovery: { sitemap_index: `${sitemapServer.baseUrl}/ai/v1.0/sitemap-index.json` },
+          })
+        );
+      }
+      sendJson(res, 404, {});
+    });
+
+    try {
+      // Default: no crossOriginSafeHeaders allow-list -> stripped, same as Authorization.
+      await expect(
+        (async () => {
+          for await (const _e of discoverAllEntities(server.baseUrl, {
+            ...PERMISSIVE,
+            headers: { "X-API-Key": "secret" },
+          })) {
+            // consume until the (expected) sitemap-index schema-validation failure
+          }
+        })()
+      ).rejects.toThrow();
+      expect(sitemapServerReceivedApiKey).toBeUndefined();
+
+      // Explicit opt-in -> forwarded cross-origin.
+      await expect(
+        (async () => {
+          for await (const _e of discoverAllEntities(server.baseUrl, {
+            ...PERMISSIVE,
+            headers: { "X-API-Key": "secret" },
+            crossOriginSafeHeaders: ["X-API-Key"],
+          })) {
+            // consume until the (expected) sitemap-index schema-validation failure
+          }
+        })()
+      ).rejects.toThrow();
+      expect(sitemapServerReceivedApiKey).toBe("secret");
+    } finally {
+      await sitemapServer.close();
+    }
+  });
+});
+
+describe("iterateSitemap — standalone traversal budget", () => {
+  it("throws AadpDiscoveryBudgetExceededError when called directly against a server with unbounded fresh cursors", async () => {
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/ai/v1.0/sitemaps/example.json") {
+        const items = [buildSitemapItem(req.headers.host!, ENTITIES[0])];
+        // Every page gets a brand-new cursor token, so cycle detection
+        // (which only catches a *repeated* cursor) never triggers.
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          type: "example",
+          generated_at: "2026-07-25T09:30:00Z",
+          checksum: checksumOf(items),
+          items,
+          cursor: { next: `page-${Math.random()}` },
+        });
+      }
+      sendJson(res, 404, {});
+    });
+
+    const sitemapUrl = `${server.baseUrl}/ai/v1.0/sitemaps/example.json`;
+    await expect(
+      (async () => {
+        for await (const _item of iterateSitemap(sitemapUrl, { ...PERMISSIVE, maxPages: 3 })) {
+          // consume
+        }
+      })()
+    ).rejects.toThrow(AadpDiscoveryBudgetExceededError);
   });
 });

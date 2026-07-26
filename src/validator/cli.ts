@@ -8,6 +8,8 @@ import {
   SUPPORTED_VERSIONS,
   type ResourceKind,
 } from "./index.js";
+import { fetchJson } from "../client/http.js";
+import { createStrictUrlPolicy, createPermissiveUrlPolicy } from "../client/url-policy.js";
 
 function detectVersion(data: unknown): string | undefined {
   if (
@@ -33,28 +35,45 @@ program
     `AADP wire version to validate against (${SUPPORTED_VERSIONS.join(", ")}). ` +
       `If omitted, read from the document's own "aadp_version" field.`
   )
-  .action(async (kind: string, source: string, opts: { version?: string }) => {
+  .option(
+    "--allow-private-network",
+    "Allow <source> (and any redirect it follows) to resolve to a private/loopback/link-local " +
+      "address. Only pass this for a deliberately local/offline deployment you trust — the " +
+      "default strict policy blocks it to prevent SSRF when validating an untrusted URL."
+  )
+  .action(async (kind: string, source: string, opts: { version?: string; allowPrivateNetwork?: boolean }) => {
     if (!KINDS.includes(kind as ResourceKind)) {
       console.error(`Unknown kind "${kind}". Expected one of: ${KINDS.join(", ")}`);
       process.exitCode = 2;
       return;
     }
 
-    let raw: string;
-    if (/^https?:\/\//.test(source)) {
-      const res = await fetch(source);
-      raw = await res.text();
-    } else {
-      raw = readFileSync(source, "utf8");
-    }
-
     let data: unknown;
-    try {
-      data = JSON.parse(raw);
-    } catch (err) {
-      console.error(`Invalid JSON in ${source}: ${(err as Error).message}`);
-      process.exitCode = 2;
-      return;
+    if (/^https?:\/\//.test(source)) {
+      // Same SSRF-aware, resource-bounded transport as the reference
+      // client: URL policy, timeout, redirect cap, streamed size cap, and
+      // a JSON content-type check — a CI job or bot running this CLI
+      // against an externally-supplied URL is exposed to the same
+      // untrusted-origin risks the client is.
+      try {
+        const result = await fetchJson(source, {
+          urlPolicy: opts.allowPrivateNetwork ? createPermissiveUrlPolicy() : createStrictUrlPolicy(),
+        });
+        data = result.data;
+      } catch (err) {
+        console.error(`Failed to fetch ${source}: ${(err as Error).message}`);
+        process.exitCode = 2;
+        return;
+      }
+    } else {
+      const raw = readFileSync(source, "utf8");
+      try {
+        data = JSON.parse(raw);
+      } catch (err) {
+        console.error(`Invalid JSON in ${source}: ${(err as Error).message}`);
+        process.exitCode = 2;
+        return;
+      }
     }
 
     const version = opts.version ?? detectVersion(data);
