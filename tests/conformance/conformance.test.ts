@@ -8,6 +8,8 @@ import {
   iterateSitemap,
   discoverAllEntities,
   AadpRequestError,
+  createPermissiveUrlPolicy,
+  type ClientOptions,
 } from "../../src/client/index.js";
 import {
   validateManifest,
@@ -35,6 +37,12 @@ import { checksumOf } from "../../src/canonical-json/checksum.js";
 let server: MockServerHandle | undefined;
 let baseUrl: string;
 
+// The self-test mock server binds to 127.0.0.1, which the default strict
+// UrlPolicy blocks as a loopback address; a real AADP_BASE_URL deployment
+// is unaffected by the permissive policy since it only widens what is
+// allowed, never narrows it.
+const PERMISSIVE: ClientOptions = { urlPolicy: createPermissiveUrlPolicy() };
+
 beforeAll(async () => {
   const externalBaseUrl = process.env.AADP_BASE_URL;
   if (externalBaseUrl) {
@@ -51,10 +59,10 @@ afterAll(async () => {
 
 describe("discovery flow", () => {
   it("manifest -> sitemap index -> sitemap -> entity all schema-validate, with checksums recomputed (not just shape-checked)", async () => {
-    const manifest = await discover(baseUrl);
+    const manifest = await discover(baseUrl, PERMISSIVE);
     expect(validateManifest(manifest).valid).toBe(true);
 
-    const index = await fetchSitemapIndex(manifest.sitemap_index);
+    const index = await fetchSitemapIndex(manifest.sitemap_index, PERMISSIVE);
     expect(validateSitemapIndex(index).valid).toBe(true);
     expect(index.sitemaps.length).toBeGreaterThan(0);
     // §6: checksum MUST be the actual hash of the canonical `sitemaps`
@@ -62,7 +70,7 @@ describe("discovery flow", () => {
     expect(index.checksum).toBe(checksumOf(index.sitemaps));
 
     const sitemapRef = index.sitemaps[0];
-    const sitemap = await fetchSitemap(sitemapRef.url);
+    const sitemap = await fetchSitemap(sitemapRef.url, undefined, PERMISSIVE);
     expect(validateSitemap(sitemap).valid).toBe(true);
     expect(sitemap.checksum).toBe(checksumOf(sitemap.items));
 
@@ -74,7 +82,7 @@ describe("discovery flow", () => {
     // the resource under the wrong namespace.
     expect(item.id.startsWith(`${sitemap.type}:`)).toBe(true);
 
-    const entity = await fetchEntity(item.url);
+    const entity = await fetchEntity(item.url, PERMISSIVE);
     expect(validateEntity(entity).valid).toBe(true);
     expect(entity.id).toBe(item.id);
     expect(entity.type).toBe(sitemap.type);
@@ -85,17 +93,17 @@ describe("discovery flow", () => {
 
   it("full discoverAllEntities walk yields every published entity exactly once, all schema-valid and checksum-correct", async () => {
     const seen = new Set<string>();
-    const manifest = await discover(baseUrl);
-    const index = await fetchSitemapIndex(manifest.sitemap_index);
+    const manifest = await discover(baseUrl, PERMISSIVE);
+    const index = await fetchSitemapIndex(manifest.sitemap_index, PERMISSIVE);
     const typeBySitemapUrl = new Map(index.sitemaps.map((s) => [s.url, s.type]));
 
     for (const sitemapRef of index.sitemaps) {
-      for await (const item of iterateSitemap(sitemapRef.url)) {
+      for await (const item of iterateSitemap(sitemapRef.url, PERMISSIVE)) {
         expect(item.id.startsWith(`${typeBySitemapUrl.get(sitemapRef.url)}:`)).toBe(true);
       }
     }
 
-    for await (const entity of discoverAllEntities(baseUrl)) {
+    for await (const entity of discoverAllEntities(baseUrl, PERMISSIVE)) {
       expect(validateEntity(entity).valid).toBe(true);
       expect(seen.has(entity.id)).toBe(false);
       seen.add(entity.id);
@@ -109,11 +117,11 @@ describe("discovery flow", () => {
 
 describe("pagination", () => {
   it("caps page size, terminates cursor.next at null, and never repeats an id — for every published sitemap type, paginated or not", async () => {
-    const manifest = await discover(baseUrl);
-    const index = await fetchSitemapIndex(manifest.sitemap_index);
+    const manifest = await discover(baseUrl, PERMISSIVE);
+    const index = await fetchSitemapIndex(manifest.sitemap_index, PERMISSIVE);
 
     for (const sitemapRef of index.sitemaps) {
-      const first = await fetchSitemap(sitemapRef.url);
+      const first = await fetchSitemap(sitemapRef.url, undefined, PERMISSIVE);
       expect(first.items.length).toBeLessThanOrEqual(100);
       // cursor is OPTIONAL (spec §5, schema does not require it): a server
       // with <=100 items MAY return a single unpaginated page and omit
@@ -123,7 +131,7 @@ describe("pagination", () => {
       }
 
       const allIds: string[] = [];
-      for await (const item of iterateSitemap(sitemapRef.url)) {
+      for await (const item of iterateSitemap(sitemapRef.url, PERMISSIVE)) {
         allIds.push(item.id);
       }
       expect(new Set(allIds).size).toBe(allIds.length); // no duplicates/no cycle
@@ -133,42 +141,42 @@ describe("pagination", () => {
 
 describe("cache and checksum stability", () => {
   it("entity checksum is stable across repeated fetches", async () => {
-    const manifest = await discover(baseUrl);
-    const index = await fetchSitemapIndex(manifest.sitemap_index);
+    const manifest = await discover(baseUrl, PERMISSIVE);
+    const index = await fetchSitemapIndex(manifest.sitemap_index, PERMISSIVE);
     if (index.sitemaps.length === 0) return;
-    const sitemap = await fetchSitemap(index.sitemaps[0].url);
+    const sitemap = await fetchSitemap(index.sitemaps[0].url, undefined, PERMISSIVE);
     if (sitemap.items.length === 0) return;
     const itemUrl = sitemap.items[0].url;
 
-    const first = await fetchEntity(itemUrl);
-    const second = await fetchEntity(itemUrl);
+    const first = await fetchEntity(itemUrl, PERMISSIVE);
+    const second = await fetchEntity(itemUrl, PERMISSIVE);
     expect(first.checksum).toBe(second.checksum);
   });
 
   it.each(["sitemap-index", "sitemap", "entity"] as const)(
     "%s: ETag equals the declared checksum, Last-Modified is a valid date, and If-None-Match yields an empty 304",
     async (kind) => {
-      const manifest = await discover(baseUrl);
+      const manifest = await discover(baseUrl, PERMISSIVE);
       let targetUrl: string;
       let declaredChecksum: string;
       let declaredTimestamp: string;
       if (kind === "sitemap-index") {
-        const index = await fetchSitemapIndex(manifest.sitemap_index);
+        const index = await fetchSitemapIndex(manifest.sitemap_index, PERMISSIVE);
         targetUrl = manifest.sitemap_index;
         declaredChecksum = index.checksum;
         declaredTimestamp = index.generated_at;
       } else {
-        const index = await fetchSitemapIndex(manifest.sitemap_index);
+        const index = await fetchSitemapIndex(manifest.sitemap_index, PERMISSIVE);
         if (index.sitemaps.length === 0) return;
         if (kind === "sitemap") {
-          const sitemap = await fetchSitemap(index.sitemaps[0].url);
+          const sitemap = await fetchSitemap(index.sitemaps[0].url, undefined, PERMISSIVE);
           targetUrl = index.sitemaps[0].url;
           declaredChecksum = sitemap.checksum;
           declaredTimestamp = sitemap.generated_at;
         } else {
-          const sitemap = await fetchSitemap(index.sitemaps[0].url);
+          const sitemap = await fetchSitemap(index.sitemaps[0].url, undefined, PERMISSIVE);
           if (sitemap.items.length === 0) return;
-          const entity = await fetchEntity(sitemap.items[0].url);
+          const entity = await fetchEntity(sitemap.items[0].url, PERMISSIVE);
           targetUrl = sitemap.items[0].url;
           declaredChecksum = entity.checksum;
           declaredTimestamp = entity.updated_at;
@@ -213,10 +221,10 @@ describe("cache and checksum stability", () => {
 
 describe("error envelope", () => {
   it("unknown entity id returns a schema-valid not_found error", async () => {
-    const manifest = await discover(baseUrl);
-    const index = await fetchSitemapIndex(manifest.sitemap_index);
+    const manifest = await discover(baseUrl, PERMISSIVE);
+    const index = await fetchSitemapIndex(manifest.sitemap_index, PERMISSIVE);
     if (index.sitemaps.length === 0) return;
-    const sitemap = await fetchSitemap(index.sitemaps[0].url);
+    const sitemap = await fetchSitemap(index.sitemaps[0].url, undefined, PERMISSIVE);
 
     // Build the "unknown id" URL by taking a *real* entity URL from the
     // sitemap and swapping only its final id segment — this guarantees
@@ -239,7 +247,7 @@ describe("error envelope", () => {
 
     let caught: AadpRequestError | undefined;
     try {
-      await fetchEntity(url);
+      await fetchEntity(url, PERMISSIVE);
     } catch (err) {
       caught = err as AadpRequestError;
     }
@@ -250,8 +258,8 @@ describe("error envelope", () => {
   });
 
   it("unpublished type returns a schema-valid unsupported_type error", async () => {
-    const manifest = await discover(baseUrl);
-    const index = await fetchSitemapIndex(manifest.sitemap_index);
+    const manifest = await discover(baseUrl, PERMISSIVE);
+    const index = await fetchSitemapIndex(manifest.sitemap_index, PERMISSIVE);
     if (index.sitemaps.length === 0) return;
 
     // Same principle as the entity test above: derive the URL by
@@ -265,7 +273,7 @@ describe("error envelope", () => {
 
     let caught: AadpRequestError | undefined;
     try {
-      await fetchSitemap(url);
+      await fetchSitemap(url, undefined, PERMISSIVE);
     } catch (err) {
       caught = err as AadpRequestError;
     }

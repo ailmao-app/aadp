@@ -5,20 +5,32 @@
  * `url`, redirect `Location` hops — MUST pass through a policy before the
  * client dereferences it.
  *
- * This is a syntactic policy: it inspects the URL's scheme and hostname
- * as written, and for IP-literal hosts checks known private/loopback/
- * link-local ranges. It does NOT resolve DNS and re-check the resolved
- * address, so it does not defend against DNS rebinding (a name that
- * initially resolves to a public IP and later repoints to a private
- * one). A production crawler embedding this client SHOULD pair it with
- * resolve-then-pin request handling at the network layer if that threat
- * matters for its deployment; that is out of scope for this reference
- * implementation.
+ * The `check()` method is a syntactic policy: it inspects the URL's scheme
+ * and hostname as written, and for IP-literal hosts checks known private/
+ * loopback/link-local ranges. On its own that does NOT defend against DNS
+ * rebinding (a name that initially resolves to a public IP and later
+ * repoints to a private one). `createStrictUrlPolicy()` also implements
+ * `checkResolvedAddress()`, which `../http.js` uses to resolve every A/AAAA
+ * record for a hostname, reject the connection if any is non-public, and
+ * pin the socket to a verified address — see `createPinnedDispatcher` in
+ * `../dns-pin.js`.
  */
 
 export interface UrlPolicy {
   /** Returns `undefined` if the URL is allowed, or a reason string if not. */
   check(url: URL): string | undefined;
+  /**
+   * Optional second gate applied to every DNS-resolved address for a
+   * hostname this policy already allowed syntactically. Defends against
+   * DNS rebinding: a hostname that resolves to a public IP at policy-check
+   * time but repoints to a private one by connect time. Returns a reason
+   * string to reject the resolved address, or `undefined` to allow it.
+   *
+   * A policy that omits this method opts out of resolve-and-pin
+   * enforcement entirely (e.g. `createPermissiveUrlPolicy`, which is only
+   * ever used against trusted local/offline fixtures).
+   */
+  checkResolvedAddress?(address: string, family: 4 | 6): string | undefined;
 }
 
 export interface StrictUrlPolicyOptions {
@@ -63,26 +75,205 @@ function isPrivateIPv4(octets: number[]): boolean {
   return false;
 }
 
-/** ::1 loopback, fc00::/7 ULA, fe80::/10 link-local, and IPv4-mapped equivalents. */
+/**
+ * Node's WHATWG URL parser keeps the brackets in `.hostname` for an IPv6
+ * literal (`new URL("https://[::1]/").hostname === "[::1]"`); strip them
+ * before comparing against unbracketed range prefixes.
+ */
+function stripBrackets(hostname: string): string {
+  if (hostname.length >= 2 && hostname.startsWith("[") && hostname.endsWith("]")) {
+    return hostname.slice(1, -1);
+  }
+  return hostname;
+}
+
+const HEX_GROUP = /^[0-9a-f]{1,4}$/;
+
+/**
+ * Expands a textual IPv6 address (bracket-stripped, lowercased) to its 8
+ * canonical 16-bit groups, resolving a `::` run-of-zeros collapse and a
+ * dotted-decimal IPv4 tail (`::ffff:127.0.0.1`) alike. Returns `null` for
+ * anything that doesn't parse as a well-formed IPv6 address — callers
+ * should treat that conservatively (as they already must, since `fetch()`
+ * itself will then fail to connect to a malformed literal).
+ */
+function expandIPv6Groups(hostname: string): string[] | null {
+  const sides = hostname.split("::");
+  if (sides.length > 2) return null; // more than one "::" is never valid
+
+  const convertDottedTail = (groups: string[]): string[] | null => {
+    if (groups.length === 0) return groups;
+    const last = groups[groups.length - 1];
+    if (!last.includes(".")) return groups;
+    const octets = parseIPv4(last);
+    if (!octets) return null;
+    const hi = ((octets[0] << 8) | octets[1]).toString(16);
+    const lo = ((octets[2] << 8) | octets[3]).toString(16);
+    return [...groups.slice(0, -1), hi, lo];
+  };
+
+  const splitSide = (side: string): string[] | null => {
+    if (side === "") return [];
+    const groups = side.split(":");
+    const converted = convertDottedTail(groups);
+    if (!converted) return null;
+    return converted.every((g) => HEX_GROUP.test(g)) ? converted : null;
+  };
+
+  if (sides.length === 1) {
+    const groups = splitSide(sides[0]);
+    return groups && groups.length === 8 ? groups : null;
+  }
+
+  const head = splitSide(sides[0]);
+  const tail = splitSide(sides[1]);
+  if (!head || !tail) return null;
+  const missing = 8 - head.length - tail.length;
+  if (missing < 0) return null;
+  return [...head, ...new Array(missing).fill("0"), ...tail];
+}
+
+/**
+ * IANA IPv6 Global Unicast Address Assignments, mirroring the registry's
+ * ALLOCATED rows exactly, one entry per registry row. Snapshot as of the
+ * registry's 2024-11-01 change (2410::/12 to APNIC — the most recent
+ * allocation as of this writing; registry page last updated 2025-10-10):
+ * https://www.iana.org/assignments/ipv6-unicast-address-assignments/
+ *
+ * Each entry is `[first 32 address bits as (g0 << 16 | g1), prefix length]`.
+ * Every allocation in the registry is /12–/23, so matching on the first
+ * two 16-bit groups is exact. `2001:0000::/23` (IETF Protocol
+ * Assignments) and `2002::/16` (6to4) appear in the registry but are
+ * intentionally NOT listed here — they get dedicated special-purpose
+ * handling in `isPrivateIPv6` before this table is consulted.
+ *
+ * Update process: run `npm run check:iana-ipv6` (after `npm run build`) to
+ * diff this table against the live registry CSV — a security allowlist
+ * must not go stale silently (2026-07-26 re-review: the 2019-era snapshot
+ * blocked the whole valid 2410::/12 APNIC allocation as bogon). When IANA
+ * adds an allocation, add its row here with the registry's change date in
+ * the comment, and extend the boundary tests in
+ * `tests/client/url-policy.test.ts`.
+ *
+ * Exported only for `scripts/check-iana-ipv6-allowlist.mjs`; not part of
+ * the package's public API surface.
+ */
+export const GLOBAL_UNICAST_ALLOCATIONS: ReadonlyArray<readonly [number, number]> = [
+  [0x20010200, 23], // 2001:200::/23 APNIC
+  [0x20010400, 23], // 2001:400::/23 ARIN
+  [0x20010600, 23], // 2001:600::/23 RIPE NCC
+  [0x20010800, 22], // 2001:800::/22 RIPE NCC
+  [0x20010c00, 23], // 2001:c00::/23 APNIC (contains 2001:db8::/32 documentation, blocked separately)
+  [0x20010e00, 23], // 2001:e00::/23 APNIC
+  [0x20011200, 23], // 2001:1200::/23 LACNIC
+  [0x20011400, 22], // 2001:1400::/22 RIPE NCC
+  [0x20011800, 23], // 2001:1800::/23 ARIN
+  [0x20011a00, 23], // 2001:1a00::/23 RIPE NCC
+  [0x20011c00, 22], // 2001:1c00::/22 RIPE NCC
+  [0x20012000, 19], // 2001:2000::/19 RIPE NCC
+  [0x20014000, 23], // 2001:4000::/23 RIPE NCC
+  [0x20014200, 23], // 2001:4200::/23 AFRINIC
+  [0x20014400, 23], // 2001:4400::/23 APNIC
+  [0x20014600, 23], // 2001:4600::/23 RIPE NCC
+  [0x20014800, 23], // 2001:4800::/23 ARIN
+  [0x20014a00, 23], // 2001:4a00::/23 RIPE NCC
+  [0x20014c00, 23], // 2001:4c00::/23 RIPE NCC
+  [0x20015000, 20], // 2001:5000::/20 RIPE NCC
+  [0x20018000, 19], // 2001:8000::/19 APNIC
+  [0x2001a000, 20], // 2001:a000::/20 APNIC
+  [0x2001b000, 20], // 2001:b000::/20 APNIC
+  [0x20030000, 18], // 2003::/18 RIPE NCC
+  [0x24000000, 12], // 2400::/12 APNIC
+  [0x24100000, 12], // 2410::/12 APNIC (2024-11-01)
+  [0x26000000, 12], // 2600::/12 ARIN
+  [0x26100000, 23], // 2610::/23 ARIN
+  [0x26200000, 23], // 2620::/23 ARIN
+  [0x26300000, 12], // 2630::/12 ARIN (2019-11-06)
+  [0x28000000, 12], // 2800::/12 LACNIC
+  [0x2a000000, 12], // 2a00::/12 RIPE NCC
+  [0x2a100000, 12], // 2a10::/12 RIPE NCC (2019-06-05)
+  [0x2c000000, 12], // 2c00::/12 AFRINIC
+];
+
+/** True if the first 32 bits fall inside a prefix IANA has allocated for global unicast. */
+function isAllocatedGlobalUnicast(g0: number, g1: number): boolean {
+  const value = (g0 << 16) | g1; // g0 <= 0x3fff inside 2000::/3, so this stays positive
+  return GLOBAL_UNICAST_ALLOCATIONS.some(
+    ([prefix, bits]) => value >>> (32 - bits) === prefix >>> (32 - bits)
+  );
+}
+
+/**
+ * Allocation-aware classification: an IPv6 address is treated as public
+ * only if it falls inside a prefix the IANA IPv6 Global Unicast Address
+ * Assignments registry has actually allocated (`GLOBAL_UNICAST_ALLOCATIONS`).
+ * Everything else is rejected — outside `2000::/3` that covers loopback
+ * (`::1`), ULA (`fc00::/7`), link-local (`fe80::/10`), deprecated
+ * site-local (`fec0::/10`), multicast (`ff00::/8`), the discard-only
+ * block (`100::/64`), and the well-known NAT64 prefix (`64:ff9b::/96`);
+ * inside `2000::/3` it covers unallocated/bogon space (e.g. `3000::/4`)
+ * and documentation `3fff::/20` alike, without needing to enumerate them.
+ * (2026-07-26 re-reviews: a prefix blocklist let `fec0::/10` and
+ * multicast through; "inside 2000::/3 == public" then let `2001::/23`,
+ * 6to4, and finally unallocated `3000::1` through — allocation-aware
+ * matching closes the class, not just the reported instance.)
+ *
+ * Special-purpose ranges that sit inside allocated (or allocatable) space
+ * still need explicit handling before the allocation table:
+ *
+ * - `2001::/23` (IETF Protocol Assignments) is rejected wholesale. Its
+ *   sub-allocations are not globally reachable by default; the handful of
+ *   exceptions (PCP/TURN anycast at 2001:1::1-3, AMT `2001:3::/32`,
+ *   AS112 `2001:4:112::/48`, Drone Remote ID `2001:30::/28`) are anycast
+ *   infrastructure endpoints an AADP crawler has no legitimate reason to
+ *   dereference as a document origin, so conservatively blocking them is
+ *   the right trade-off for an SSRF boundary. This also covers Teredo
+ *   (`2001::/32`), benchmarking (`2001:2::/48`), and both ORCHID ranges.
+ * - `2001:db8::/32` (documentation) sits inside APNIC's `2001:c00::/23`
+ *   allocation and is rejected.
+ * - `2002::/16` (6to4) embeds an IPv4 address in bits 16-47; it is
+ *   classified by that embedded IPv4 address (`2002:7f00:1::` embeds
+ *   127.0.0.1 and is rejected; a 6to4 form of a public address passes).
+ *
+ * IPv4-mapped (`::ffff:a.b.c.d` / `::ffff:HHHH:HHHH`) and IPv4-compatible
+ * (`::a.b.c.d`, deprecated) addresses are likewise classified by their
+ * embedded IPv4 address, regardless of whether it's written as
+ * dotted-decimal or hex groups.
+ */
 function isPrivateIPv6(hostname: string): boolean {
-  const h = hostname.toLowerCase();
-  if (h === "::1" || h === "::") return true;
-  if (h.startsWith("fc") || h.startsWith("fd")) return true; // fc00::/7 ULA
-  if (h.startsWith("fe8") || h.startsWith("fe9") || h.startsWith("fea") || h.startsWith("feb")) {
-    return true; // fe80::/10 link-local
+  const h = stripBrackets(hostname).toLowerCase();
+  const groups = expandIPv6Groups(h);
+  if (!groups) return true; // fail closed: an unparseable IPv6 literal is never allowed
+
+  const asInt = (g: string) => parseInt(g, 16);
+  const embeddedIPv4 = (hi: number, lo: number): number[] => [
+    (hi >> 8) & 0xff,
+    hi & 0xff,
+    (lo >> 8) & 0xff,
+    lo & 0xff,
+  ];
+
+  const first5Zero = groups.slice(0, 5).every((g) => asInt(g) === 0);
+  const sixth = asInt(groups[5]);
+  if (first5Zero && (sixth === 0xffff || sixth === 0)) {
+    return isPrivateIPv4(embeddedIPv4(asInt(groups[6]), asInt(groups[7])));
   }
-  const mapped = h.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
-  if (mapped) {
-    const octets = parseIPv4(mapped[1]);
-    if (octets) return isPrivateIPv4(octets);
+
+  const g0 = asInt(groups[0]);
+  const g1 = asInt(groups[1]);
+  if (g0 === 0x2001 && g1 <= 0x01ff) return true; // 2001::/23 IETF Protocol Assignments
+  if (g0 === 0x2001 && g1 === 0x0db8) return true; // 2001:db8::/32 documentation
+  if (g0 === 0x2002) {
+    // 2002::/16 6to4: classify by the IPv4 address embedded in bits 16-47.
+    return isPrivateIPv4(embeddedIPv4(g1, asInt(groups[2])));
   }
-  return false;
+
+  return !isAllocatedGlobalUnicast(g0, g1);
 }
 
 function isIPv6Literal(hostname: string): boolean {
-  // URL hostname for IPv6 literals is bracket-stripped by the WHATWG URL
-  // parser (new URL("https://[::1]/").hostname === "::1"), so this checks
-  // for a colon rather than brackets.
+  // Bracketed ("[::1]") or bare ("::1", as seen post-DNS-resolution) — both
+  // contain a colon, which no valid IPv4 literal or DNS hostname does.
   return hostname.includes(":");
 }
 
@@ -104,13 +295,26 @@ export function createStrictUrlPolicy(options: StrictUrlPolicyOptions = {}): Url
       }
       if (isIPv6Literal(hostname)) {
         if (isPrivateIPv6(hostname)) {
-          return `IPv6 address "${hostname}" is loopback, link-local, or ULA`;
+          return `IPv6 address "${hostname}" is not a global-unicast address`;
         }
         return undefined;
       }
       const ipv4 = parseIPv4(hostname);
       if (ipv4 && isPrivateIPv4(ipv4)) {
         return `IPv4 address "${hostname}" is private, loopback, link-local, or reserved`;
+      }
+      return undefined;
+    },
+    checkResolvedAddress(address: string, family: 4 | 6): string | undefined {
+      if (family === 6) {
+        if (isPrivateIPv6(address)) {
+          return `resolved IPv6 address "${address}" is not a global-unicast address`;
+        }
+        return undefined;
+      }
+      const octets = parseIPv4(address);
+      if (!octets || isPrivateIPv4(octets)) {
+        return `resolved IPv4 address "${address}" is private, loopback, link-local, or reserved`;
       }
       return undefined;
     },
