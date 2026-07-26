@@ -1,15 +1,67 @@
 /**
  * Reference AADP v0.1 client: discovery -> sitemap index -> sitemap ->
- * entity. Deliberately independent of any application/Ailmao type —
- * everything here operates on the generic AADP v0.1 envelope shapes.
+ * entity. Deliberately independent of any application/Ailmao type, and of
+ * the v1.0 client's wire types (`../v1.0/index.js`) — everything here
+ * operates on the generic AADP v0.1 envelope shapes below.
  *
- * Unchanged in behavior from the pre-Phase-4 client — kept exactly as it
- * was so existing v0.1 consumers and tests are unaffected. New work
- * (URL policy, response-size/timeout/redirect limits, schema+semantic
- * gating) landed in `../v1.0/index.ts` only; see ADR-0004 on why v0.1
- * itself does not change.
+ * Wire contract (envelope types, URL shapes, function signatures) is
+ * unchanged from the pre-Phase-4 client, so existing v0.1 consumers keep
+ * compiling and their request/response shapes are untouched. What changed
+ * is the transport and validation underneath: this now runs on the same
+ * SSRF-aware, resource-bounded fetch layer as v1.0 (`../http.js`), the
+ * same schema/checksum/cross-document validation (`../validated-document.js`
+ * — v0.1 has its own registered schema, so this is a real check, not a
+ * v1.0 schema misapplied to v0.1 data), and the same traversal budgets
+ * (`../discovery-budget.js`) instead of a bare, unvalidated, unbounded
+ * `fetch()`. A consumer using this package's default export gets all of
+ * that without any code change on its part. An optional trailing
+ * `options: ClientOptions` param (identical to v1.0's) lets a caller
+ * override any of it, e.g. `createPermissiveUrlPolicy()` for a
+ * deliberately local/offline deployment.
  */
+import { scopeHeadersToOrigin, type FetchJsonOptions } from "../http.js";
+import {
+  fetchAndValidateDocument,
+  AadpSchemaValidationError,
+  AadpChecksumMismatchError,
+  AadpIntegrityMismatchError,
+} from "../validated-document.js";
+import {
+  createDiscoveryBudget,
+  chargeDiscoveryBudget,
+  AadpDiscoveryBudgetExceededError,
+  type DiscoveryBudget,
+  type DiscoveryBudgetState,
+} from "../discovery-budget.js";
 import { AadpRequestError, type AadpErrorEnvelope } from "../errors.js";
+
+export {
+  createStrictUrlPolicy,
+  createPermissiveUrlPolicy,
+  BlockedUrlError,
+  type UrlPolicy,
+} from "../url-policy.js";
+export {
+  AadpClientError,
+  TimeoutError,
+  TooManyRedirectsError,
+  ResponseTooLargeError,
+  InvalidContentTypeError,
+  MalformedJsonError,
+} from "../http.js";
+export {
+  AadpSchemaValidationError,
+  AadpChecksumMismatchError,
+  AadpIntegrityMismatchError,
+} from "../validated-document.js";
+export {
+  AadpDiscoveryBudgetExceededError,
+  type DiscoveryBudget,
+  type DiscoveryBudgetState,
+} from "../discovery-budget.js";
+export { UnsupportedAadpVersionError } from "../../validator/index.js";
+
+export type ClientOptions = FetchJsonOptions;
 
 /** Every AADP envelope permits `x_*` extension fields (spec §10). */
 interface ExtensionFields {
@@ -70,49 +122,66 @@ export interface Entity<T = unknown> extends ExtensionFields {
 export { AadpRequestError };
 export type { AadpErrorEnvelope };
 
-async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (res.status === 304) {
-    throw new AadpRequestError("Not modified", 304);
-  }
-  const body = (await res.json()) as T | AadpErrorEnvelope;
-  if (!res.ok) {
-    const envelope = body as AadpErrorEnvelope;
-    throw new AadpRequestError(
-      envelope?.error?.message ?? `Request to ${url} failed with ${res.status}`,
-      res.status,
-      envelope
-    );
-  }
-  return body as T;
-}
-
-export async function discover(originBaseUrl: string): Promise<Manifest> {
+export async function discover(
+  originBaseUrl: string,
+  options: ClientOptions = {}
+): Promise<Manifest> {
   const url = new URL("/.well-known/ai-manifest.json", originBaseUrl).toString();
-  return getJson<Manifest>(url);
+  return fetchAndValidateDocument<Manifest>(url, "0.1", "manifest", options);
 }
 
-export async function fetchSitemapIndex(url: string): Promise<SitemapIndex> {
-  return getJson<SitemapIndex>(url);
+export async function fetchSitemapIndex(
+  url: string,
+  options: ClientOptions = {}
+): Promise<SitemapIndex> {
+  return fetchAndValidateDocument<SitemapIndex>(url, "0.1", "sitemap-index", options);
 }
 
 export async function fetchSitemap(
   url: string,
-  cursor?: string | null
+  cursor?: string | null,
+  options: ClientOptions = {}
 ): Promise<Sitemap> {
   const target = new URL(url);
   if (cursor) target.searchParams.set("cursor", cursor);
-  return getJson<Sitemap>(target.toString());
+  return fetchAndValidateDocument<Sitemap>(target.toString(), "0.1", "sitemap", options);
 }
 
-/** Follows `cursor.next` until exhausted, yielding every sitemap item. */
+export interface IterateSitemapOptions extends ClientOptions, DiscoveryBudget {
+  /** Throws `AadpIntegrityMismatchError` if the fetched sitemap's declared `type` disagrees with this. */
+  expectedType?: string;
+  /**
+   * Share page/deadline accounting across multiple `iterateSitemap` calls
+   * (e.g. one per sitemap in a `discoverAllEntities` walk) instead of
+   * budgeting this call alone. Created fresh from `maxPages`/`deadlineMs`
+   * when omitted.
+   */
+  budget?: DiscoveryBudgetState;
+}
+
+/**
+ * Follows `cursor.next` until exhausted, yielding every sitemap item.
+ * Bounded by `maxPages`/`deadlineMs` (default 10000 pages / 5 minutes)
+ * even when this is called directly rather than through
+ * `discoverAllEntities` — a schema-valid server can still hand out
+ * unbounded pages via an ever-fresh `cursor.next` that cycle detection
+ * alone does not catch.
+ */
 export async function* iterateSitemap(
-  sitemapUrl: string
+  sitemapUrl: string,
+  options: IterateSitemapOptions = {}
 ): AsyncGenerator<SitemapItem> {
+  const budget = options.budget ?? createDiscoveryBudget(options);
   let cursor: string | null | undefined = undefined;
   const seenCursors = new Set<string>();
   do {
-    const page = await fetchSitemap(sitemapUrl, cursor);
+    chargeDiscoveryBudget(budget, "page", `iterateSitemap(${sitemapUrl})`);
+    const page = await fetchSitemap(sitemapUrl, cursor, options);
+    if (options.expectedType !== undefined && page.type !== options.expectedType) {
+      throw new AadpIntegrityMismatchError(
+        `Sitemap at ${sitemapUrl} declares type "${page.type}" but was referenced as "${options.expectedType}"`
+      );
+    }
     for (const item of page.items) yield item;
     cursor = page.cursor?.next ?? null;
     if (cursor) {
@@ -124,19 +193,70 @@ export async function* iterateSitemap(
   } while (cursor);
 }
 
-export async function fetchEntity<T = unknown>(url: string): Promise<Entity<T>> {
-  return getJson<Entity<T>>(url);
+export async function fetchEntity<T = unknown>(
+  url: string,
+  options: ClientOptions = {}
+): Promise<Entity<T>> {
+  return fetchAndValidateDocument<Entity<T>>(url, "0.1", "entity", options);
 }
 
-/** Full discovery walk: manifest -> sitemap index -> every sitemap -> every entity. */
+export type DiscoverAllEntitiesOptions = ClientOptions & DiscoveryBudget;
+
+/**
+ * Full discovery walk: manifest -> sitemap index -> every sitemap ->
+ * every entity, delegating pagination to `iterateSitemap` (sharing one
+ * `DiscoveryBudgetState` across every sitemap) rather than re-implementing
+ * it, so the same page/deadline budget applies whether a caller uses this
+ * or paginates a sitemap directly.
+ *
+ * Enforces the identity/integrity invariants spec §6 requires across
+ * documents (`AadpIntegrityMismatchError` on violation) — a sitemap must
+ * declare the `type` its index entry claims, and each fetched entity must
+ * agree with its sitemap item on `id`, `type` (the sitemap's namespace),
+ * and `checksum`. Each document's own checksum is separately verified in
+ * `fetchAndValidateDocument` (`AadpChecksumMismatchError`).
+ *
+ * Headers configured in `options.headers` are only sent to
+ * `originBaseUrl`'s own origin; sitemap/entity URLs a document points at a
+ * different origin never receive them (see `scopeHeadersToOrigin`).
+ */
 export async function* discoverAllEntities(
-  originBaseUrl: string
+  originBaseUrl: string,
+  options: DiscoverAllEntitiesOptions = {}
 ): AsyncGenerator<Entity> {
-  const manifest = await discover(originBaseUrl);
-  const index = await fetchSitemapIndex(manifest.sitemap_index);
+  const homeOrigin = new URL(originBaseUrl).origin;
+  const scoped = (targetUrl: string): ClientOptions =>
+    scopeHeadersToOrigin(options, targetUrl, homeOrigin);
+  const budget = createDiscoveryBudget(options);
+
+  const manifest = await discover(originBaseUrl, options);
+  const index = await fetchSitemapIndex(manifest.sitemap_index, scoped(manifest.sitemap_index));
+
   for (const sitemapRef of index.sitemaps) {
-    for await (const item of iterateSitemap(sitemapRef.url)) {
-      yield await fetchEntity(item.url);
+    const sitemapOptions: IterateSitemapOptions = {
+      ...scoped(sitemapRef.url),
+      expectedType: sitemapRef.type,
+      budget,
+    };
+    for await (const item of iterateSitemap(sitemapRef.url, sitemapOptions)) {
+      chargeDiscoveryBudget(budget, "entity", "discoverAllEntities");
+      const entity = await fetchEntity(item.url, scoped(item.url));
+      if (entity.id !== item.id) {
+        throw new AadpIntegrityMismatchError(
+          `Sitemap item id "${item.id}" at ${item.url} does not match fetched entity id "${entity.id}"`
+        );
+      }
+      if (entity.type !== sitemapRef.type) {
+        throw new AadpIntegrityMismatchError(
+          `Entity at ${item.url} has type "${entity.type}" but its sitemap namespace is "${sitemapRef.type}"`
+        );
+      }
+      if (entity.checksum !== item.checksum) {
+        throw new AadpIntegrityMismatchError(
+          `Sitemap item checksum "${item.checksum}" for ${item.url} does not match fetched entity checksum "${entity.checksum}"`
+        );
+      }
+      yield entity;
     }
   }
 }
