@@ -76,6 +76,31 @@ describe("createStrictUrlPolicy — allow-only-global-unicast IPv6 (not a prefix
   });
 });
 
+describe("createStrictUrlPolicy — special-purpose ranges INSIDE 2000::/3", () => {
+  const policy = createStrictUrlPolicy();
+
+  it.each([
+    ["2001:100::1", "IETF Protocol Assignments 2001::/23, unallocated"],
+    ["2001::1", "Teredo 2001::/32 (inside 2001::/23)"],
+    ["2002:7f00:1::", "6to4 embedding 127.0.0.1"],
+    ["2002:a00:1::", "6to4 embedding 10.0.0.1"],
+    ["2002:c0a8:101::", "6to4 embedding 192.168.1.1"],
+  ])("blocks %s (%s) in both check() and checkResolvedAddress()", (addr) => {
+    // Parity: the URL-literal gate and the DNS-resolved gate must agree —
+    // an address a document can't name directly must not slip through via
+    // a hostname that resolves to it.
+    expect(policy.check(new URL(`http://[${addr}]/`))).toBeDefined();
+    expect(policy.checkResolvedAddress?.(addr, 6)).toBeDefined();
+  });
+
+  it("allows a 6to4 form of a public IPv4 address", () => {
+    // 2002:808:808:: embeds 8.8.8.8 — public, so 6to4 routing of it is
+    // no more reachable than the public address itself.
+    expect(policy.check(new URL("http://[2002:808:808::]/"))).toBeUndefined();
+    expect(policy.checkResolvedAddress?.("2002:808:808::", 6)).toBeUndefined();
+  });
+});
+
 describe("createStrictUrlPolicy — checkResolvedAddress", () => {
   const policy = createStrictUrlPolicy();
 

@@ -134,22 +134,34 @@ function expandIPv6Groups(hostname: string): string[] | null {
 }
 
 /**
- * Allow-only-global-unicast, not a blocklist: anything outside `2000::/3`
- * is treated as non-public — loopback (`::1`), ULA (`fc00::/7`),
- * link-local (`fe80::/10`), deprecated site-local (`fec0::/10`),
- * multicast (`ff00::/8`), the discard-only block (`100::/64`), the
- * well-known NAT64 prefix (`64:ff9b::/96`), and any future or
- * unrecognized special-purpose range alike — rather than enumerating
- * known-bad prefixes one at a time and missing whatever isn't listed
- * (2026-07-26 re-review: a hand-maintained prefix blocklist let
- * `fec0::/10` and multicast through). A handful of ranges ARE carved out
- * of `2000::/3` without being publicly routable (IANA IPv6 Special-Purpose
- * Address Registry) and are excluded explicitly below.
+ * Non-global-unicast classification per the IANA IPv6 Special-Purpose
+ * Address Registry. Anything outside `2000::/3` is treated as non-public —
+ * loopback (`::1`), ULA (`fc00::/7`), link-local (`fe80::/10`),
+ * deprecated site-local (`fec0::/10`), multicast (`ff00::/8`), the
+ * discard-only block (`100::/64`), the well-known NAT64 prefix
+ * (`64:ff9b::/96`), and any future or unrecognized special-purpose range
+ * alike — and within `2000::/3` the registry's special-purpose blocks are
+ * excluded too (2026-07-26 re-reviews: a hand-maintained prefix blocklist
+ * let `fec0::/10` and multicast through, then "inside 2000::/3 == public"
+ * let `2001::/23` IETF Protocol Assignments and 6to4 through):
+ *
+ * - `2001::/23` (IETF Protocol Assignments) is rejected wholesale. Its
+ *   allocations are not globally reachable by default; the handful of
+ *   exceptions (PCP/TURN anycast at 2001:1::1-3, AMT `2001:3::/32`,
+ *   AS112 `2001:4:112::/48`, Drone Remote ID `2001:30::/28`) are anycast
+ *   infrastructure endpoints an AADP crawler has no legitimate reason to
+ *   dereference as a document origin, so conservatively blocking them is
+ *   the right trade-off for an SSRF boundary. This also covers Teredo
+ *   (`2001::/32`), benchmarking (`2001:2::/48`), and both ORCHID ranges.
+ * - `2002::/16` (6to4) embeds an IPv4 address in bits 16-47; it is
+ *   classified by that embedded IPv4 address (`2002:7f00:1::` embeds
+ *   127.0.0.1 and is rejected; a 6to4 form of a public address passes).
+ * - `2001:db8::/32` and `3fff::/20` (documentation) are rejected.
  *
  * IPv4-mapped (`::ffff:a.b.c.d` / `::ffff:HHHH:HHHH`) and IPv4-compatible
- * (`::a.b.c.d`, deprecated) addresses are classified by the embedded IPv4
- * address instead, regardless of whether it's written as dotted-decimal
- * or hex groups.
+ * (`::a.b.c.d`, deprecated) addresses are likewise classified by their
+ * embedded IPv4 address, regardless of whether it's written as
+ * dotted-decimal or hex groups.
  */
 function isPrivateIPv6(hostname: string): boolean {
   const h = stripBrackets(hostname).toLowerCase();
@@ -157,23 +169,29 @@ function isPrivateIPv6(hostname: string): boolean {
   if (!groups) return true; // fail closed: an unparseable IPv6 literal is never allowed
 
   const asInt = (g: string) => parseInt(g, 16);
+  const embeddedIPv4 = (hi: number, lo: number): number[] => [
+    (hi >> 8) & 0xff,
+    hi & 0xff,
+    (lo >> 8) & 0xff,
+    lo & 0xff,
+  ];
+
   const first5Zero = groups.slice(0, 5).every((g) => asInt(g) === 0);
   const sixth = asInt(groups[5]);
   if (first5Zero && (sixth === 0xffff || sixth === 0)) {
-    const hi = asInt(groups[6]);
-    const lo = asInt(groups[7]);
-    const octets = [(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff];
-    return isPrivateIPv4(octets);
+    return isPrivateIPv4(embeddedIPv4(asInt(groups[6]), asInt(groups[7])));
   }
 
   const g0 = asInt(groups[0]);
   if ((g0 & 0xe000) !== 0x2000) return true; // not in 2000::/3 global unicast
 
   const g1 = asInt(groups[1]);
+  if (g0 === 0x2001 && g1 <= 0x01ff) return true; // 2001::/23 IETF Protocol Assignments
   if (g0 === 0x2001 && g1 === 0x0db8) return true; // 2001:db8::/32 documentation
-  if (g0 === 0x2001 && g1 === 0x0002 && asInt(groups[2]) === 0) return true; // 2001:2::/48 benchmarking
-  if (g0 === 0x2001 && (g1 & 0xfff0) === 0x0010) return true; // 2001:10::/28 ORCHID (deprecated)
-  if (g0 === 0x2001 && (g1 & 0xfff0) === 0x0020) return true; // 2001:20::/28 ORCHIDv2
+  if (g0 === 0x2002) {
+    // 2002::/16 6to4: classify by the IPv4 address embedded in bits 16-47.
+    return isPrivateIPv4(embeddedIPv4(g1, asInt(groups[2])));
+  }
   if (g0 === 0x3fff && (g1 & 0xf000) === 0) return true; // 3fff::/20 documentation (RFC 9637)
 
   return false;
