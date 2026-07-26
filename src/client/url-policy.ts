@@ -134,29 +134,96 @@ function expandIPv6Groups(hostname: string): string[] | null {
 }
 
 /**
- * Non-global-unicast classification per the IANA IPv6 Special-Purpose
- * Address Registry. Anything outside `2000::/3` is treated as non-public —
- * loopback (`::1`), ULA (`fc00::/7`), link-local (`fe80::/10`),
- * deprecated site-local (`fec0::/10`), multicast (`ff00::/8`), the
- * discard-only block (`100::/64`), the well-known NAT64 prefix
- * (`64:ff9b::/96`), and any future or unrecognized special-purpose range
- * alike — and within `2000::/3` the registry's special-purpose blocks are
- * excluded too (2026-07-26 re-reviews: a hand-maintained prefix blocklist
- * let `fec0::/10` and multicast through, then "inside 2000::/3 == public"
- * let `2001::/23` IETF Protocol Assignments and 6to4 through):
+ * IANA IPv6 Global Unicast Address Assignments, snapshot as of the
+ * registry's 2019-11-06 change (2630::/12 to ARIN — the most recent
+ * entry as of this writing):
+ * https://www.iana.org/assignments/ipv6-unicast-address-assignments/
+ *
+ * Each entry is `[first 32 address bits as (g0 << 16 | g1), prefix length]`.
+ * Every allocation in the registry is /12–/23, so matching on the first
+ * two 16-bit groups is exact. `2001:0000::/23` (IETF Protocol
+ * Assignments) and `2002::/16` (6to4) appear in the registry but are
+ * intentionally NOT listed here — they get dedicated special-purpose
+ * handling in `isPrivateIPv6` before this table is consulted.
+ *
+ * Update process: when IANA adds an allocation, add its row here with the
+ * registry's change date in the comment, and extend the boundary tests in
+ * `tests/client/url-policy.test.ts`.
+ */
+const GLOBAL_UNICAST_ALLOCATIONS: ReadonlyArray<readonly [number, number]> = [
+  [0x20010200, 23], // APNIC
+  [0x20010400, 23], // ARIN
+  [0x20010600, 23], // RIPE NCC
+  [0x20010800, 22], // RIPE NCC
+  [0x20010c00, 22], // APNIC
+  [0x20011200, 23], // LACNIC
+  [0x20011400, 22], // RIPE NCC
+  [0x20011800, 23], // ARIN
+  [0x20011a00, 23], // RIPE NCC
+  [0x20011c00, 22], // RIPE NCC
+  [0x20012000, 19], // RIPE NCC
+  [0x20014000, 23], // RIPE NCC
+  [0x20014200, 23], // AFRINIC
+  [0x20014400, 23], // APNIC
+  [0x20014600, 23], // RIPE NCC
+  [0x20014800, 23], // ARIN
+  [0x20014a00, 23], // RIPE NCC
+  [0x20014c00, 23], // RIPE NCC
+  [0x20015000, 20], // RIPE NCC
+  [0x20018000, 19], // APNIC
+  [0x2001a000, 20], // APNIC
+  [0x2001b000, 20], // APNIC
+  [0x20030000, 18], // RIPE NCC
+  [0x24000000, 12], // APNIC
+  [0x26000000, 12], // ARIN
+  [0x26100000, 23], // ARIN
+  [0x26200000, 23], // ARIN
+  [0x26300000, 12], // ARIN (2019-11-06)
+  [0x28000000, 12], // LACNIC
+  [0x2a000000, 12], // RIPE NCC
+  [0x2a100000, 12], // RIPE NCC
+  [0x2c000000, 12], // AFRINIC
+];
+
+/** True if the first 32 bits fall inside a prefix IANA has allocated for global unicast. */
+function isAllocatedGlobalUnicast(g0: number, g1: number): boolean {
+  const value = (g0 << 16) | g1; // g0 <= 0x3fff inside 2000::/3, so this stays positive
+  return GLOBAL_UNICAST_ALLOCATIONS.some(
+    ([prefix, bits]) => value >>> (32 - bits) === prefix >>> (32 - bits)
+  );
+}
+
+/**
+ * Allocation-aware classification: an IPv6 address is treated as public
+ * only if it falls inside a prefix the IANA IPv6 Global Unicast Address
+ * Assignments registry has actually allocated (`GLOBAL_UNICAST_ALLOCATIONS`).
+ * Everything else is rejected — outside `2000::/3` that covers loopback
+ * (`::1`), ULA (`fc00::/7`), link-local (`fe80::/10`), deprecated
+ * site-local (`fec0::/10`), multicast (`ff00::/8`), the discard-only
+ * block (`100::/64`), and the well-known NAT64 prefix (`64:ff9b::/96`);
+ * inside `2000::/3` it covers unallocated/bogon space (e.g. `3000::/4`)
+ * and documentation `3fff::/20` alike, without needing to enumerate them.
+ * (2026-07-26 re-reviews: a prefix blocklist let `fec0::/10` and
+ * multicast through; "inside 2000::/3 == public" then let `2001::/23`,
+ * 6to4, and finally unallocated `3000::1` through — allocation-aware
+ * matching closes the class, not just the reported instance.)
+ *
+ * Special-purpose ranges that sit inside allocated (or allocatable) space
+ * still need explicit handling before the allocation table:
  *
  * - `2001::/23` (IETF Protocol Assignments) is rejected wholesale. Its
- *   allocations are not globally reachable by default; the handful of
+ *   sub-allocations are not globally reachable by default; the handful of
  *   exceptions (PCP/TURN anycast at 2001:1::1-3, AMT `2001:3::/32`,
  *   AS112 `2001:4:112::/48`, Drone Remote ID `2001:30::/28`) are anycast
  *   infrastructure endpoints an AADP crawler has no legitimate reason to
  *   dereference as a document origin, so conservatively blocking them is
  *   the right trade-off for an SSRF boundary. This also covers Teredo
  *   (`2001::/32`), benchmarking (`2001:2::/48`), and both ORCHID ranges.
+ * - `2001:db8::/32` (documentation) sits inside APNIC's `2001:c00::/22`
+ *   allocation and is rejected.
  * - `2002::/16` (6to4) embeds an IPv4 address in bits 16-47; it is
  *   classified by that embedded IPv4 address (`2002:7f00:1::` embeds
  *   127.0.0.1 and is rejected; a 6to4 form of a public address passes).
- * - `2001:db8::/32` and `3fff::/20` (documentation) are rejected.
  *
  * IPv4-mapped (`::ffff:a.b.c.d` / `::ffff:HHHH:HHHH`) and IPv4-compatible
  * (`::a.b.c.d`, deprecated) addresses are likewise classified by their
@@ -183,8 +250,6 @@ function isPrivateIPv6(hostname: string): boolean {
   }
 
   const g0 = asInt(groups[0]);
-  if ((g0 & 0xe000) !== 0x2000) return true; // not in 2000::/3 global unicast
-
   const g1 = asInt(groups[1]);
   if (g0 === 0x2001 && g1 <= 0x01ff) return true; // 2001::/23 IETF Protocol Assignments
   if (g0 === 0x2001 && g1 === 0x0db8) return true; // 2001:db8::/32 documentation
@@ -192,9 +257,8 @@ function isPrivateIPv6(hostname: string): boolean {
     // 2002::/16 6to4: classify by the IPv4 address embedded in bits 16-47.
     return isPrivateIPv4(embeddedIPv4(g1, asInt(groups[2])));
   }
-  if (g0 === 0x3fff && (g1 & 0xf000) === 0) return true; // 3fff::/20 documentation (RFC 9637)
 
-  return false;
+  return !isAllocatedGlobalUnicast(g0, g1);
 }
 
 function isIPv6Literal(hostname: string): boolean {

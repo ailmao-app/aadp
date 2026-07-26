@@ -101,6 +101,33 @@ describe("createStrictUrlPolicy — special-purpose ranges INSIDE 2000::/3", () 
   });
 });
 
+describe("createStrictUrlPolicy — allocation-aware: unallocated/bogon space inside 2000::/3", () => {
+  const policy = createStrictUrlPolicy();
+
+  it.each([
+    ["3000::1", "3000::/4 — never allocated by IANA"],
+    ["2010::1", "gap after 2003::/18, before 2400::/12"],
+    ["2001:1000::1", "gap between 2001:c00::/22 and 2001:1200::/23"],
+    ["2003:4000::1", "first address block past the 2003::/18 allocation boundary"],
+    ["2410::1", "first /16 past the 2400::/12 (APNIC) boundary"],
+  ])("blocks %s (%s) in both check() and checkResolvedAddress()", (addr) => {
+    expect(policy.check(new URL(`http://[${addr}]/`))).toBeDefined();
+    expect(policy.checkResolvedAddress?.(addr, 6)).toBeDefined();
+  });
+
+  it.each([
+    ["2003:3fff::1", "last /32 inside 2003::/18 (RIPE NCC)"],
+    ["240f::1", "last /16 inside 2400::/12 (APNIC)"],
+    ["2600::1", "2600::/12 (ARIN)"],
+    ["2620:fe::fe", "2620::/23 ARIN micro-allocation (Quad9 DNS)"],
+    ["2a01:4f8::1", "2a00::/12 (RIPE NCC)"],
+    ["2c0f:f930::1", "2c00::/12 (AFRINIC)"],
+  ])("allows %s (%s) in both check() and checkResolvedAddress()", (addr) => {
+    expect(policy.check(new URL(`http://[${addr}]/`))).toBeUndefined();
+    expect(policy.checkResolvedAddress?.(addr, 6)).toBeUndefined();
+  });
+});
+
 describe("createStrictUrlPolicy — checkResolvedAddress", () => {
   const policy = createStrictUrlPolicy();
 
