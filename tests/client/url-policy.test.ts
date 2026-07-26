@@ -48,6 +48,34 @@ describe("createStrictUrlPolicy — IPv4-mapped IPv6, hex or dotted-decimal", ()
   });
 });
 
+describe("createStrictUrlPolicy — allow-only-global-unicast IPv6 (not a prefix blocklist)", () => {
+  const policy = createStrictUrlPolicy();
+
+  it.each([
+    ["http://[fec0::1]/", "deprecated site-local fec0::/10"],
+    ["http://[ff02::1]/", "multicast ff00::/8"],
+    ["http://[100::1]/", "discard-only 100::/64"],
+    ["http://[64:ff9b::808:808]/", "well-known NAT64 prefix 64:ff9b::/96"],
+    ["http://[2001:db8::1]/", "documentation 2001:db8::/32 (carved out of 2000::/3)"],
+    ["http://[2001:2::1]/", "benchmarking 2001:2::/48 (carved out of 2000::/3)"],
+    ["http://[2001:10::1]/", "ORCHID 2001:10::/28 (carved out of 2000::/3)"],
+    ["http://[3fff::1]/", "documentation 3fff::/20 (RFC 9637)"],
+  ])("blocks %s (%s)", (url) => {
+    expect(policy.check(new URL(url))).toBeDefined();
+  });
+
+  it("still allows a real global-unicast address outside any carve-out", () => {
+    expect(policy.check(new URL("http://[2001:4860:4860::8888]/"))).toBeUndefined();
+  });
+
+  it("fails closed (blocks) an unparseable IPv6-looking resolved address", () => {
+    // checkResolvedAddress receives raw strings straight from DNS, not
+    // WHATWG-URL-validated hostnames — it must not assume they're
+    // well-formed.
+    expect(policy.checkResolvedAddress?.("garbage", 6)).toBeDefined();
+  });
+});
+
 describe("createStrictUrlPolicy — checkResolvedAddress", () => {
   const policy = createStrictUrlPolicy();
 

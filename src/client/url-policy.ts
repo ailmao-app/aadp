@@ -134,21 +134,28 @@ function expandIPv6Groups(hostname: string): string[] | null {
 }
 
 /**
- * ::1 loopback, fc00::/7 ULA, fe80::/10 link-local, and any IPv4-mapped
- * (`::ffff:a.b.c.d` / `::ffff:HHHH:HHHH`) or IPv4-compatible (`::a.b.c.d`,
- * deprecated) representation of a private IPv4 address, regardless of
- * whether the last 32 bits are written as dotted-decimal or hex groups.
+ * Allow-only-global-unicast, not a blocklist: anything outside `2000::/3`
+ * is treated as non-public — loopback (`::1`), ULA (`fc00::/7`),
+ * link-local (`fe80::/10`), deprecated site-local (`fec0::/10`),
+ * multicast (`ff00::/8`), the discard-only block (`100::/64`), the
+ * well-known NAT64 prefix (`64:ff9b::/96`), and any future or
+ * unrecognized special-purpose range alike — rather than enumerating
+ * known-bad prefixes one at a time and missing whatever isn't listed
+ * (2026-07-26 re-review: a hand-maintained prefix blocklist let
+ * `fec0::/10` and multicast through). A handful of ranges ARE carved out
+ * of `2000::/3` without being publicly routable (IANA IPv6 Special-Purpose
+ * Address Registry) and are excluded explicitly below.
+ *
+ * IPv4-mapped (`::ffff:a.b.c.d` / `::ffff:HHHH:HHHH`) and IPv4-compatible
+ * (`::a.b.c.d`, deprecated) addresses are classified by the embedded IPv4
+ * address instead, regardless of whether it's written as dotted-decimal
+ * or hex groups.
  */
 function isPrivateIPv6(hostname: string): boolean {
   const h = stripBrackets(hostname).toLowerCase();
-  if (h === "::1" || h === "::") return true;
-  if (h.startsWith("fc") || h.startsWith("fd")) return true; // fc00::/7 ULA
-  if (h.startsWith("fe8") || h.startsWith("fe9") || h.startsWith("fea") || h.startsWith("feb")) {
-    return true; // fe80::/10 link-local
-  }
-
   const groups = expandIPv6Groups(h);
-  if (!groups) return false;
+  if (!groups) return true; // fail closed: an unparseable IPv6 literal is never allowed
+
   const asInt = (g: string) => parseInt(g, 16);
   const first5Zero = groups.slice(0, 5).every((g) => asInt(g) === 0);
   const sixth = asInt(groups[5]);
@@ -158,6 +165,17 @@ function isPrivateIPv6(hostname: string): boolean {
     const octets = [(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff];
     return isPrivateIPv4(octets);
   }
+
+  const g0 = asInt(groups[0]);
+  if ((g0 & 0xe000) !== 0x2000) return true; // not in 2000::/3 global unicast
+
+  const g1 = asInt(groups[1]);
+  if (g0 === 0x2001 && g1 === 0x0db8) return true; // 2001:db8::/32 documentation
+  if (g0 === 0x2001 && g1 === 0x0002 && asInt(groups[2]) === 0) return true; // 2001:2::/48 benchmarking
+  if (g0 === 0x2001 && (g1 & 0xfff0) === 0x0010) return true; // 2001:10::/28 ORCHID (deprecated)
+  if (g0 === 0x2001 && (g1 & 0xfff0) === 0x0020) return true; // 2001:20::/28 ORCHIDv2
+  if (g0 === 0x3fff && (g1 & 0xf000) === 0) return true; // 3fff::/20 documentation (RFC 9637)
+
   return false;
 }
 
@@ -185,7 +203,7 @@ export function createStrictUrlPolicy(options: StrictUrlPolicyOptions = {}): Url
       }
       if (isIPv6Literal(hostname)) {
         if (isPrivateIPv6(hostname)) {
-          return `IPv6 address "${hostname}" is loopback, link-local, or ULA`;
+          return `IPv6 address "${hostname}" is not a global-unicast address`;
         }
         return undefined;
       }
@@ -198,7 +216,7 @@ export function createStrictUrlPolicy(options: StrictUrlPolicyOptions = {}): Url
     checkResolvedAddress(address: string, family: 4 | 6): string | undefined {
       if (family === 6) {
         if (isPrivateIPv6(address)) {
-          return `resolved IPv6 address "${address}" is loopback, link-local, or ULA`;
+          return `resolved IPv6 address "${address}" is not a global-unicast address`;
         }
         return undefined;
       }
