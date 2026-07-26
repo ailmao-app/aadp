@@ -72,7 +72,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "validate": "node --loader ts-node/esm src/validator/cli.ts"
+    "validate": "node --loader ts-node/esm src/validator/cli.ts",
+    "check:iana-ipv6": "node scripts/check-iana-ipv6-allowlist.mjs"
   },
   "dependencies": {
     "ajv": "^8.17.1",

@@ -134,9 +134,10 @@ function expandIPv6Groups(hostname: string): string[] | null {
 }
 
 /**
- * IANA IPv6 Global Unicast Address Assignments, snapshot as of the
- * registry's 2019-11-06 change (2630::/12 to ARIN — the most recent
- * entry as of this writing):
+ * IANA IPv6 Global Unicast Address Assignments, mirroring the registry's
+ * ALLOCATED rows exactly, one entry per registry row. Snapshot as of the
+ * registry's 2024-11-01 change (2410::/12 to APNIC — the most recent
+ * allocation as of this writing; registry page last updated 2025-10-10):
  * https://www.iana.org/assignments/ipv6-unicast-address-assignments/
  *
  * Each entry is `[first 32 address bits as (g0 << 16 | g1), prefix length]`.
@@ -146,43 +147,52 @@ function expandIPv6Groups(hostname: string): string[] | null {
  * intentionally NOT listed here — they get dedicated special-purpose
  * handling in `isPrivateIPv6` before this table is consulted.
  *
- * Update process: when IANA adds an allocation, add its row here with the
- * registry's change date in the comment, and extend the boundary tests in
+ * Update process: run `npm run check:iana-ipv6` (after `npm run build`) to
+ * diff this table against the live registry CSV — a security allowlist
+ * must not go stale silently (2026-07-26 re-review: the 2019-era snapshot
+ * blocked the whole valid 2410::/12 APNIC allocation as bogon). When IANA
+ * adds an allocation, add its row here with the registry's change date in
+ * the comment, and extend the boundary tests in
  * `tests/client/url-policy.test.ts`.
+ *
+ * Exported only for `scripts/check-iana-ipv6-allowlist.mjs`; not part of
+ * the package's public API surface.
  */
-const GLOBAL_UNICAST_ALLOCATIONS: ReadonlyArray<readonly [number, number]> = [
-  [0x20010200, 23], // APNIC
-  [0x20010400, 23], // ARIN
-  [0x20010600, 23], // RIPE NCC
-  [0x20010800, 22], // RIPE NCC
-  [0x20010c00, 22], // APNIC
-  [0x20011200, 23], // LACNIC
-  [0x20011400, 22], // RIPE NCC
-  [0x20011800, 23], // ARIN
-  [0x20011a00, 23], // RIPE NCC
-  [0x20011c00, 22], // RIPE NCC
-  [0x20012000, 19], // RIPE NCC
-  [0x20014000, 23], // RIPE NCC
-  [0x20014200, 23], // AFRINIC
-  [0x20014400, 23], // APNIC
-  [0x20014600, 23], // RIPE NCC
-  [0x20014800, 23], // ARIN
-  [0x20014a00, 23], // RIPE NCC
-  [0x20014c00, 23], // RIPE NCC
-  [0x20015000, 20], // RIPE NCC
-  [0x20018000, 19], // APNIC
-  [0x2001a000, 20], // APNIC
-  [0x2001b000, 20], // APNIC
-  [0x20030000, 18], // RIPE NCC
-  [0x24000000, 12], // APNIC
-  [0x26000000, 12], // ARIN
-  [0x26100000, 23], // ARIN
-  [0x26200000, 23], // ARIN
-  [0x26300000, 12], // ARIN (2019-11-06)
-  [0x28000000, 12], // LACNIC
-  [0x2a000000, 12], // RIPE NCC
-  [0x2a100000, 12], // RIPE NCC
-  [0x2c000000, 12], // AFRINIC
+export const GLOBAL_UNICAST_ALLOCATIONS: ReadonlyArray<readonly [number, number]> = [
+  [0x20010200, 23], // 2001:200::/23 APNIC
+  [0x20010400, 23], // 2001:400::/23 ARIN
+  [0x20010600, 23], // 2001:600::/23 RIPE NCC
+  [0x20010800, 22], // 2001:800::/22 RIPE NCC
+  [0x20010c00, 23], // 2001:c00::/23 APNIC (contains 2001:db8::/32 documentation, blocked separately)
+  [0x20010e00, 23], // 2001:e00::/23 APNIC
+  [0x20011200, 23], // 2001:1200::/23 LACNIC
+  [0x20011400, 22], // 2001:1400::/22 RIPE NCC
+  [0x20011800, 23], // 2001:1800::/23 ARIN
+  [0x20011a00, 23], // 2001:1a00::/23 RIPE NCC
+  [0x20011c00, 22], // 2001:1c00::/22 RIPE NCC
+  [0x20012000, 19], // 2001:2000::/19 RIPE NCC
+  [0x20014000, 23], // 2001:4000::/23 RIPE NCC
+  [0x20014200, 23], // 2001:4200::/23 AFRINIC
+  [0x20014400, 23], // 2001:4400::/23 APNIC
+  [0x20014600, 23], // 2001:4600::/23 RIPE NCC
+  [0x20014800, 23], // 2001:4800::/23 ARIN
+  [0x20014a00, 23], // 2001:4a00::/23 RIPE NCC
+  [0x20014c00, 23], // 2001:4c00::/23 RIPE NCC
+  [0x20015000, 20], // 2001:5000::/20 RIPE NCC
+  [0x20018000, 19], // 2001:8000::/19 APNIC
+  [0x2001a000, 20], // 2001:a000::/20 APNIC
+  [0x2001b000, 20], // 2001:b000::/20 APNIC
+  [0x20030000, 18], // 2003::/18 RIPE NCC
+  [0x24000000, 12], // 2400::/12 APNIC
+  [0x24100000, 12], // 2410::/12 APNIC (2024-11-01)
+  [0x26000000, 12], // 2600::/12 ARIN
+  [0x26100000, 23], // 2610::/23 ARIN
+  [0x26200000, 23], // 2620::/23 ARIN
+  [0x26300000, 12], // 2630::/12 ARIN (2019-11-06)
+  [0x28000000, 12], // 2800::/12 LACNIC
+  [0x2a000000, 12], // 2a00::/12 RIPE NCC
+  [0x2a100000, 12], // 2a10::/12 RIPE NCC (2019-06-05)
+  [0x2c000000, 12], // 2c00::/12 AFRINIC
 ];
 
 /** True if the first 32 bits fall inside a prefix IANA has allocated for global unicast. */
@@ -219,7 +229,7 @@ function isAllocatedGlobalUnicast(g0: number, g1: number): boolean {
  *   dereference as a document origin, so conservatively blocking them is
  *   the right trade-off for an SSRF boundary. This also covers Teredo
  *   (`2001::/32`), benchmarking (`2001:2::/48`), and both ORCHID ranges.
- * - `2001:db8::/32` (documentation) sits inside APNIC's `2001:c00::/22`
+ * - `2001:db8::/32` (documentation) sits inside APNIC's `2001:c00::/23`
  *   allocation and is rejected.
  * - `2002::/16` (6to4) embeds an IPv4 address in bits 16-47; it is
  *   classified by that embedded IPv4 address (`2002:7f00:1::` embeds
