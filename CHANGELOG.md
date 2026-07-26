@@ -4,6 +4,12 @@ All notable changes to `ail-aadp` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Protocol compatibility follows [ADR-0004](docs/adr/0004-backward-compatibility.md); released schemas are immutable and wire-breaking changes require a new protocol version.
 
+## 1.0.2 - 2026-07-26
+
+### Changed
+
+- Yêu cầu Node.js 20.18.1 trở lên để tương thích với transport HTTP đã được tăng cường bảo mật.
+
 ## 1.0.1 - 2026-07-25
 
 ### Changed
