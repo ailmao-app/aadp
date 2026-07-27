@@ -151,32 +151,27 @@ export function collectAdvertisedUrls(manifest: ManifestV1): string[] {
 }
 
 /**
- * A URL for a document that does not exist, derived from a published one
- * by replacing its last path segment — or `undefined` when that cannot be
- * done safely.
+ * Why the negative-path checks never invent their own target.
  *
- * AADP fixes each document's authoritative URL but no routing template
- * (spec v1.0 §5), so there is no general way to name a resource that does
- * not exist. Swapping the last segment is only sound for a plain
- * path-based URL: with a query string the identity may live in the query
- * (`/entity?id=article:1`), so the derived URL can still resolve to a
- * real resource and a conformant server would be marked failing. Those
- * shapes require `negativeTargets` from the caller instead.
+ * AADP fixes each document's *authoritative* URL and nothing else (spec
+ * v1.0 §5): there is no routing template, so no URL can be constructed
+ * that is known to name a resource this deployment does not publish.
+ * Nothing about a URL's shape proves otherwise — an entity URL may be
+ * content-addressed (`/objects/sha256-abc`), signed, opaque, or served
+ * through a gateway that answers unknown paths with a generic HTML 404
+ * that is not an AADP response at all. Swapping a path segment on any of
+ * those produces a request the deployment never promised anything about,
+ * and failing it would fail a conformant server.
+ *
+ * So the target must be named by whoever knows the deployment's routing:
+ * `negativeTargets` from the caller. Without it the checks report
+ * `inconclusive` — the error envelope was not exercised, which is not the
+ * same as it being correct.
  */
-export function deriveUnknownUrl(url: string, segment: string): string | undefined {
-  const target = new URL(url);
-  if (target.search !== "" || target.hash !== "") return undefined;
-  const segments = target.pathname.split("/");
-  const last = segments[segments.length - 1];
-  if (segments.length < 2 || last === "") return undefined;
-  segments[segments.length - 1] = last.includes(".") ? `${segment}.json` : segment;
-  target.pathname = segments.join("/");
-  return target.toString();
-}
-
-/** Fixed, obviously-synthetic name so a derived URL cannot collide with a real one. */
-const UNKNOWN_ENTITY_SEGMENT = "aadp-conformance-runner-does-not-exist";
-const UNKNOWN_TYPE_SEGMENT = "aadp-conformance-runner-unknown-type";
+const NEGATIVE_TARGET_RATIONALE =
+  "AADP defines each document's authoritative URL but no routing template, so this runner cannot " +
+  "construct a URL that is known not to exist without risking a request the deployment never " +
+  "promised anything about";
 
 /**
  * Runs the shared shape assertions for one cache-validated document kind:
@@ -541,14 +536,11 @@ export const CHECKS: Check[] = [
     title: "Unknown entity id returns 404 with a schema-valid not_found envelope",
     requires: ["traversal.entity"],
     async run(ctx) {
-      const sampleUrl = required(ctx.state.firstEntityUrl, "first entity url");
-      const target =
-        ctx.negativeTargets.unknownEntityUrl ?? deriveUnknownUrl(sampleUrl, UNKNOWN_ENTITY_SEGMENT);
+      const target = ctx.negativeTargets.unknownEntityUrl;
       if (!target) {
         return ctx.inconclusive(
-          `Cannot name a non-existent entity from "${sampleUrl}": AADP defines no routing template, and this ` +
-            `URL's identity may live in its query string. Pass negativeTargets.unknownEntityUrl ` +
-            `(CLI: --unknown-entity-url) to exercise the error envelope.`
+          `No entity URL to probe: ${NEGATIVE_TARGET_RATIONALE}. Pass negativeTargets.unknownEntityUrl ` +
+            `(CLI: --unknown-entity-url) with a URL your deployment does not publish, to exercise the error envelope.`
         );
       }
       await assertErrorEnvelope(ctx, target, "not_found", (url) => fetchEntity(url, ctx.scoped(url)));
@@ -560,12 +552,11 @@ export const CHECKS: Check[] = [
     title: "Unpublished resource type returns 404 with a schema-valid unsupported_type envelope",
     requires: ["traversal.sitemap"],
     async run(ctx) {
-      const sampleUrl = required(ctx.state.firstSitemapUrl, "first sitemap url");
-      const target = ctx.negativeTargets.unknownTypeUrl ?? deriveUnknownUrl(sampleUrl, UNKNOWN_TYPE_SEGMENT);
+      const target = ctx.negativeTargets.unknownTypeUrl;
       if (!target) {
         return ctx.inconclusive(
-          `Cannot name an unpublished type from "${sampleUrl}": AADP defines no routing template for sitemap ` +
-            `URLs. Pass negativeTargets.unknownTypeUrl (CLI: --unknown-type-url) to exercise the error envelope.`
+          `No sitemap URL to probe: ${NEGATIVE_TARGET_RATIONALE}. Pass negativeTargets.unknownTypeUrl ` +
+            `(CLI: --unknown-type-url) with a sitemap URL for a type your deployment does not publish.`
         );
       }
       await assertErrorEnvelope(ctx, target, "unsupported_type", (url) => fetchSitemap(url, null, ctx.scoped(url)));
@@ -599,14 +590,13 @@ export const CHECKS: Check[] = [
 ];
 
 /**
- * Requests `target` (a URL that must not resolve) and asserts the AADP
- * error envelope contract of spec v1.0 §9: HTTP 404, a schema-valid
- * envelope, and `expectedCode`.
+ * Requests `target` — a URL the caller stated the deployment does not
+ * publish — and asserts the AADP error envelope contract of spec v1.0
+ * §9: HTTP 404, a schema-valid envelope, and `expectedCode`.
  *
- * A *successful* response is reported as inconclusive rather than as a
- * failure: when the target was derived rather than supplied, a 200 means
- * the runner failed to name something unpublished — which says nothing
- * about the server's error handling.
+ * A successful response is a failure, not an inconclusive result: the
+ * target is caller-supplied (this runner never derives one), so a 200
+ * means the deployment served something it was declared not to have.
  */
 async function assertErrorEnvelope(
   ctx: CheckContext,
@@ -629,9 +619,9 @@ async function assertErrorEnvelope(
   // Signalled outside the catch: `ctx.*` throws to unwind the check, and
   // doing that inside the `try` would land in this function's own handler.
   if (!err) {
-    return ctx.inconclusive(
-      `${target} returned a successful response, so it names something the deployment publishes; ` +
-        `the error envelope was never exercised`
+    return ctx.fail(
+      `${target} was supplied as a URL this deployment does not publish, but it returned a successful ` +
+        `response instead of a 404 ${expectedCode} envelope`
     );
   }
 

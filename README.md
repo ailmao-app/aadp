@@ -276,13 +276,15 @@ Exit codes are stable for CI:
 
 A `skipped` check reached no verdict — a prerequisite failed, the server publishes nothing to exercise, or a traversal budget stopped the walk early. It is never evidence of conformance. When the skip means the run itself was incomplete, the verdict is `inconclusive` and the exit code is `4`, never `0`.
 
-AADP fixes each document's authoritative URL but no routing template, so the error-envelope checks derive a "does not exist" URL only from a plain path-based URL. If your entity or sitemap URLs are query-based, opaque or signed, supply the targets explicitly instead of accepting an inconclusive result:
+AADP fixes each document's authoritative URL but no routing template, so the runner cannot construct a URL that is known not to exist — entity URLs may be content-addressed, signed, opaque, or served through a gateway that answers unknown paths outside AADP entirely. The two error-envelope checks are therefore `inconclusive` until you name the targets yourself:
 
 ```bash
 npx aadp-conformance https://example.com \
-  --unknown-entity-url "https://example.com/entity?id=does-not-exist" \
-  --unknown-type-url "https://example.com/sitemap?type=does-not-exist"
+  --unknown-entity-url "https://example.com/ai/v1.0/entities/article/does-not-exist.json" \
+  --unknown-type-url "https://example.com/ai/v1.0/sitemaps/does-not-exist.json"
 ```
+
+A URL you pass here is taken as authoritative: if the deployment answers it successfully, the check fails.
 
 Headers you pass with `--header` are sent to the target origin only. A manifest can point its sitemap, entity, policy or documentation URLs at any host, so those requests drop your headers unless you allow-list them with `--cross-origin-safe-header`.
 
@@ -293,9 +295,14 @@ The runner never sends a credential it was not given, never follows a URL from a
 ```ts
 import { runConformance, exitCodeFor, renderTextReport } from "ail-aadp/conformance";
 
+// Throws UnsupportedConformanceVersionError or InvalidConformanceOptionsError
+// for a run it cannot perform; a nonconformant deployment is reported, not thrown.
 const report = await runConformance({
   baseUrl: "https://example.com",
   maxPages: 20,
+  negativeTargets: {
+    unknownEntityUrl: "https://example.com/ai/v1.0/entities/article/does-not-exist.json",
+  },
   onCheck: (check) => console.log(check.status, check.id),
 });
 

@@ -15,6 +15,7 @@ import type { ClientOptions } from "../client/v1.0/index.js";
 import { CHECKS, CheckSignal, type Check, type CheckContext, type CheckOutcome, type RunState } from "./checks.js";
 import {
   SUPPORTED_CONFORMANCE_VERSIONS,
+  InvalidConformanceOptionsError,
   UnsupportedConformanceVersionError,
   type CheckResult,
   type CheckStatus,
@@ -55,6 +56,61 @@ function assertSupportedVersion(version: string): asserts version is Conformance
   }
 }
 
+/**
+ * Numeric options, and the smallest value each accepts. `maxRedirects`
+ * allows `0` — "do not follow redirects" is a meaningful policy — while
+ * every limit whose job is to permit at least one unit of work does not:
+ * `maxPages: 0` would make the first fetch throw a budget error, which
+ * `runCheck` would otherwise record as a failing check and blame on the
+ * deployment.
+ */
+export const NUMERIC_OPTION_MINIMUMS = {
+  timeoutMs: 1,
+  maxRedirects: 0,
+  maxResponseBytes: 1,
+  maxPages: 1,
+  maxEntities: 1,
+  maxSitemaps: 1,
+  deadlineMs: 1,
+} as const satisfies Record<string, number>;
+
+/**
+ * Rejects unusable options before any request is made. A configuration
+ * mistake must surface as an error the caller owns, never as a
+ * nonconformant verdict for the deployment under test.
+ */
+function assertUsableOptions(options: ConformanceOptions): void {
+  for (const [name, minimum] of Object.entries(NUMERIC_OPTION_MINIMUMS)) {
+    const value = options[name as keyof typeof NUMERIC_OPTION_MINIMUMS];
+    if (value === undefined) continue;
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new InvalidConformanceOptionsError(name, `expected a finite number, got ${JSON.stringify(value)}`);
+    }
+    if (!Number.isInteger(value)) {
+      throw new InvalidConformanceOptionsError(name, `expected an integer, got ${value}`);
+    }
+    if (value < minimum) {
+      throw new InvalidConformanceOptionsError(name, `must be at least ${minimum}, got ${value}`);
+    }
+  }
+
+  for (const [name, url] of Object.entries(options.negativeTargets ?? {})) {
+    if (url === undefined) continue;
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new InvalidConformanceOptionsError(`negativeTargets.${name}`, `not an absolute URL: ${JSON.stringify(url)}`);
+    }
+    if (!/^https?:$/.test(parsed.protocol)) {
+      throw new InvalidConformanceOptionsError(
+        `negativeTargets.${name}`,
+        `must be an http(s) URL, got "${parsed.protocol}"`
+      );
+    }
+  }
+}
+
 function emptySummary(): ConformanceSummary {
   return { total: 0, passed: 0, failed: 0, warnings: 0, skipped: 0, inconclusive: 0 };
 }
@@ -89,12 +145,15 @@ function describeThrown(err: unknown): { message: string; details?: string[] } {
  *
  * Never throws for a nonconformant server — that is what the report is
  * for. It throws only when the *request to run* is unusable
- * (`UnsupportedConformanceVersionError`, an unparseable base URL), so a
- * caller cannot mistake a misconfigured run for a passing deployment.
+ * (`UnsupportedConformanceVersionError`, `InvalidConformanceOptionsError`,
+ * an unparseable base URL), so a caller can neither mistake a
+ * misconfigured run for a passing deployment nor blame their own
+ * misconfiguration on the deployment.
  */
 export async function runConformance(options: ConformanceOptions): Promise<ConformanceReport> {
   const version = options.version ?? "1.0";
   assertSupportedVersion(version);
+  assertUsableOptions(options);
 
   let origin: string;
   try {

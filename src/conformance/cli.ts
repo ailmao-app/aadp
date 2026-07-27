@@ -46,10 +46,16 @@ interface CliOptions {
   color?: boolean;
 }
 
-function positiveInt(value: string): number {
+/**
+ * Parses an integer flag. Range checking is deliberately left to
+ * `runConformance`, so the CLI and a programmatic caller enforce exactly
+ * the same bounds instead of drifting apart (`--max-redirects 0`, for
+ * one, is a meaningful value the API accepts).
+ */
+function intOption(value: string): number {
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new InvalidArgumentError(`expected a positive integer, got "${value}"`);
+  if (!Number.isInteger(parsed)) {
+    throw new InvalidArgumentError(`expected an integer, got "${value}"`);
   }
   return parsed;
 }
@@ -87,13 +93,13 @@ program
     `AADP wire version to exercise (${SUPPORTED_CONFORMANCE_VERSIONS.join(", ")})`,
     "1.0"
   )
-  .option("--timeout <ms>", "per-request timeout in milliseconds", positiveInt)
-  .option("--max-redirects <n>", "maximum redirect hops per request", positiveInt)
-  .option("--max-response-bytes <n>", "maximum response body size in bytes", positiveInt)
-  .option("--max-pages <n>", "traversal budget: maximum sitemap pages fetched", positiveInt)
-  .option("--max-entities <n>", "traversal budget: maximum entities fetched", positiveInt)
-  .option("--max-sitemaps <n>", "traversal budget: maximum sitemaps the index may list", positiveInt)
-  .option("--deadline <ms>", "traversal budget: wall-clock deadline for the walk", positiveInt)
+  .option("--timeout <ms>", "per-request timeout in milliseconds", intOption)
+  .option("--max-redirects <n>", "maximum redirect hops per request", intOption)
+  .option("--max-response-bytes <n>", "maximum response body size in bytes", intOption)
+  .option("--max-pages <n>", "traversal budget: maximum sitemap pages fetched", intOption)
+  .option("--max-entities <n>", "traversal budget: maximum entities fetched", intOption)
+  .option("--max-sitemaps <n>", "traversal budget: maximum sitemaps the index may list", intOption)
+  .option("--deadline <ms>", "traversal budget: wall-clock deadline for the walk", intOption)
   .option(
     "--allow-private-network",
     "allow the target (and its redirects) to resolve to a private/loopback/link-local address. " +

@@ -65,7 +65,7 @@ export interface ConformanceSummary {
  * failed check: the server was never fully exercised.
  */
 export interface ConformanceFatal {
-  code: "unsupported_version" | "unreachable" | "invalid_options";
+  code: "unsupported_version" | "unreachable";
   message: string;
 }
 
@@ -125,16 +125,17 @@ export interface ConformanceOptions {
   /** Header names that may survive a cross-origin hop. See `FetchJsonOptions`. */
   crossOriginSafeHeaders?: string[];
   /**
-   * URLs to use for the negative-path checks, instead of deriving them.
+   * URLs for the negative-path checks. Required to exercise them: AADP
+   * fixes the *authoritative* URL of each document but no routing
+   * template, so no URL can be constructed that is known not to exist —
+   * an entity URL may be content-addressed, signed, opaque, or behind a
+   * gateway that answers unknown paths outside AADP entirely. The runner
+   * therefore never derives one, and reports `inconclusive` for these
+   * two checks when they are not supplied.
    *
-   * AADP fixes the *authoritative* URL of each document but no routing
-   * template, so there is no general way to construct the URL of a
-   * resource that does not exist: a query-based, opaque or signed entity
-   * URL can resolve to something real when its last path segment is
-   * swapped. Deriving is therefore attempted only for a plain path-based
-   * URL with no query, and any other shape reports `inconclusive` asking
-   * for these. Supply them to exercise the error envelope on a
-   * deployment whose URLs the runner cannot reason about.
+   * A URL given here is treated as authoritative: if the deployment
+   * answers it successfully, that is a failure, not an inconclusive
+   * result.
    */
   negativeTargets?: {
     /** URL of an entity that does not exist. Must answer `404` + a `not_found` envelope. */
@@ -146,6 +147,23 @@ export interface ConformanceOptions {
   failOnWarning?: boolean;
   /** Called as each check settles, for progress output. Never throws into the run. */
   onCheck?: (result: CheckResult) => void;
+}
+
+/**
+ * A `ConformanceOptions` value is unusable. Thrown before any request is
+ * made, so a misconfigured runner can never be recorded as a
+ * nonconformant deployment.
+ */
+export class InvalidConformanceOptionsError extends Error {
+  readonly code = "invalid_options" as const;
+
+  constructor(
+    public readonly option: string,
+    message: string
+  ) {
+    super(`Invalid conformance option "${option}": ${message}`);
+    this.name = "InvalidConformanceOptionsError";
+  }
 }
 
 /** `options.version` names a protocol version this runner cannot exercise. */

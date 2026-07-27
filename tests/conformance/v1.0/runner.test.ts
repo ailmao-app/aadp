@@ -11,7 +11,7 @@ import {
   type ConformanceOptions,
   type ConformanceReport,
 } from "../../../src/conformance/index.js";
-import { deriveUnknownUrl } from "../../../src/conformance/checks.js";
+import { InvalidConformanceOptionsError } from "../../../src/conformance/index.js";
 import { createPermissiveUrlPolicy } from "../../../src/client/url-policy.js";
 
 /**
@@ -31,6 +31,20 @@ const permissive = (extra: Partial<ConformanceOptions> = {}): ConformanceOptions
   urlPolicy: createPermissiveUrlPolicy(),
   ...extra,
 });
+
+/**
+ * URLs the mock server is known not to publish. The runner never derives
+ * a negative target (AADP defines no routing template), so a run that
+ * should exercise the error envelope has to name them.
+ */
+const withNegativeTargets = (extra: Partial<ConformanceOptions> = {}): ConformanceOptions =>
+  permissive({
+    negativeTargets: {
+      unknownEntityUrl: `${server.baseUrl}/ai/v1.0/entities/example/aadp-conformance-does-not-exist.json`,
+      unknownTypeUrl: `${server.baseUrl}/ai/v1.0/sitemaps/aadp-conformance-unknown-type.json`,
+    },
+    ...extra,
+  });
 
 interface ObservedRequest {
   path: string;
@@ -85,7 +99,7 @@ describe("runConformance against a conformant v1.0 server", () => {
   let report: ConformanceReport;
 
   beforeAll(async () => {
-    report = await runConformance(permissive());
+    report = await runConformance(withNegativeTargets());
   });
 
   it("reports a passing run with no failed check", () => {
@@ -150,7 +164,7 @@ describe("runConformance against a conformant v1.0 server", () => {
   });
 
   it("treats warnings as failures only when asked", async () => {
-    const strict = await runConformance(permissive({ failOnWarning: true }));
+    const strict = await runConformance(withNegativeTargets({ failOnWarning: true }));
     expect(strict.summary.warnings).toBeGreaterThan(0);
     expect(strict.summary.failed).toBe(0);
     expect(strict.status).toBe("failed");
@@ -179,7 +193,7 @@ describe("traversal budgets", () => {
     // (1 page) = 4 page fetches for the whole run, of which
     // traversal.sitemap already made the first. A budget of exactly 4
     // must therefore complete; 3 must not.
-    const complete = await runConformance(permissive({ maxPages: 4 }));
+    const complete = await runConformance(withNegativeTargets({ maxPages: 4 }));
     expect(byId(complete, "pagination.contract").status).toBe("passed");
     expect(complete.status).toBe("passed");
 
@@ -332,52 +346,42 @@ describe("caller headers never leak to a cross-origin URL a document supplied", 
   });
 });
 
-describe("negative-path checks only assert what the wire contract implies", () => {
-  it("derives a negative target only from a plain path-based URL", () => {
-    // A query-based, opaque or signed URL may carry the identity outside
-    // the path, so swapping the last segment can still hit a real
-    // resource — the runner must ask for an explicit target instead of
-    // failing a conformant server.
-    expect(deriveUnknownUrl("https://api.example/entity?id=article:1", "nope")).toBeUndefined();
-    expect(deriveUnknownUrl("https://api.example/entities/", "nope")).toBeUndefined();
-    expect(deriveUnknownUrl("https://api.example/ai/v1.0/entities/example/1.json", "nope")).toBe(
-      "https://api.example/ai/v1.0/entities/example/nope.json"
-    );
-    expect(deriveUnknownUrl("https://api.example/e/1", "nope")).toBe("https://api.example/e/nope");
-  });
-
-  it("still exercises the error envelope on a path-based deployment", async () => {
+describe("negative-path checks never invent a target", () => {
+  it("is inconclusive, not passing and not failing, when no target is supplied", async () => {
     const report = await runConformance(permissive());
-    expect(byId(report, "errors.not_found").status).toBe("passed");
-    expect(byId(report, "errors.unsupported_type").status).toBe("passed");
+    for (const id of ["errors.not_found", "errors.unsupported_type"]) {
+      const check = byId(report, id);
+      expect(check.status).toBe("skipped");
+      expect(check.inconclusive).toBe(true);
+      expect(check.message).toMatch(/no routing template/);
+    }
+    // Nothing failed, but the error envelope was never exercised, so the
+    // run must not certify the deployment.
+    expect(report.summary.failed).toBe(0);
+    expect(report.status).toBe("inconclusive");
+    expect(exitCodeFor(report)).toBe(4);
   });
 
-  it("uses caller-supplied negative targets when given", async () => {
-    const report = await runConformance(
-      permissive({
-        negativeTargets: {
-          unknownEntityUrl: `${server.baseUrl}/ai/v1.0/entities/example/nope-not-here.json`,
-          unknownTypeUrl: `${server.baseUrl}/ai/v1.0/sitemaps/nope-not-a-type.json`,
-        },
-      })
-    );
+  it("exercises the envelope when the caller names targets", async () => {
+    const report = await runConformance(withNegativeTargets());
     expect(byId(report, "errors.not_found").status).toBe("passed");
     expect(byId(report, "errors.unsupported_type").status).toBe("passed");
+    expect(report.status).toBe("passed");
+    expect(exitCodeFor(report)).toBe(0);
   });
 
-  it("reports inconclusive, not failed, when the negative target turns out to exist", async () => {
-    // Pointing the check at a *published* entity mimics a derived URL that
-    // happens to resolve: nothing was learned about error handling, so the
-    // result must not be a failure against a conformant server.
+  it("fails when a caller-named target resolves instead of 404ing", async () => {
+    // The caller stated this URL is not published; the deployment serving
+    // it is a contract violation, not an inconclusive result.
     const report = await runConformance(
       permissive({
         negativeTargets: { unknownEntityUrl: `${server.baseUrl}/ai/v1.0/entities/example/item-1.json` },
       })
     );
     const check = byId(report, "errors.not_found");
-    expect(check.status).toBe("skipped");
-    expect(check.inconclusive).toBe(true);
-    expect(check.message).toMatch(/successful response/);
+    expect(check.status).toBe("failed");
+    expect(check.message).toMatch(/returned a successful response/);
+    expect(exitCodeFor(report)).toBe(1);
   });
 });
 
@@ -413,6 +417,39 @@ describe("URL policy", () => {
 describe("invalid input", () => {
   it("throws rather than reporting a verdict for an unusable base URL", async () => {
     await expect(runConformance({ baseUrl: "not a url" })).rejects.toThrow(TypeError);
+  });
+
+  it.each([
+    ["maxPages", 0],
+    ["maxEntities", 0],
+    ["maxSitemaps", 0],
+    ["timeoutMs", 0],
+    ["deadlineMs", 0],
+    ["maxResponseBytes", 0],
+    ["maxRedirects", -1],
+    ["maxPages", -5],
+    ["timeoutMs", 1.5],
+    ["maxPages", Number.NaN],
+    ["deadlineMs", Number.POSITIVE_INFINITY],
+  ])("rejects %s = %s as a caller error, never as a failing deployment", async (option, value) => {
+    // A budget of 0 would otherwise make the first fetch throw
+    // `AadpDiscoveryBudgetExceededError`, which would be recorded as a
+    // failed check and blamed on the server.
+    await expect(runConformance(permissive({ [option]: value }))).rejects.toThrow(InvalidConformanceOptionsError);
+  });
+
+  it("accepts maxRedirects = 0, which means do not follow redirects", async () => {
+    const report = await runConformance(withNegativeTargets({ maxRedirects: 0 }));
+    expect(report.summary.total).toBeGreaterThan(0);
+  });
+
+  it("rejects a negative target that is not an http(s) URL", async () => {
+    await expect(
+      runConformance(permissive({ negativeTargets: { unknownEntityUrl: "not a url" } }))
+    ).rejects.toThrow(InvalidConformanceOptionsError);
+    await expect(
+      runConformance(permissive({ negativeTargets: { unknownTypeUrl: "file:///etc/passwd" } }))
+    ).rejects.toThrow(InvalidConformanceOptionsError);
   });
 
   it("records an unreachable origin as a fatal, not as a passing run", async () => {

@@ -22,6 +22,7 @@ export {
 export { CHECKS, collectAdvertisedUrls, type Check } from "./checks.js";
 export {
   SUPPORTED_CONFORMANCE_VERSIONS,
+  InvalidConformanceOptionsError,
   UnsupportedConformanceVersionError,
   type CheckResult,
   type CheckStatus,
