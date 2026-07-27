@@ -4,6 +4,20 @@ All notable changes to `ail-aadp` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Protocol compatibility follows [ADR-0004](docs/adr/0004-backward-compatibility.md); released schemas are immutable and wire-breaking changes require a new protocol version.
 
+## Unreleased
+
+### Added
+
+- Added a standalone conformance runner at `ail-aadp/conformance`: `runConformance(...)` executes the AADP v1.0 checks against a live deployment and returns a structured report, with no test framework and no repository fixtures involved.
+- Added the `aadp-conformance` binary (`npx aadp-conformance https://example.com`) with a text report, a `--json` report for CI, `--output` to a file, and stable exit codes (`0` conformant, `1` failed check, `2` run could not be performed, `3` protocol version mismatch).
+- Added traversal controls to the runner and CLI: protocol version, request timeout, redirect and response-size caps, sitemap page/entity/sitemap-count budgets, and a wall-clock deadline. A run stopped by a budget is reported as `skipped`, never as a pass.
+- Added `probeUrl` to the client transport for liveness-checking URLs a manifest advertises, under the same URL policy, timeout, redirect and size limits as `fetchJson`.
+- Added a clean-install test that packs the real tarball, unpacks it elsewhere, and runs the packed CLI against a live server.
+
+### Changed
+
+- `fetchJson` now also returns the final response `headers`, the `bodyBytes` actually read, and the final `url` after redirects, so callers can verify HTTP-level behaviour without a second unchecked `fetch`. A `304` response now has its (required-empty) body read under the size cap instead of being discarded unread.
+
 ## 1.0.2 - 2026-07-26
 
 ### Changed

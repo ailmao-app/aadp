@@ -45,6 +45,25 @@ export interface FetchJsonResult {
   status: number;
   contentType: string | null;
   data: unknown;
+  /**
+   * Response headers of the final (non-redirect) hop. Exposed so callers
+   * that verify HTTP-level behaviour — the conformance runner's `ETag` /
+   * `Last-Modified` / conditional-GET checks — do not have to re-fetch
+   * through a bare `fetch()` that bypasses this module's URL policy.
+   */
+  headers: Headers;
+  /** Body size actually read, in bytes. `0` for a well-formed 304. */
+  bodyBytes: number;
+  /** Final URL after redirects. Differs from the requested URL only when redirected. */
+  url: string;
+}
+
+export interface ProbeResult {
+  status: number;
+  contentType: string | null;
+  headers: Headers;
+  /** Final URL after redirects. */
+  url: string;
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -210,13 +229,31 @@ async function readBodyCapped(
 }
 
 /**
- * Fetches `url` as JSON with SSRF policy, timeout, manual-redirect
- * capping, and streamed size limiting. Returns the raw `{status,
- * contentType, data}` triple — callers decide how to interpret non-2xx
- * status (e.g. as an AADP error envelope) since that varies by call
- * site.
+ * Response of the final (non-redirect) hop, handed to a `requestWithPolicy`
+ * handler while the request's timeout is still armed.
  */
-export async function fetchJson(url: string, options: FetchJsonOptions = {}): Promise<FetchJsonResult> {
+interface FinalResponse {
+  res: Response;
+  finalUrl: string;
+  signal: AbortSignal;
+  maxResponseBytes: number;
+  timeoutMs: number;
+}
+
+/**
+ * Shared request loop: per-hop URL policy check, pinned-DNS dispatcher,
+ * timeout, manual redirect capping, and cross-origin header stripping.
+ * The final response is handed to `handle` *inside* the timeout scope, so
+ * a handler that reads the body is time-bounded too. Every reader of this
+ * module (`fetchJson`, `probeUrl`) goes through here, so there is exactly
+ * one place where the safety properties documented at the top of this
+ * file are enforced.
+ */
+async function requestWithPolicy<T>(
+  url: string,
+  options: FetchJsonOptions,
+  handle: (final: FinalResponse) => Promise<T>
+): Promise<T> {
   const policy = options.urlPolicy ?? DEFAULT_STRICT_POLICY;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
@@ -249,11 +286,6 @@ export async function fetchJson(url: string, options: FetchJsonOptions = {}): Pr
         throw err;
       }
 
-      if (res.status === 304) {
-        await res.body?.cancel().catch(() => {});
-        return { status: 304, contentType: res.headers.get("content-type"), data: undefined };
-      }
-
       const isRedirect = res.status >= 300 && res.status < 400 && res.headers.has("location");
       if (isRedirect) {
         // Drain the (typically empty) redirect body to release the socket.
@@ -269,31 +301,97 @@ export async function fetchJson(url: string, options: FetchJsonOptions = {}): Pr
         continue;
       }
 
-      const contentType = res.headers.get("content-type");
-      let raw: string;
-      try {
-        raw = await readBodyCapped(res, current.toString(), maxResponseBytes, controller.signal);
-      } catch (err) {
-        if (isAbortError(err)) {
-          throw new TimeoutError(current.toString(), timeoutMs);
-        }
-        throw err;
-      }
-
-      if (!isJsonContentType(contentType)) {
-        throw new InvalidContentTypeError(current.toString(), contentType);
-      }
-
-      let data: unknown;
-      try {
-        data = JSON.parse(raw);
-      } catch (err) {
-        throw new MalformedJsonError(current.toString(), err);
-      }
-
-      return { status: res.status, contentType, data };
+      return await handle({
+        res,
+        finalUrl: current.toString(),
+        signal: controller.signal,
+        maxResponseBytes,
+        timeoutMs,
+      });
     } finally {
       clearTimeout(timer);
     }
   }
+}
+
+/** Reads the body with the size cap, mapping an abort to `TimeoutError`. */
+async function readBodyOrTimeout(final: FinalResponse): Promise<string> {
+  try {
+    return await readBodyCapped(final.res, final.finalUrl, final.maxResponseBytes, final.signal);
+  } catch (err) {
+    if (isAbortError(err)) {
+      throw new TimeoutError(final.finalUrl, final.timeoutMs);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Fetches `url` as JSON with SSRF policy, timeout, manual-redirect
+ * capping, and streamed size limiting. Returns the raw `{status,
+ * contentType, data}` triple — callers decide how to interpret non-2xx
+ * status (e.g. as an AADP error envelope) since that varies by call
+ * site.
+ *
+ * A 304 short-circuits before the content-type/JSON checks (there is no
+ * body to type), returning `data: undefined` — but its body is still read
+ * under the size cap so `bodyBytes` can prove the response really was
+ * empty, as RFC 9110 §15.4.5 requires.
+ */
+export async function fetchJson(url: string, options: FetchJsonOptions = {}): Promise<FetchJsonResult> {
+  return requestWithPolicy(url, options, async (final) => {
+    const contentType = final.res.headers.get("content-type");
+    const raw = await readBodyOrTimeout(final);
+    const bodyBytes = Buffer.byteLength(raw, "utf8");
+
+    if (final.res.status === 304) {
+      return {
+        status: 304,
+        contentType,
+        data: undefined,
+        headers: final.res.headers,
+        bodyBytes,
+        url: final.finalUrl,
+      };
+    }
+
+    if (!isJsonContentType(contentType)) {
+      throw new InvalidContentTypeError(final.finalUrl, contentType);
+    }
+
+    let data: unknown;
+    try {
+      data = JSON.parse(raw);
+    } catch (err) {
+      throw new MalformedJsonError(final.finalUrl, err);
+    }
+
+    return { status: final.res.status, contentType, data, headers: final.res.headers, bodyBytes, url: final.finalUrl };
+  });
+}
+
+/**
+ * Requests `url` under the same policy/timeout/redirect/size guarantees as
+ * `fetchJson` but reports only the response metadata, discarding the body
+ * without parsing it or requiring a JSON content type. Intended for
+ * liveness probing of URLs a document *advertises* (policy pages, license
+ * URLs, interface documentation), which are ordinary web pages rather than
+ * AADP documents — a dead-link check must not report `text/html` as a
+ * failure.
+ */
+export async function probeUrl(url: string, options: FetchJsonOptions = {}): Promise<ProbeResult> {
+  return requestWithPolicy(url, options, async (final) => {
+    // Read (and discard) under the cap rather than leaving the socket
+    // holding an unbounded body: same resource bound as fetchJson.
+    await readBodyOrTimeout(final).catch((err) => {
+      if (err instanceof ResponseTooLargeError) return "";
+      throw err;
+    });
+    return {
+      status: final.res.status,
+      contentType: final.res.headers.get("content-type"),
+      headers: final.res.headers,
+      url: final.finalUrl,
+    };
+  });
 }
