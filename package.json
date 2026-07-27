@@ -46,6 +46,10 @@
       "types": "./dist/validator/index.d.ts",
       "import": "./dist/validator/index.js"
     },
+    "./conformance": {
+      "types": "./dist/conformance/index.d.ts",
+      "import": "./dist/conformance/index.js"
+    },
     "./canonical-json": {
       "types": "./dist/canonical-json/index.d.ts",
       "import": "./dist/canonical-json/index.js"
@@ -65,7 +69,8 @@
     "README.md"
   ],
   "bin": {
-    "aadp-validate": "dist/validator/cli.js"
+    "aadp-validate": "dist/validator/cli.js",
+    "aadp-conformance": "dist/conformance/cli.js"
   },
   "engines": {
     "node": ">=20.18.1"
@@ -74,6 +79,7 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "validate": "node dist/validator/cli.js",
+    "conformance": "node dist/conformance/cli.js",
     "check:iana-ipv6": "node scripts/check-iana-ipv6-allowlist.mjs"
   },
   "dependencies": {
