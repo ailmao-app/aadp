@@ -272,8 +272,19 @@ Exit codes are stable for CI:
 | `1` | At least one check failed |
 | `2` | The run could not be performed (unreachable origin, unusable options) |
 | `3` | The deployment does not speak the requested AADP version |
+| `4` | Nothing failed, but the run left checks unfinished, so it certifies nothing |
 
-A `skipped` check reached no verdict — a prerequisite failed, the server publishes nothing to exercise, or a traversal budget stopped the walk early. It is never evidence of conformance.
+A `skipped` check reached no verdict — a prerequisite failed, the server publishes nothing to exercise, or a traversal budget stopped the walk early. It is never evidence of conformance. When the skip means the run itself was incomplete, the verdict is `inconclusive` and the exit code is `4`, never `0`.
+
+AADP fixes each document's authoritative URL but no routing template, so the error-envelope checks derive a "does not exist" URL only from a plain path-based URL. If your entity or sitemap URLs are query-based, opaque or signed, supply the targets explicitly instead of accepting an inconclusive result:
+
+```bash
+npx aadp-conformance https://example.com \
+  --unknown-entity-url "https://example.com/entity?id=does-not-exist" \
+  --unknown-type-url "https://example.com/sitemap?type=does-not-exist"
+```
+
+Headers you pass with `--header` are sent to the target origin only. A manifest can point its sitemap, entity, policy or documentation URLs at any host, so those requests drop your headers unless you allow-list them with `--cross-origin-safe-header`.
 
 The runner never sends a credential it was not given, never follows a URL from a document it has not validated, and never treats free text in a manifest as an instruction.
 

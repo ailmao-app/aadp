@@ -115,6 +115,12 @@ describe("aadp-conformance, run from the packed tarball", () => {
     expect(result.stdout).toContain("RESULT: FAILED");
   });
 
+  it("exits 4 when a traversal budget leaves the run unfinished", async () => {
+    const result = await runCli([server.baseUrl, "--allow-private-network", "--max-pages", "1"]);
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("RESULT: INCONCLUSIVE");
+  });
+
   it("exits 2 when the run cannot be performed", async () => {
     // Default strict policy refuses the loopback origin: the run never
     // reaches a verdict, which must not look like a pass.

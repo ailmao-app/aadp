@@ -34,6 +34,8 @@ interface CliOptions {
   maxEntities?: number;
   maxSitemaps?: number;
   deadline?: number;
+  unknownEntityUrl?: string;
+  unknownTypeUrl?: string;
   allowPrivateNetwork?: boolean;
   header: string[];
   crossOriginSafeHeader: string[];
@@ -76,7 +78,8 @@ program
   .description(
     "Run the AADP conformance suite against a deployment.\n\n" +
       "Exit codes: 0 conformant, 1 one or more checks failed, 2 the run could not be " +
-      "performed, 3 the deployment does not speak the requested AADP version."
+      "performed, 3 the deployment does not speak the requested AADP version, 4 the run " +
+      "left checks unfinished and certifies nothing."
   )
   .argument("<base-url>", "origin to exercise, e.g. https://example.com")
   .option(
@@ -104,6 +107,15 @@ program
       "dropped when a document points at another origin.",
     collect,
     []
+  )
+  .option(
+    "--unknown-entity-url <url>",
+    "URL of an entity that does not exist, for the not_found envelope check. Needed when entity " +
+      "URLs are query-based, opaque or signed, since AADP defines no routing template to derive one."
+  )
+  .option(
+    "--unknown-type-url <url>",
+    "URL of a sitemap for an unpublished type, for the unsupported_type envelope check."
   )
   .option("--json", "print the machine-readable report to stdout instead of the text report")
   .option("--output <file>", "also write the JSON report to <file>")
@@ -148,6 +160,12 @@ program
       failOnWarning: opts.failOnWarning,
       onCheck,
     };
+    if (opts.unknownEntityUrl || opts.unknownTypeUrl) {
+      options.negativeTargets = {
+        ...(opts.unknownEntityUrl ? { unknownEntityUrl: opts.unknownEntityUrl } : {}),
+        ...(opts.unknownTypeUrl ? { unknownTypeUrl: opts.unknownTypeUrl } : {}),
+      };
+    }
     const headers = parseHeaders(opts.header);
     if (Object.keys(headers).length > 0) options.headers = headers;
     if (opts.crossOriginSafeHeader.length > 0) options.crossOriginSafeHeaders = opts.crossOriginSafeHeader;

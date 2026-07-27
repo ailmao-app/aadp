@@ -65,7 +65,21 @@ export interface MockServerHandle {
   close: () => Promise<void>;
 }
 
-export async function startMockServer(): Promise<MockServerHandle> {
+export interface MockServerOptions {
+  /**
+   * Cache-validator behaviour:
+   * - `strong` (default): strong `ETag`, weak comparison on
+   *   `If-None-Match` — the conformant behaviour of spec v1.0 §7.
+   * - `weak-exact`: weak `ETag` that only 304s on a byte-identical weak
+   *   validator, rejecting the strong form. Deliberately nonconformant,
+   *   used to prove the conformance runner sends both forms and catches
+   *   an exact-match-only implementation.
+   */
+  cacheValidator?: "strong" | "weak-exact";
+}
+
+export async function startMockServer(options: MockServerOptions = {}): Promise<MockServerHandle> {
+  const weakExact = options.cacheValidator === "weak-exact";
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const host = req.headers.host!;
@@ -89,12 +103,15 @@ export async function startMockServer(): Promise<MockServerHandle> {
       checksum: string,
       updatedAt: string
     ) => {
-      const etag = `"${checksum}"`;
+      const strongEtag = `"${checksum}"`;
+      const etag = weakExact ? `W/${strongEtag}` : strongEtag;
       const ifNoneMatch = req.headers["if-none-match"];
       const hits =
         typeof ifNoneMatch === "string" &&
-        (ifNoneMatch.trim() === "*" ||
-          (ifNoneMatch.startsWith("W/") ? ifNoneMatch.slice(2) : ifNoneMatch) === etag);
+        (weakExact
+          ? ifNoneMatch.trim() === etag
+          : ifNoneMatch.trim() === "*" ||
+            (ifNoneMatch.startsWith("W/") ? ifNoneMatch.slice(2) : ifNoneMatch) === strongEtag);
       if (hits) {
         res.writeHead(304, { ETag: etag, "Last-Modified": new Date(updatedAt).toUTCString() });
         res.end();

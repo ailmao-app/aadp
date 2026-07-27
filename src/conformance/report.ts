@@ -88,7 +88,13 @@ export function renderSummary(report: ConformanceReport): string {
     // to mistake for "fine": it means no verdict was reached.
     lines.push("skipped checks reached no verdict and are not evidence of conformance");
   }
-  lines.push(report.status === "passed" ? "RESULT: PASSED" : "RESULT: FAILED");
+  if (summary.inconclusive > 0) {
+    lines.push(
+      `${summary.inconclusive} check(s) could not complete (traversal budget, or no target could be derived); ` +
+        "the run does not certify conformance"
+    );
+  }
+  lines.push(`RESULT: ${report.status.toUpperCase()}`);
   return lines.join("\n");
 }
 
@@ -101,10 +107,12 @@ export function renderJsonReport(report: ConformanceReport): string {
  * Exit code contract for CI. Stable across releases:
  * `0` conformant, `1` at least one failed check, `2` the run could not be
  * performed (unreachable origin, unusable options), `3` the deployment
- * does not speak the requested protocol version.
+ * does not speak the requested protocol version, `4` the run completed
+ * without a failure but left checks unfinished, so it certifies nothing.
  */
-export function exitCodeFor(report: ConformanceReport): 0 | 1 | 2 | 3 {
+export function exitCodeFor(report: ConformanceReport): 0 | 1 | 2 | 3 | 4 {
   if (report.fatal?.code === "unsupported_version") return 3;
   if (report.fatal) return 2;
-  return report.status === "passed" ? 0 : 1;
+  if (report.status === "failed") return 1;
+  return report.status === "inconclusive" ? 4 : 0;
 }

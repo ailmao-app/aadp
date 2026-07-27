@@ -35,6 +35,18 @@ export interface CheckResult {
   message?: string;
   /** Supporting lines (schema errors, offending URLs, ...). */
   details?: string[];
+  /**
+   * Set on a `skipped` check that *should* have reached a verdict but
+   * could not — a traversal budget stopped the walk, or no trustworthy
+   * target could be derived. Such a run is reported `inconclusive`
+   * overall rather than `passed`: an incomplete run must never be
+   * certified as conformant by exit code `0`.
+   *
+   * A skip without this flag is a legitimate nothing-to-test (the server
+   * publishes no `usage_guidance`, no sitemaps, ...), which does not
+   * taint the verdict.
+   */
+  inconclusive?: boolean;
 }
 
 export interface ConformanceSummary {
@@ -43,6 +55,8 @@ export interface ConformanceSummary {
   failed: number;
   warnings: number;
   skipped: number;
+  /** Subset of `skipped` that left the run incomplete. See `CheckResult.inconclusive`. */
+  inconclusive: number;
 }
 
 /**
@@ -65,8 +79,13 @@ export interface ConformanceReport {
   started_at: string;
   finished_at: string;
   duration_ms: number;
-  /** `failed` if any check failed, a fatal occurred, or `failOnWarning` and any check warned. */
-  status: "passed" | "failed";
+  /**
+   * `failed` if any check failed, a fatal occurred, or `failOnWarning`
+   * and any check warned. `inconclusive` if nothing failed but the run
+   * could not complete every check it should have (see
+   * `CheckResult.inconclusive`) — never reported as `passed`.
+   */
+  status: "passed" | "failed" | "inconclusive";
   summary: ConformanceSummary;
   fatal?: ConformanceFatal;
   checks: CheckResult[];
@@ -105,6 +124,24 @@ export interface ConformanceOptions {
   headers?: Record<string, string>;
   /** Header names that may survive a cross-origin hop. See `FetchJsonOptions`. */
   crossOriginSafeHeaders?: string[];
+  /**
+   * URLs to use for the negative-path checks, instead of deriving them.
+   *
+   * AADP fixes the *authoritative* URL of each document but no routing
+   * template, so there is no general way to construct the URL of a
+   * resource that does not exist: a query-based, opaque or signed entity
+   * URL can resolve to something real when its last path segment is
+   * swapped. Deriving is therefore attempted only for a plain path-based
+   * URL with no query, and any other shape reports `inconclusive` asking
+   * for these. Supply them to exercise the error envelope on a
+   * deployment whose URLs the runner cannot reason about.
+   */
+  negativeTargets?: {
+    /** URL of an entity that does not exist. Must answer `404` + a `not_found` envelope. */
+    unknownEntityUrl?: string;
+    /** URL of a sitemap for an unpublished type. Must answer `404` + an `unsupported_type` envelope. */
+    unknownTypeUrl?: string;
+  };
   /** Treat `warning` results as failures in `report.status`. Default false. */
   failOnWarning?: boolean;
   /** Called as each check settles, for progress output. Never throws into the run. */

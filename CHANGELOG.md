@@ -9,10 +9,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pro
 ### Added
 
 - Added a standalone conformance runner at `ail-aadp/conformance`: `runConformance(...)` executes the AADP v1.0 checks against a live deployment and returns a structured report, with no test framework and no repository fixtures involved.
-- Added the `aadp-conformance` binary (`npx aadp-conformance https://example.com`) with a text report, a `--json` report for CI, `--output` to a file, and stable exit codes (`0` conformant, `1` failed check, `2` run could not be performed, `3` protocol version mismatch).
-- Added traversal controls to the runner and CLI: protocol version, request timeout, redirect and response-size caps, sitemap page/entity/sitemap-count budgets, and a wall-clock deadline. A run stopped by a budget is reported as `skipped`, never as a pass.
+- Added the `aadp-conformance` binary (`npx aadp-conformance https://example.com`) with a text report, a `--json` report for CI, `--output` to a file, and stable exit codes (`0` conformant, `1` failed check, `2` run could not be performed, `3` protocol version mismatch, `4` run left unfinished).
+- Added traversal controls to the runner and CLI: protocol version, request timeout, redirect and response-size caps, sitemap page/entity/sitemap-count budgets, and a wall-clock deadline. Every document fetch is charged to one shared budget, and a run a budget cut short is reported `inconclusive` with exit code `4` — never as a pass.
+- Added `negativeTargets` (`--unknown-entity-url`, `--unknown-type-url`) for the error-envelope checks. AADP defines no routing template, so a "does not exist" URL is derived only from a plain path-based URL; a query-based, opaque or signed URL reports `inconclusive` and asks for an explicit target instead of failing a conformant deployment.
 - Added `probeUrl` to the client transport for liveness-checking URLs a manifest advertises, under the same URL policy, timeout, redirect and size limits as `fetchJson`.
 - Added a clean-install test that packs the real tarball, unpacks it elsewhere, and runs the packed CLI against a live server.
+- Added header scoping to the runner: headers the caller configures reach the target origin only, and a URL a document points at another host receives them only when explicitly allow-listed through `crossOriginSafeHeaders` — a manifest cannot make the runner forward an API key to a third party.
+- Added both validator forms to the conditional-GET checks. Spec v1.0 §7 mandates weak comparison, so `"checksum"` and `W/"checksum"` are both sent; a server that only honours the exact tag it emitted now fails.
 
 ### Changed
 

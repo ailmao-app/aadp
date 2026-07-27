@@ -11,6 +11,7 @@ import {
   type ConformanceOptions,
   type ConformanceReport,
 } from "../../../src/conformance/index.js";
+import { deriveUnknownUrl } from "../../../src/conformance/checks.js";
 import { createPermissiveUrlPolicy } from "../../../src/client/url-policy.js";
 
 /**
@@ -31,12 +32,29 @@ const permissive = (extra: Partial<ConformanceOptions> = {}): ConformanceOptions
   ...extra,
 });
 
-/** Minimal one-route server, for origins the shared mock cannot express. */
+interface ObservedRequest {
+  path: string;
+  auth?: string;
+  trace?: string;
+}
+
+/**
+ * Minimal one-route server, for origins the shared mock cannot express.
+ * `observe` records the headers each request arrived with, which is how
+ * the cross-origin header-scoping tests see what actually left the runner.
+ */
 async function startTinyServer(
-  handler: (path: string) => { status: number; body: string; contentType?: string }
+  handler: (path: string) => { status: number; body: string; contentType?: string },
+  observe?: (request: ObservedRequest) => void
 ): Promise<{ baseUrl: string; close: () => Promise<void> }> {
   const srv: Server = createServer((req, res) => {
-    const { status, body, contentType } = handler(new URL(req.url ?? "/", "http://localhost").pathname);
+    const path = new URL(req.url ?? "/", "http://localhost").pathname;
+    observe?.({
+      path,
+      auth: req.headers.authorization,
+      trace: typeof req.headers["x-trace"] === "string" ? req.headers["x-trace"] : undefined,
+    });
+    const { status, body, contentType } = handler(path);
     res.writeHead(status, { "Content-Type": contentType ?? "application/json" });
     res.end(body);
   });
@@ -141,15 +159,32 @@ describe("runConformance against a conformant v1.0 server", () => {
 });
 
 describe("traversal budgets", () => {
-  it("stops the pagination walk at maxPages and reports it as skipped, not passed", async () => {
+  it("stops the pagination walk at maxPages and refuses to certify the run", async () => {
     // The example sitemap paginates 5 items at 2 per page, so one page is
     // not enough to finish the walk.
     const report = await runConformance(permissive({ maxPages: 1 }));
     const pagination = byId(report, "pagination.contract");
     expect(pagination.status).toBe("skipped");
+    expect(pagination.inconclusive).toBe(true);
     expect(pagination.message).toMatch(/traversal budget/i);
-    // A budget stop is this runner's limit, not the server's defect.
-    expect(report.status).toBe("passed");
+    // A budget stop is this runner's limit, not the server's defect — but
+    // an unfinished walk must not exit 0 as if conformance were proven.
+    expect(report.summary.failed).toBe(0);
+    expect(report.status).toBe("inconclusive");
+    expect(exitCodeFor(report)).toBe(4);
+  });
+
+  it("charges every sitemap page fetch to the shared budget, with no duplicate preflight", async () => {
+    // 2 sitemaps: `example` (5 items / 2 per page = 3 pages) and `note`
+    // (1 page) = 4 page fetches for the whole run, of which
+    // traversal.sitemap already made the first. A budget of exactly 4
+    // must therefore complete; 3 must not.
+    const complete = await runConformance(permissive({ maxPages: 4 }));
+    expect(byId(complete, "pagination.contract").status).toBe("passed");
+    expect(complete.status).toBe("passed");
+
+    const short = await runConformance(permissive({ maxPages: 3 }));
+    expect(byId(short, "pagination.contract").inconclusive).toBe(true);
   });
 
   it("fails when the index declares more sitemaps than maxSitemaps allows", async () => {
@@ -197,6 +232,166 @@ describe("version handling", () => {
       expect(exitCodeFor(report)).toBe(3);
     } finally {
       await tiny.close();
+    }
+  });
+});
+
+describe("caller headers never leak to a cross-origin URL a document supplied", () => {
+  it("sends configured headers to the target origin but not to a third-party host it points at", async () => {
+    const seen: ObservedRequest[] = [];
+    // Stands in for a host the manifest points at: it records whether the
+    // caller's credential arrived, and 404s everything so the run fails
+    // fast. What is asserted is the header, not the verdict.
+    const thirdParty = await startTinyServer(() => ({ status: 404, body: "{}" }), (req) => seen.push(req));
+
+    // The origin under test advertises a policy URL and a sitemap index on
+    // the third-party host.
+    const target = await startTinyServer(
+      (path) =>
+        path === "/.well-known/ai-manifest.json"
+          ? {
+              status: 200,
+              body: JSON.stringify({
+                aadp_version: "1.0",
+                application: {
+                  name: "Cross origin",
+                  description: "Points its discovery and policy URLs at another host.",
+                  publisher: { name: "P", url: thirdParty.baseUrl },
+                },
+                discovery: { sitemap_index: `${thirdParty.baseUrl}/ai/v1.0/sitemap-index.json` },
+                policies: { robots: `${thirdParty.baseUrl}/robots.txt`, terms: `${thirdParty.baseUrl}/terms` },
+              }),
+            }
+          : { status: 404, body: "{}" },
+      (req) => seen.push(req)
+    );
+
+    try {
+      await runConformance({
+        baseUrl: target.baseUrl,
+        urlPolicy: createPermissiveUrlPolicy(),
+        headers: { Authorization: "Bearer super-secret" },
+      });
+    } finally {
+      await target.close();
+      await thirdParty.close();
+    }
+
+    const home = new URL(target.baseUrl).port;
+    const homeRequests = seen.filter((r) => r.path.startsWith("/.well-known"));
+    expect(homeRequests.length).toBeGreaterThan(0);
+    expect(homeRequests.every((r) => r.auth === "Bearer super-secret")).toBe(true);
+    expect(home).toBeTruthy();
+
+    // The third-party host was contacted for the sitemap index and the
+    // advertised policy URLs — and saw no credential on any of them.
+    const foreign = seen.filter((r) => !r.path.startsWith("/.well-known"));
+    expect(foreign.length).toBeGreaterThan(0);
+    expect(foreign.map((r) => r.auth)).toEqual(foreign.map(() => undefined));
+  });
+
+  it("keeps a header the caller explicitly allow-listed as cross-origin-safe", async () => {
+    const seen: ObservedRequest[] = [];
+    const thirdParty = await startTinyServer(() => ({ status: 404, body: "{}" }), (req) => seen.push(req));
+    const target = await startTinyServer(
+      (path) =>
+        path === "/.well-known/ai-manifest.json"
+          ? {
+              status: 200,
+              body: JSON.stringify({
+                aadp_version: "1.0",
+                application: {
+                  name: "Cross origin",
+                  description: "Points its discovery and policy URLs at another host.",
+                  publisher: { name: "P", url: thirdParty.baseUrl },
+                },
+                discovery: { sitemap_index: `${thirdParty.baseUrl}/ai/v1.0/sitemap-index.json` },
+                policies: { robots: `${thirdParty.baseUrl}/robots.txt`, terms: `${thirdParty.baseUrl}/terms` },
+              }),
+            }
+          : { status: 404, body: "{}" },
+      (req) => seen.push(req)
+    );
+
+    try {
+      await runConformance({
+        baseUrl: target.baseUrl,
+        urlPolicy: createPermissiveUrlPolicy(),
+        headers: { Authorization: "Bearer super-secret", "X-Trace": "run-1" },
+        crossOriginSafeHeaders: ["x-trace"],
+      });
+    } finally {
+      await target.close();
+      await thirdParty.close();
+    }
+
+    const foreign = seen.filter((r) => !r.path.startsWith("/.well-known"));
+    expect(foreign.length).toBeGreaterThan(0);
+    expect(foreign.every((r) => r.trace === "run-1")).toBe(true);
+    expect(foreign.every((r) => r.auth === undefined)).toBe(true);
+  });
+});
+
+describe("negative-path checks only assert what the wire contract implies", () => {
+  it("derives a negative target only from a plain path-based URL", () => {
+    // A query-based, opaque or signed URL may carry the identity outside
+    // the path, so swapping the last segment can still hit a real
+    // resource — the runner must ask for an explicit target instead of
+    // failing a conformant server.
+    expect(deriveUnknownUrl("https://api.example/entity?id=article:1", "nope")).toBeUndefined();
+    expect(deriveUnknownUrl("https://api.example/entities/", "nope")).toBeUndefined();
+    expect(deriveUnknownUrl("https://api.example/ai/v1.0/entities/example/1.json", "nope")).toBe(
+      "https://api.example/ai/v1.0/entities/example/nope.json"
+    );
+    expect(deriveUnknownUrl("https://api.example/e/1", "nope")).toBe("https://api.example/e/nope");
+  });
+
+  it("still exercises the error envelope on a path-based deployment", async () => {
+    const report = await runConformance(permissive());
+    expect(byId(report, "errors.not_found").status).toBe("passed");
+    expect(byId(report, "errors.unsupported_type").status).toBe("passed");
+  });
+
+  it("uses caller-supplied negative targets when given", async () => {
+    const report = await runConformance(
+      permissive({
+        negativeTargets: {
+          unknownEntityUrl: `${server.baseUrl}/ai/v1.0/entities/example/nope-not-here.json`,
+          unknownTypeUrl: `${server.baseUrl}/ai/v1.0/sitemaps/nope-not-a-type.json`,
+        },
+      })
+    );
+    expect(byId(report, "errors.not_found").status).toBe("passed");
+    expect(byId(report, "errors.unsupported_type").status).toBe("passed");
+  });
+
+  it("reports inconclusive, not failed, when the negative target turns out to exist", async () => {
+    // Pointing the check at a *published* entity mimics a derived URL that
+    // happens to resolve: nothing was learned about error handling, so the
+    // result must not be a failure against a conformant server.
+    const report = await runConformance(
+      permissive({
+        negativeTargets: { unknownEntityUrl: `${server.baseUrl}/ai/v1.0/entities/example/item-1.json` },
+      })
+    );
+    const check = byId(report, "errors.not_found");
+    expect(check.status).toBe("skipped");
+    expect(check.inconclusive).toBe(true);
+    expect(check.message).toMatch(/successful response/);
+  });
+});
+
+describe("conditional GET is checked in both validator forms", () => {
+  it("fails a server that only honours the exact weak ETag it emitted", async () => {
+    const weak = await startMockServer({ cacheValidator: "weak-exact" });
+    try {
+      const report = await runConformance({ baseUrl: weak.baseUrl, urlPolicy: createPermissiveUrlPolicy() });
+      const cache = byId(report, "http.cache.sitemap_index");
+      expect(cache.status).toBe("failed");
+      expect(cache.message).toMatch(/weak comparison/);
+      expect(exitCodeFor(report)).toBe(1);
+    } finally {
+      await weak.close();
     }
   });
 });
