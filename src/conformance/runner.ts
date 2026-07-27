@@ -10,7 +10,7 @@
 import { createRequire } from "node:module";
 import { createStrictUrlPolicy, createPermissiveUrlPolicy } from "../client/url-policy.js";
 import { scopeHeadersToOrigin } from "../client/http.js";
-import { createDiscoveryBudget } from "../client/discovery-budget.js";
+import { createDiscoveryBudget, AadpDiscoveryBudgetExceededError } from "../client/discovery-budget.js";
 import type { ClientOptions } from "../client/v1.0/index.js";
 import { CHECKS, CheckSignal, type Check, type CheckContext, type CheckOutcome, type RunState } from "./checks.js";
 import {
@@ -320,6 +320,20 @@ async function runCheck(
         ...(err.outcome.message ? { message: err.outcome.message } : {}),
         ...(err.outcome.details ? { details: err.outcome.details } : {}),
         ...("inconclusive" in err.outcome && err.outcome.inconclusive ? { inconclusive: true } : {}),
+      };
+    }
+    // Handled here, once, for every check: running out of the caller's
+    // traversal budget is the runner stopping itself, not the deployment
+    // misbehaving — recording it as a failed check would blame the server
+    // for the caller's own limit. The run is incomplete, so the skip is
+    // marked inconclusive and the overall verdict cannot be "passed".
+    if (err instanceof AadpDiscoveryBudgetExceededError) {
+      return {
+        ...base,
+        status: "skipped",
+        duration_ms: Date.now() - startedMs,
+        message: `Stopped by this run's traversal budget: ${err.message}`,
+        inconclusive: true,
       };
     }
     const described = describeThrown(err);

@@ -76,12 +76,15 @@ export interface MockServerOptions {
    *   an exact-match-only implementation.
    */
   cacheValidator?: "strong" | "weak-exact";
+  /** Observes every inbound request before the fixture handles it. */
+  observeRequest?: (path: string) => void;
 }
 
 export async function startMockServer(options: MockServerOptions = {}): Promise<MockServerHandle> {
   const weakExact = options.cacheValidator === "weak-exact";
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
+    options.observeRequest?.(url.pathname);
     const host = req.headers.host!;
 
     const send = (status: number, body: unknown, extraHeaders: Record<string, string> = {}) => {

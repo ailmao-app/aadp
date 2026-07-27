@@ -58,7 +58,12 @@ interface ObservedRequest {
  * the cross-origin header-scoping tests see what actually left the runner.
  */
 async function startTinyServer(
-  handler: (path: string) => { status: number; body: string; contentType?: string },
+  handler: (path: string) => {
+    status: number;
+    body: string;
+    contentType?: string;
+    headers?: Record<string, string>;
+  },
   observe?: (request: ObservedRequest) => void
 ): Promise<{ baseUrl: string; close: () => Promise<void> }> {
   const srv: Server = createServer((req, res) => {
@@ -68,8 +73,8 @@ async function startTinyServer(
       auth: req.headers.authorization,
       trace: typeof req.headers["x-trace"] === "string" ? req.headers["x-trace"] : undefined,
     });
-    const { status, body, contentType } = handler(path);
-    res.writeHead(status, { "Content-Type": contentType ?? "application/json" });
+    const { status, body, contentType, headers } = handler(path);
+    res.writeHead(status, { "Content-Type": contentType ?? "application/json", ...headers });
     res.end(body);
   });
   await new Promise<void>((resolve) => srv.listen(0, "127.0.0.1", resolve));
@@ -190,15 +195,46 @@ describe("traversal budgets", () => {
 
   it("charges every sitemap page fetch to the shared budget, with no duplicate preflight", async () => {
     // 2 sitemaps: `example` (5 items / 2 per page = 3 pages) and `note`
-    // (1 page) = 4 page fetches for the whole run, of which
-    // traversal.sitemap already made the first. A budget of exactly 4
-    // must therefore complete; 3 must not.
+    // (1 page) = 4 traversal page fetches, of which traversal.sitemap
+    // already made the first. A budget of exactly 4 must therefore finish
+    // pagination; later cache and negative checks consume their own share
+    // of the same whole-run request budget.
     const complete = await runConformance(withNegativeTargets({ maxPages: 4 }));
     expect(byId(complete, "pagination.contract").status).toBe("passed");
-    expect(complete.status).toBe("passed");
+    expect(byId(complete, "http.cache.sitemap").inconclusive).toBe(true);
+    expect(complete.status).toBe("inconclusive");
 
     const short = await runConformance(permissive({ maxPages: 3 }));
     expect(byId(short, "pagination.contract").inconclusive).toBe(true);
+  });
+
+  it("never sends more sitemap or entity requests than the whole-run budgets", async () => {
+    const seen: string[] = [];
+    const counted = await startMockServer({ observeRequest: (path) => seen.push(path) });
+    const options = {
+      baseUrl: counted.baseUrl,
+      urlPolicy: createPermissiveUrlPolicy(),
+      maxPages: 7,
+      maxEntities: 4,
+      negativeTargets: {
+        unknownEntityUrl: `${counted.baseUrl}/ai/v1.0/entities/example/missing.json`,
+        unknownTypeUrl: `${counted.baseUrl}/ai/v1.0/sitemaps/missing.json`,
+      },
+    };
+
+    try {
+      const report = await runConformance(options);
+      const sitemapRequests = seen.filter((path) => path.startsWith("/ai/v1.0/sitemaps/"));
+      const entityRequests = seen.filter((path) => path.startsWith("/ai/v1.0/entities/"));
+
+      expect(sitemapRequests).toHaveLength(options.maxPages);
+      expect(entityRequests).toHaveLength(options.maxEntities);
+      expect(byId(report, "errors.not_found").inconclusive).toBe(true);
+      expect(byId(report, "errors.unsupported_type").inconclusive).toBe(true);
+      expect(report.status).toBe("inconclusive");
+    } finally {
+      await counted.close();
+    }
   });
 
   it("fails when the index declares more sitemaps than maxSitemaps allows", async () => {
@@ -441,6 +477,46 @@ describe("invalid input", () => {
   it("accepts maxRedirects = 0, which means do not follow redirects", async () => {
     const report = await runConformance(withNegativeTargets({ maxRedirects: 0 }));
     expect(report.summary.total).toBeGreaterThan(0);
+  });
+
+  it("enforces maxRedirects as the exact number of redirect hops allowed", async () => {
+    const manifest = JSON.stringify({
+      aadp_version: "1.0",
+      application: {
+        name: "Redirect boundary",
+        description: "Exercises the redirect-hop option.",
+        publisher: { name: "P", url: "https://example.com" },
+      },
+      discovery: { sitemap_index: "https://example.com/sitemap-index.json" },
+      policies: { robots: "https://example.com/robots.txt", terms: "https://example.com/terms" },
+    });
+    const oneHop = await startTinyServer((path) =>
+      path === "/.well-known/ai-manifest.json"
+        ? { status: 302, body: "", headers: { Location: "/manifest.json" } }
+        : { status: 200, body: manifest }
+    );
+    const twoHops = await startTinyServer((path) => {
+      if (path === "/.well-known/ai-manifest.json") {
+        return { status: 302, body: "", headers: { Location: "/manifest-hop.json" } };
+      }
+      if (path === "/manifest-hop.json") {
+        return { status: 302, body: "", headers: { Location: "/manifest.json" } };
+      }
+      return { status: 200, body: manifest };
+    });
+
+    try {
+      const run = (baseUrl: string, maxRedirects: number) =>
+        runConformance({ baseUrl, maxRedirects, urlPolicy: createPermissiveUrlPolicy() });
+
+      expect(byId(await run(oneHop.baseUrl, 0), "manifest.http").status).toBe("failed");
+      expect(byId(await run(oneHop.baseUrl, 1), "manifest.http").status).toBe("passed");
+      expect(byId(await run(twoHops.baseUrl, 1), "manifest.http").status).toBe("failed");
+      expect(byId(await run(twoHops.baseUrl, 2), "manifest.http").status).toBe("passed");
+    } finally {
+      await oneHop.close();
+      await twoHops.close();
+    }
   });
 
   it("rejects a negative target that is not an http(s) URL", async () => {

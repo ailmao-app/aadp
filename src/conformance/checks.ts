@@ -174,19 +174,55 @@ const NEGATIVE_TARGET_RATIONALE =
   "promised anything about";
 
 /**
+ * Charges the shared budget for one sitemap-page or entity request, then
+ * performs it. `maxPages`/`maxEntities` are documented as bounding these
+ * requests across the whole run, so every check that requests one of
+ * those document kinds — traversal, pagination, cache validators,
+ * negative targets — must come through here (or charge before its own
+ * fetch); a check making an uncharged request would let the runner exceed
+ * the load the caller configured.
+ */
+async function budgetedFetchSitemap(
+  ctx: CheckContext,
+  url: string,
+  cursor: string | null | undefined,
+  context: string
+): Promise<SitemapV1> {
+  chargeDiscoveryBudget(ctx.budget, "page", context);
+  return fetchSitemap(url, cursor, ctx.scoped(url));
+}
+
+async function budgetedFetchEntity(ctx: CheckContext, url: string, context: string): Promise<EntityV1> {
+  chargeDiscoveryBudget(ctx.budget, "entity", context);
+  return fetchEntity(url, ctx.scoped(url));
+}
+
+/**
  * Runs the shared shape assertions for one cache-validated document kind:
  * strong `ETag` equal to the declared checksum, a parseable `Last-Modified`
  * agreeing with the document's own timestamp, and a conditional GET that
  * answers `304` with no body — for both the strong and weak form of the
  * tag (spec v1.0 §7).
+ *
+ * Makes three requests (one full GET, two conditional GETs). Each is
+ * charged to the shared budget under `budgetKind` — a 304 answer carries
+ * no document, but it is still a request this runner sends, and the
+ * page/entity budgets are documented as request bounds for the whole
+ * run. The sitemap index has no budget kind and passes `undefined`.
  */
 async function assertCacheValidators(
   ctx: CheckContext,
   url: string,
   declaredChecksum: string,
-  declaredTimestamp: string
+  declaredTimestamp: string,
+  budgetKind: "page" | "entity" | undefined,
+  context: string
 ): Promise<void> {
   const client = ctx.scoped(url);
+  const charge = () => {
+    if (budgetKind) chargeDiscoveryBudget(ctx.budget, budgetKind, context);
+  };
+  charge();
   const first = await fetchJson(url, client);
   const etag = first.headers.get("etag");
   if (!etag) ctx.fail(`${url} returned no ETag; a document carrying a checksum must expose one`);
@@ -214,6 +250,7 @@ async function assertCacheValidators(
   // ETag would send the weak tag twice whenever the server answered with
   // one, letting an exact-match-only implementation through.
   for (const tag of [strongTag, `W/${strongTag}`]) {
+    charge();
     const conditional = await fetchJson(url, { ...client, headers: { ...client.headers, "If-None-Match": tag } });
     if (conditional.status !== 304) {
       ctx.fail(
@@ -354,8 +391,7 @@ export const CHECKS: Check[] = [
     async run(ctx) {
       const index = required(ctx.state.index, "sitemap index");
       const ref = index.sitemaps[0];
-      chargeDiscoveryBudget(ctx.budget, "page", "traversal.sitemap");
-      const sitemap = await fetchSitemap(ref.url, null, ctx.scoped(ref.url));
+      const sitemap = await budgetedFetchSitemap(ctx, ref.url, null, "traversal.sitemap");
       ctx.state.firstSitemapUrl = ref.url;
       ctx.state.firstSitemap = sitemap;
       if (sitemap.items.length > MAX_PAGE_SIZE) {
@@ -388,8 +424,7 @@ export const CHECKS: Check[] = [
     async run(ctx) {
       const sitemap = required(ctx.state.firstSitemap, "first sitemap");
       const item = sitemap.items[0];
-      chargeDiscoveryBudget(ctx.budget, "entity", "traversal.entity");
-      const entity = await fetchEntity(item.url, ctx.scoped(item.url));
+      const entity = await budgetedFetchEntity(ctx, item.url, "traversal.entity");
       ctx.state.firstEntityUrl = item.url;
       ctx.state.firstEntity = entity;
 
@@ -417,48 +452,38 @@ export const CHECKS: Check[] = [
       // the client helper yields items, not pages, so a per-page size cap
       // cannot be checked through it. The page `traversal.sitemap`
       // already fetched is reused instead of being requested again.
-      try {
-        for (const ref of index.sitemaps) {
-          const seenIds = new Set<string>();
-          const seenCursors = new Set<string>();
-          let cursor: string | null | undefined;
-          for (;;) {
-            const reusable =
-              cursor === undefined && ref.url === ctx.state.firstSitemapUrl ? ctx.state.firstSitemap : undefined;
-            let page: SitemapV1;
-            if (reusable) {
-              page = reusable;
-            } else {
-              chargeDiscoveryBudget(ctx.budget, "page", "pagination.contract");
-              page = await fetchSitemap(ref.url, cursor, ctx.scoped(ref.url));
-            }
+      // Budget exhaustion propagates to the runner, which records it as
+      // an inconclusive skip for this check.
+      for (const ref of index.sitemaps) {
+        const seenIds = new Set<string>();
+        const seenCursors = new Set<string>();
+        let cursor: string | null | undefined;
+        for (;;) {
+          const reusable =
+            cursor === undefined && ref.url === ctx.state.firstSitemapUrl ? ctx.state.firstSitemap : undefined;
+          const page: SitemapV1 =
+            reusable ?? (await budgetedFetchSitemap(ctx, ref.url, cursor, "pagination.contract"));
 
-            if (page.type !== ref.type) {
-              ctx.fail(`Sitemap ${ref.url} declares type "${page.type}" but the index lists it as "${ref.type}"`);
-            }
-            if (page.items.length > MAX_PAGE_SIZE) {
-              ctx.fail(`Sitemap ${ref.url} returned ${page.items.length} items, above the ${MAX_PAGE_SIZE}-item page cap`);
-            }
-            for (const item of page.items) {
-              if (seenIds.has(item.id)) {
-                ctx.fail(`Sitemap ${ref.url} yielded id "${item.id}" on more than one page`);
-              }
-              seenIds.add(item.id);
-            }
-
-            cursor = page.cursor?.next ?? null;
-            if (!cursor) break;
-            if (seenCursors.has(cursor)) {
-              ctx.fail(`Sitemap ${ref.url} repeats cursor "${cursor}"; the walk would never terminate`);
-            }
-            seenCursors.add(cursor);
+          if (page.type !== ref.type) {
+            ctx.fail(`Sitemap ${ref.url} declares type "${page.type}" but the index lists it as "${ref.type}"`);
           }
+          if (page.items.length > MAX_PAGE_SIZE) {
+            ctx.fail(`Sitemap ${ref.url} returned ${page.items.length} items, above the ${MAX_PAGE_SIZE}-item page cap`);
+          }
+          for (const item of page.items) {
+            if (seenIds.has(item.id)) {
+              ctx.fail(`Sitemap ${ref.url} yielded id "${item.id}" on more than one page`);
+            }
+            seenIds.add(item.id);
+          }
+
+          cursor = page.cursor?.next ?? null;
+          if (!cursor) break;
+          if (seenCursors.has(cursor)) {
+            ctx.fail(`Sitemap ${ref.url} repeats cursor "${cursor}"; the walk would never terminate`);
+          }
+          seenCursors.add(cursor);
         }
-      } catch (err) {
-        if (!(err instanceof AadpDiscoveryBudgetExceededError)) throw err;
-        // The runner ran out of budget, so pagination was never fully
-        // observed. That is not a pass — the run is incomplete.
-        ctx.inconclusive(`Pagination walk stopped early by this run's traversal budget: ${err.message}`);
       }
     },
   },
@@ -470,7 +495,14 @@ export const CHECKS: Check[] = [
     async run(ctx) {
       const manifest = required(ctx.state.manifest, "manifest");
       const index = required(ctx.state.index, "sitemap index");
-      await assertCacheValidators(ctx, manifest.discovery.sitemap_index, index.checksum, index.generated_at);
+      await assertCacheValidators(
+        ctx,
+        manifest.discovery.sitemap_index,
+        index.checksum,
+        index.generated_at,
+        undefined,
+        "http.cache.sitemap_index"
+      );
     },
   },
   {
@@ -481,7 +513,7 @@ export const CHECKS: Check[] = [
     async run(ctx) {
       const url = required(ctx.state.firstSitemapUrl, "first sitemap url");
       const sitemap = required(ctx.state.firstSitemap, "first sitemap");
-      await assertCacheValidators(ctx, url, sitemap.checksum, sitemap.generated_at);
+      await assertCacheValidators(ctx, url, sitemap.checksum, sitemap.generated_at, "page", "http.cache.sitemap");
     },
   },
   {
@@ -492,7 +524,7 @@ export const CHECKS: Check[] = [
     async run(ctx) {
       const url = required(ctx.state.firstEntityUrl, "first entity url");
       const entity = required(ctx.state.firstEntity, "first entity");
-      await assertCacheValidators(ctx, url, entity.checksum, entity.updated_at);
+      await assertCacheValidators(ctx, url, entity.checksum, entity.updated_at, "entity", "http.cache.entity");
     },
   },
   {
@@ -543,7 +575,11 @@ export const CHECKS: Check[] = [
             `(CLI: --unknown-entity-url) with a URL your deployment does not publish, to exercise the error envelope.`
         );
       }
-      await assertErrorEnvelope(ctx, target, "not_found", (url) => fetchEntity(url, ctx.scoped(url)));
+      // An entity request even though it must 404: the budgets bound the
+      // requests this runner sends, not the documents it receives.
+      await assertErrorEnvelope(ctx, target, "not_found", (url) =>
+        budgetedFetchEntity(ctx, url, "errors.not_found")
+      );
     },
   },
   {
@@ -559,7 +595,9 @@ export const CHECKS: Check[] = [
             `(CLI: --unknown-type-url) with a sitemap URL for a type your deployment does not publish.`
         );
       }
-      await assertErrorEnvelope(ctx, target, "unsupported_type", (url) => fetchSitemap(url, null, ctx.scoped(url)));
+      await assertErrorEnvelope(ctx, target, "unsupported_type", (url) =>
+        budgetedFetchSitemap(ctx, url, null, "errors.unsupported_type")
+      );
     },
   },
   {
@@ -608,6 +646,10 @@ async function assertErrorEnvelope(
   try {
     await fetcher(target);
   } catch (caught) {
+    // Budget exhaustion belongs to the runner, not the deployment. Let
+    // runCheck convert it to an inconclusive skip instead of disguising
+    // it as a malformed error-envelope failure.
+    if (caught instanceof AadpDiscoveryBudgetExceededError) throw caught;
     if (!(caught instanceof AadpRequestError)) {
       ctx.fail(
         `${target} failed with ${(caught as Error).name}: ${(caught as Error).message}, expected an AADP error envelope`

@@ -102,9 +102,17 @@ export interface ConformanceOptions {
   maxRedirects?: number;
   /** Maximum response body size in bytes. Default 2 MiB (client default). */
   maxResponseBytes?: number;
-  /** Traversal budget: maximum sitemap pages fetched across the whole run. Default 100. */
+  /**
+   * Maximum sitemap-page requests across the whole run — traversal,
+   * pagination, cache-validator requests (a 304 is still a request this
+   * runner sent) and a caller-supplied negative target all count.
+   * Default 100.
+   */
   maxPages?: number;
-  /** Traversal budget: maximum entities fetched across the whole run. Default 200. */
+  /**
+   * Maximum entity requests across the whole run, counted the same way
+   * as `maxPages`. Default 200.
+   */
   maxEntities?: number;
   /** Traversal budget: maximum sitemaps listed by the index. Default 100. */
   maxSitemaps?: number;
