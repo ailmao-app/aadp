@@ -62,7 +62,11 @@ export function defineResource<T>(config: ResourceConfig<T>): ResourceDefinition
       `defineResource(): type "${config.type}" is not a valid AADP resource type (must match ${RESOURCE_TYPE_GRAMMAR}).`
     );
   }
-  return { ...config, __aadpResource: true };
+  // Frozen so a caller that kept a reference to this object cannot flip
+  // `type`/`security` (or swap `list`/`get`/`serialize`) after the fact —
+  // `defineAADP()` reads these once at definition time and treats them as
+  // an immutable input to manifest/router/cache-policy construction.
+  return Object.freeze({ ...config, __aadpResource: true });
 }
 
 function toIso(value: string | Date): string {
@@ -91,6 +95,32 @@ function routeIdOf(resource: ResourceDefinition<unknown>, serialized: Serialized
     );
   }
   return serialized.id.slice(prefix.length);
+}
+
+/** Recursively freezes a plain JSON-like value. Only ever called on a `structuredClone()` of caller-supplied data, never on the caller's own object — freezing someone else's live object as a side effect would be a surprising and unrelated mutation. */
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const key of Object.getOwnPropertyNames(value)) {
+      deepFreeze((value as Record<string, unknown>)[key]);
+    }
+    Object.freeze(value);
+  }
+  return value;
+}
+
+/** Validates the shape `resource.list()` MUST return before its `nextCursor` is ever encoded into a published wire cursor — a malformed result (missing/undefined/non-string `nextCursor`, non-array `items`) must fail loudly now, not two requests later when a client tries to decode a cursor that was never valid. */
+function assertValidListResult(
+  type: string,
+  result: { items: unknown; nextCursor: unknown }
+): asserts result is { items: unknown[]; nextCursor: string | null } {
+  if (!result || !Array.isArray(result.items)) {
+    throw upstreamUnavailable(`Resource "${type}" list() did not return an "items" array.`);
+  }
+  if (result.nextCursor !== null && typeof result.nextCursor !== "string") {
+    throw upstreamUnavailable(
+      `Resource "${type}" list() returned a "nextCursor" that is neither a string nor null (got ${JSON.stringify(result.nextCursor)}).`
+    );
+  }
 }
 
 /**
@@ -192,8 +222,14 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
   }
   const corsAllowHeaders = buildCorsAllowHeaders(apiKeyHeaderNames);
 
+  // Snapshot the array itself — `resourceList`/`resourcesByType` must not
+  // see a later `push`/`splice` on the caller's own array reference.
+  // Each individual resource definition is already frozen by
+  // `defineResource()`, so no per-object clone is needed here.
+  const resourceList = [...config.resources];
+
   const resourcesByType = new Map<string, ResourceDefinition<unknown>>();
-  for (const resource of config.resources) {
+  for (const resource of resourceList) {
     if (resourcesByType.has(resource.type)) {
       throw new Error(`defineAADP(): duplicate resource type "${resource.type}".`);
     }
@@ -228,16 +264,22 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
   // Built and validated once at definition time — resources/policies are
   // static, and a manifest that fails its own schema/semantic rules is a
   // configuration bug that should fail the app at startup, not on the
-  // first inbound request.
+  // first inbound request. `structuredClone` fully decouples the result
+  // from `config.application`/`config.policies`/etc: those come straight
+  // from the caller, and without cloning, a mutation of the caller's own
+  // object after `defineAADP()` returns would silently reach into an
+  // already-"validated" published document. The clone is then deep-frozen
+  // so `manifest()` can safely hand out the same object on every call
+  // without a caller being able to corrupt it for subsequent requests.
   const manifestDoc: ManifestV1 = (() => {
     const manifest: ManifestV1 = {
       aadp_version: version,
       application: config.application,
       ...(config.links ? { links: config.links } : {}),
       discovery: { sitemap_index: `${baseUrl}${sitemapIndexPath}` },
-      ...(config.resources.length > 0
+      ...(resourceList.length > 0
         ? {
-            resources: config.resources.map((r) => ({
+            resources: resourceList.map((r) => ({
               type: r.type,
               ...(r.mediaTypes ? { media_types: r.mediaTypes } : {}),
               ...(r.security ? { security: r.security } : {}),
@@ -248,20 +290,21 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
       policies: config.policies,
       ...(config.usageGuidance ? { usage_guidance: config.usageGuidance } : {}),
     };
+    const snapshot = structuredClone(manifest);
 
-    const schemaResult = validateDocument({ version, kind: "manifest", data: manifest });
+    const schemaResult = validateDocument({ version, kind: "manifest", data: snapshot });
     if (!schemaResult.valid) {
       throw new Error(
         `defineAADP(): generated manifest failed schema validation: ${JSON.stringify(schemaResult.errors)}`
       );
     }
-    const semanticIssues = checkManifestSemantics(manifest);
+    const semanticIssues = checkManifestSemantics(snapshot);
     if (hasSemanticErrors(semanticIssues)) {
       throw new Error(
         `defineAADP(): generated manifest failed semantic validation: ${JSON.stringify(semanticIssues)}`
       );
     }
-    return manifest;
+    return deepFreeze(snapshot);
   })();
 
   function manifest(): ManifestV1 {
@@ -269,7 +312,7 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
   }
 
   function sitemapIndex(): SitemapIndexV1 {
-    const sitemaps = config.resources.map((r) => ({ type: r.type, url: sitemapUrl(r.type) }));
+    const sitemaps = resourceList.map((r) => ({ type: r.type, url: sitemapUrl(r.type) }));
     const doc: SitemapIndexV1 = {
       aadp_version: version,
       generated_at: new Date().toISOString(),
@@ -291,11 +334,13 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
     // present-but-malformed cursor that must fail decodeCursor()'s own
     // shape check, not silently collapse to "no cursor" and replay page 1.
     const appCursor = cursorParam == null ? null : decodeCursor(type, version, cursorParam);
-    const { items: records, nextCursor } = await resource.list({
+    const listResult = await resource.list({
       cursor: appCursor,
       limit: pageSize,
       request,
     } as ListArgs);
+    assertValidListResult(type, listResult);
+    const { items: records, nextCursor } = listResult;
 
     const items = await Promise.all(
       records.map(async (record) => {

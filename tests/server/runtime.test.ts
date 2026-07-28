@@ -72,6 +72,63 @@ describe("defineAADP() manifest", () => {
       /not a valid AADP resource type/
     );
   });
+
+  it("freezes the object defineResource() returns, so a caller can't flip type/security after the fact", () => {
+    const resource = makePostResource();
+    expect(Object.isFrozen(resource)).toBe(true);
+    expect(() => {
+      (resource as { security?: string }).security = "hacked";
+    }).toThrow();
+  });
+
+  it("is unaffected by pushing to the resources array after defineAADP() returns", async () => {
+    const resources = [makePostResource()];
+    const aadp = defineAADP({
+      baseUrl: "https://example.com",
+      application: {
+        name: "Example App",
+        description: "An example AADP application.",
+        publisher: { name: "Example Publisher", url: "https://example.com" },
+      },
+      policies: { robots: "https://example.com/robots.txt", terms: "https://example.com/terms" },
+      resources,
+    });
+    resources.push(makePostResource({ type: "note" }));
+
+    expect(aadp.manifest().resources).toEqual([{ type: "post" }]);
+    expect(aadp.sitemapIndex().sitemaps).toEqual([
+      { type: "post", url: "https://example.com/ai/v1.0/sitemaps/post.json" },
+    ]);
+    await expect(aadp.sitemap("note")).rejects.toMatchObject({ code: "unsupported_type" });
+  });
+
+  it("returns a manifest object a caller cannot mutate to affect what handleRequest later serves", async () => {
+    const aadp = makeServer();
+    const manifest = aadp.manifest();
+    expect(() => {
+      (manifest.discovery as { sitemap_index: string }).sitemap_index = "not a uri";
+    }).toThrow();
+
+    const res = await aadp.handleRequest(new Request("https://example.com/.well-known/ai-manifest.json"));
+    const body = await res.json();
+    expect(body.discovery.sitemap_index).toBe("https://example.com/ai/v1.0/sitemap-index.json");
+  });
+
+  it("is unaffected by mutating the application/policies objects passed into defineAADP() after it returns", () => {
+    const application = {
+      name: "Example App",
+      description: "An example AADP application.",
+      publisher: { name: "Example Publisher", url: "https://example.com" },
+    };
+    const aadp = defineAADP({
+      baseUrl: "https://example.com",
+      application,
+      policies: { robots: "https://example.com/robots.txt", terms: "https://example.com/terms" },
+      resources: [makePostResource()],
+    });
+    application.name = "Mutated after the fact";
+    expect(aadp.manifest().application.name).toBe("Example App");
+  });
 });
 
 describe("defineAADP() config validation", () => {
@@ -207,6 +264,21 @@ describe("defineAADP() sitemap index and sitemap", () => {
     expect(page2.items[0].id).toBe("post:second-post");
     expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: "" }));
   });
+
+  it("rejects a list() result whose items is not an array", async () => {
+    const list = vi.fn(() => ({ items: "not-an-array", nextCursor: null }) as never);
+    const aadp = makeServer({ resources: [makePostResource({ list })] });
+    await expect(aadp.sitemap("post")).rejects.toMatchObject({ code: "upstream_unavailable" });
+  });
+
+  it.each([undefined, 42, {}, ["array"]])(
+    "rejects a list() result whose nextCursor is %j (not a string or null)",
+    async (nextCursor) => {
+      const list = vi.fn(() => ({ items: [], nextCursor }) as never);
+      const aadp = makeServer({ resources: [makePostResource({ list })] });
+      await expect(aadp.sitemap("post")).rejects.toMatchObject({ code: "upstream_unavailable" });
+    }
+  );
 });
 
 describe("defineAADP() entity", () => {
