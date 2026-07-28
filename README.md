@@ -78,7 +78,7 @@ AADP has a read-only core. It does not replace OpenAPI, an authorization server,
 
 ## Installation
 
-Node.js 20.18.1 trở lên là bắt buộc.
+Node.js 20.18.1 or later is required.
 
 ```bash
 npm install ail-aadp
