@@ -50,6 +50,14 @@
       "types": "./dist/conformance/index.d.ts",
       "import": "./dist/conformance/index.js"
     },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js"
+    },
+    "./scaffold": {
+      "types": "./dist/scaffold/index.d.ts",
+      "import": "./dist/scaffold/index.js"
+    },
     "./canonical-json": {
       "types": "./dist/canonical-json/index.d.ts",
       "import": "./dist/canonical-json/index.js"
@@ -70,7 +78,8 @@
   ],
   "bin": {
     "aadp-validate": "dist/validator/cli.js",
-    "aadp-conformance": "dist/conformance/cli.js"
+    "aadp-conformance": "dist/conformance/cli.js",
+    "aadp": "dist/scaffold/cli.js"
   },
   "engines": {
     "node": ">=20.18.1"

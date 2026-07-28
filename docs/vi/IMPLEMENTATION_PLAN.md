@@ -472,12 +472,31 @@ và render report.
 
 ### Ưu tiên 2 — Server implementation SDK
 
-Cung cấp builder/serializer trung lập để application tạo document AADP an toàn:
+> **Đã triển khai** — declarative runtime `defineAADP()`/`defineResource()` nằm ở
+> `src/server/` (export qua `ail-aadp/server`), test tại
+> `tests/server/runtime.test.ts`. Scaffold CLI `aadp init`/`aadp add-resource`
+> nằm ở `src/scaffold/` (bin `aadp`, export qua `ail-aadp/scaffold`), test tại
+> `tests/scaffold/scaffold.test.ts`.
 
-- Manifest, sitemap index, sitemap page, entity và error envelope builder.
-- Tự động canonicalize payload và sinh checksum khi phù hợp.
-- Helper cho timestamp, `ETag`, conditional GET và cache header.
-- Validate schema và semantic rule trước khi document được publish.
+Cung cấp runtime khai báo để application tạo và phục vụ document AADP an toàn mà
+không cần tự viết tay manifest/sitemap/entity builder:
+
+- `defineResource({ type, list, get, serialize })`: `list`/`get` là data access
+  do application tự viết (DB, HTTP API nội bộ hoặc bất kỳ nguồn nào khác — SDK
+  không giả định nguồn dữ liệu); `serialize()` là ranh giới bắt buộc duy nhất nơi
+  record thật được lọc thành public data.
+- `defineAADP({ baseUrl, application, policies, resources, ... })`: build và
+  validate (schema + semantic) manifest ngay khi gọi; build sitemap index,
+  sitemap page (có cursor pagination, cursor được bọc theo `type`/`version` để
+  chặn cursor dùng sai chỗ) và entity theo yêu cầu.
+- Tự động canonicalize payload và sinh checksum (`checksumOf`) cho sitemap/entity.
+- `handleRequest(Request): Promise<Response>` — Fetch handler trung lập, dùng
+  thẳng làm route handler Next.js (`export const GET = aadp.handleRequest`)
+  không cần adapter riêng; tự xử lý `ETag`/conditional GET/`Cache-Control` và
+  error envelope theo spec v1.0 §9.
+- Validate schema (và semantic cho manifest) trước khi mọi document được publish;
+  document sitemap/entity không hợp lệ trả lỗi `upstream_unavailable` (502) thay
+  vì phơi ra document sai.
 
 SDK không phụ thuộc Next.js, Ailmao hoặc domain model cụ thể. Adapter framework
 và adapter application phải là layer mỏng nằm bên ngoài core.
@@ -538,13 +557,15 @@ conflict semantics; không được tuyên bố một license có hiệu lực p
 1. `AADP-CONFORMANCE-001`: Programmatic conformance runner.
 2. `AADP-CONFORMANCE-002`: CLI `aadp-conformance`.
 3. `AADP-CONFORMANCE-003`: JSON/JUnit report và CI example.
-4. `AADP-SERVER-001`: Typed document builders.
-5. `AADP-SERVER-002`: HTTP cache, checksum và validation helpers.
-6. `AADP-INTEROP-001`: Neutral reference server và clean-install verification.
-7. `AADP-MODULE-001`: ADR cho module versioning.
-8. `AADP-RELATIONS-001`: Relations schema, validator, conformance và client traversal.
-9. `AADP-ANSWER-001`: Answer Module.
-10. `AADP-EVIDENCE-001`: Evidence & Provenance Module.
-11. `AADP-AI-POLICY-001`: ADR cho AI usage vocabulary, legal boundary và conflict semantics.
-12. `AADP-AI-POLICY-002`: Experimental `x_ai_usage` schema, validator và examples.
-13. `AADP-AI-POLICY-003`: Interoperability, legal review và đề xuất chuẩn hóa cho protocol version mới.
+4. `AADP-SERVER-001`: Declarative `defineAADP()` server runtime. **Đã triển khai.**
+5. `AADP-SERVER-002`: Typed `defineResource()` contract và public serializer boundary. **Đã triển khai.**
+6. `AADP-SERVER-003`: Document generation, HTTP cache, checksum và validation helpers. **Đã triển khai.**
+7. `AADP-SERVER-004`: Fetch adapter và scaffolding CLI (`aadp init`/`aadp add-resource`). **Đã triển khai.**
+8. `AADP-INTEROP-001`: Neutral reference server và clean-install verification.
+9. `AADP-MODULE-001`: ADR cho module versioning.
+10. `AADP-RELATIONS-001`: Relations schema, validator, conformance và client traversal.
+11. `AADP-ANSWER-001`: Answer Module.
+12. `AADP-EVIDENCE-001`: Evidence & Provenance Module.
+13. `AADP-AI-POLICY-001`: ADR cho AI usage vocabulary, legal boundary và conflict semantics.
+14. `AADP-AI-POLICY-002`: Experimental `x_ai_usage` schema, validator và examples.
+15. `AADP-AI-POLICY-003`: Interoperability, legal review và đề xuất chuẩn hóa cho protocol version mới.
