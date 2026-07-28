@@ -16,7 +16,14 @@ import { validateDocument } from "../validator/index.js";
 import { checkManifestSemantics, hasSemanticErrors } from "../validator/semantic.js";
 import { notFound, invalidRequest, unsupportedType, upstreamUnavailable } from "./errors.js";
 import { encodeCursor, decodeCursor } from "./cursor.js";
-import { cacheableJsonResponse, manifestResponse, errorResponse, preflightResponse } from "./http.js";
+import {
+  cacheableJsonResponse,
+  privateJsonResponse,
+  manifestResponse,
+  errorResponse,
+  preflightResponse,
+  buildCorsAllowHeaders,
+} from "./http.js";
 import { RESOURCE_TYPE_GRAMMAR } from "./types.js";
 import type {
   AadpServer,
@@ -93,6 +100,15 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
   const pageSize = Math.min(config.pageSize ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
   const basePath = `/ai/v${version}`; // spec/v1.0/specification.md:355-356 — wire base path is "/ai/v1.0", not "/ai/1.0"
   const sitemapIndexPath = `${basePath}/sitemap-index.json`;
+
+  // A configured `api_key` (`in: "header"`) scheme's header name must be
+  // preflight-allowed, or a browser blocks the request before the
+  // resource's own auth check in list()/get() ever runs.
+  const apiKeyHeaderNames = Object.values(config.securitySchemes ?? {})
+    .filter((scheme): scheme is { type: "api_key"; in: "header" | "query"; name: string } => scheme.type === "api_key")
+    .filter((scheme) => scheme.in === "header")
+    .map((scheme) => scheme.name);
+  const corsAllowHeaders = buildCorsAllowHeaders(apiKeyHeaderNames);
 
   const resourcesByType = new Map<string, ResourceDefinition<unknown>>();
   for (const resource of config.resources) {
@@ -251,19 +267,19 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
 
   async function handleRequest(request: Request): Promise<Response> {
     try {
-      if (request.method === "OPTIONS") return preflightResponse();
+      if (request.method === "OPTIONS") return preflightResponse(corsAllowHeaders);
       if (request.method !== "GET") throw notFound(`No route for ${request.method} ${new URL(request.url).pathname}`);
 
       const url = new URL(request.url);
       const pathname = url.pathname;
 
       if (pathname === WELL_KNOWN_PATH) {
-        return manifestResponse(manifest(), cacheMaxAgeSeconds);
+        return manifestResponse(manifest(), cacheMaxAgeSeconds, corsAllowHeaders);
       }
 
       if (pathname === sitemapIndexPath) {
         const doc = sitemapIndex();
-        return cacheableJsonResponse(request, doc, doc.checksum, doc.generated_at, cacheMaxAgeSeconds);
+        return cacheableJsonResponse(request, doc, doc.checksum, doc.generated_at, cacheMaxAgeSeconds, corsAllowHeaders);
       }
 
       const sitemapsPrefix = `${basePath}/sitemaps/`;
@@ -273,7 +289,9 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
           pathname
         );
         const doc = await sitemap(type, url.searchParams.get("cursor"), request);
-        return cacheableJsonResponse(request, doc, doc.checksum, doc.generated_at, cacheMaxAgeSeconds);
+        return resourcesByType.get(type)?.security
+          ? privateJsonResponse(doc, corsAllowHeaders)
+          : cacheableJsonResponse(request, doc, doc.checksum, doc.generated_at, cacheMaxAgeSeconds, corsAllowHeaders);
       }
 
       const entitiesPrefix = `${basePath}/entities/`;
@@ -283,15 +301,17 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
         if (slashIndex === -1) {
           throw notFound(`No route for ${pathname}`);
         }
-        const type = rest.slice(0, slashIndex);
+        const type = safeDecodeURIComponent(rest.slice(0, slashIndex), pathname);
         const id = safeDecodeURIComponent(rest.slice(slashIndex + 1), pathname);
         const doc = await entity(type, id, request);
-        return cacheableJsonResponse(request, doc, doc.checksum, doc.updated_at, cacheMaxAgeSeconds);
+        return resourcesByType.get(type)?.security
+          ? privateJsonResponse(doc, corsAllowHeaders)
+          : cacheableJsonResponse(request, doc, doc.checksum, doc.updated_at, cacheMaxAgeSeconds, corsAllowHeaders);
       }
 
       throw notFound(`No route for ${pathname}`);
     } catch (error) {
-      return errorResponse(error);
+      return errorResponse(error, corsAllowHeaders);
     }
   }
 

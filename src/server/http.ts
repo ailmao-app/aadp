@@ -1,10 +1,26 @@
 import { AadpServerError } from "./errors.js";
 
-const CORS_HEADERS: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "If-None-Match, If-Modified-Since, Authorization",
-};
+const BASE_CORS_HEADERS = ["If-None-Match", "If-Modified-Since"];
+
+/**
+ * Builds the `Access-Control-Allow-Headers` value for this server:
+ * conditional-cache headers plus every header name a configured `api_key`
+ * (`in: "header"`) security scheme declares — a scheme the manifest
+ * advertises but whose header the CORS preflight never allow-lists is
+ * invisible to any browser-based client (they get blocked before the
+ * resource's own auth check ever runs).
+ */
+export function buildCorsAllowHeaders(extraHeaderNames: string[]): string {
+  return [...new Set([...BASE_CORS_HEADERS, "Authorization", ...extraHeaderNames])].join(", ");
+}
+
+function corsHeaders(allowHeaders: string): Record<string, string> {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": allowHeaders,
+  };
+}
 
 // RFC 9110 §8.8.3.2: conditional GET uses *weak* comparison — a CDN in
 // front of the app commonly rewrites a strong ETag to weak once it
@@ -22,17 +38,18 @@ function ifNoneMatchHits(ifNoneMatch: string | null, etag: string): boolean {
     .some((candidate) => (candidate.startsWith("W/") ? candidate.slice(2) : candidate) === target);
 }
 
-function jsonHeaders(extra: Record<string, string>): Headers {
-  return new Headers({ "Content-Type": "application/json", ...CORS_HEADERS, ...extra });
+function jsonHeaders(corsAllowHeaders: string, extra: Record<string, string>): Headers {
+  return new Headers({ "Content-Type": "application/json", ...corsHeaders(corsAllowHeaders), ...extra });
 }
 
-/** Shared response builder for sitemap-index/sitemap/entity — every kind that carries a checksum + timestamp and must support conditional GET (spec v1.0 §7). */
+/** Shared response builder for a *public* sitemap-index/sitemap/entity — carries a checksum + timestamp and supports conditional GET (spec v1.0 §7). Never use this for a resource that declared a `security` scheme; use `privateJsonResponse` instead, or a shared/CDN cache will serve one principal's protected data to another. */
 export function cacheableJsonResponse(
   request: Request,
   body: unknown,
   checksum: string,
   timestamp: string,
-  maxAgeSeconds: number
+  maxAgeSeconds: number,
+  corsAllowHeaders: string
 ): Response {
   const etag = `"${checksum}"`;
   const ifNoneMatch = request.headers.get("if-none-match");
@@ -41,13 +58,13 @@ export function cacheableJsonResponse(
   if (ifNoneMatchHits(ifNoneMatch, etag)) {
     return new Response(null, {
       status: 304,
-      headers: new Headers({ ETag: etag, "Last-Modified": lastModified, ...CORS_HEADERS }),
+      headers: new Headers({ ETag: etag, "Last-Modified": lastModified, ...corsHeaders(corsAllowHeaders) }),
     });
   }
 
   return new Response(JSON.stringify(body), {
     status: 200,
-    headers: jsonHeaders({
+    headers: jsonHeaders(corsAllowHeaders, {
       ETag: etag,
       "Last-Modified": lastModified,
       "Cache-Control": `public, max-age=${maxAgeSeconds}`,
@@ -55,20 +72,34 @@ export function cacheableJsonResponse(
   });
 }
 
-/** Manifest has no mandatory checksum in v1.0 — no conditional GET, just a cache lifetime. */
-export function manifestResponse(body: unknown, maxAgeSeconds: number): Response {
+/**
+ * Response builder for a sitemap/entity whose resource declared a
+ * `security` scheme. No `Cache-Control: public`, no ETag, no conditional
+ * GET — a shared cache (CDN, reverse proxy) MUST NOT store this, since
+ * the document was only authorized for the principal that just made
+ * this request.
+ */
+export function privateJsonResponse(body: unknown, corsAllowHeaders: string): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
-    headers: jsonHeaders({ "Cache-Control": `public, max-age=${maxAgeSeconds}` }),
+    headers: jsonHeaders(corsAllowHeaders, { "Cache-Control": "private, no-store" }),
   });
 }
 
-export function preflightResponse(): Response {
-  return new Response(null, { status: 204, headers: new Headers(CORS_HEADERS) });
+/** Manifest has no mandatory checksum in v1.0 — no conditional GET, just a cache lifetime. Always public: it is discovery metadata (which schemes/types exist), never protected data. */
+export function manifestResponse(body: unknown, maxAgeSeconds: number, corsAllowHeaders: string): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: jsonHeaders(corsAllowHeaders, { "Cache-Control": `public, max-age=${maxAgeSeconds}` }),
+  });
+}
+
+export function preflightResponse(corsAllowHeaders: string): Response {
+  return new Response(null, { status: 204, headers: new Headers(corsHeaders(corsAllowHeaders)) });
 }
 
 /** AADP v1.0 spec §9 error envelope. Never forwards a raw, unrecognized error's message/stack — that may contain upstream URLs or internals. */
-export function errorResponse(error: unknown): Response {
+export function errorResponse(error: unknown, corsAllowHeaders: string): Response {
   const requestId =
     typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
@@ -77,7 +108,7 @@ export function errorResponse(error: unknown): Response {
   if (error instanceof AadpServerError) {
     return new Response(
       JSON.stringify({ error: { code: error.code, message: error.message, request_id: requestId } }),
-      { status: error.status, headers: jsonHeaders({}) }
+      { status: error.status, headers: jsonHeaders(corsAllowHeaders, {}) }
     );
   }
   return new Response(
@@ -88,6 +119,6 @@ export function errorResponse(error: unknown): Response {
         request_id: requestId,
       },
     }),
-    { status: 502, headers: jsonHeaders({}) }
+    { status: 502, headers: jsonHeaders(corsAllowHeaders, {}) }
   );
 }

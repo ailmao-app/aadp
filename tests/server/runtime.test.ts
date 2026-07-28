@@ -240,4 +240,67 @@ describe("defineAADP() handleRequest", () => {
     );
     expect(authed.status).toBe(200);
   });
+
+  it("returns 400 invalid_request for malformed percent-encoding in the entity type segment, without calling the resource", async () => {
+    const get = vi.fn(() => null);
+    const aadp = makeServer({ resources: [makePostResource({ get })] });
+
+    const res = await aadp.handleRequest(new Request("https://example.com/ai/v1.0/entities/%ZZ/first-post.json"));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("invalid_request");
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("decodes a valid percent-encoded entity type the same way as an unencoded one", async () => {
+    const aadp = makeServer();
+    const res = await aadp.handleRequest(new Request("https://example.com/ai/v1.0/entities/%70ost/first-post.json"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.type).toBe("post");
+  });
+
+  it("marks a public resource's sitemap/entity as shared-cacheable but a resource with a security scheme as private/no-store", async () => {
+    const aadp = makeServer({
+      resources: [
+        makePostResource(),
+        makePostResource({
+          type: "private-post",
+          security: "bearer",
+          get: () => POSTS[0],
+          serialize: (post) => ({
+            id: `private-post:${post.slug}`,
+            updatedAt: post.updatedAt,
+            data: { title: post.title },
+          }),
+        }),
+      ],
+      securitySchemes: { bearer: { type: "api_key", in: "header", name: "Authorization" } },
+    });
+
+    const publicRes = await aadp.handleRequest(new Request("https://example.com/ai/v1.0/entities/post/first-post.json"));
+    expect(publicRes.headers.get("Cache-Control")).toContain("public");
+    expect(publicRes.headers.get("ETag")).toBeTruthy();
+
+    const privateRes = await aadp.handleRequest(
+      new Request("https://example.com/ai/v1.0/entities/private-post/first-post.json")
+    );
+    expect(privateRes.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(privateRes.headers.get("ETag")).toBeNull();
+
+    const privateSitemap = await aadp.handleRequest(new Request("https://example.com/ai/v1.0/sitemaps/private-post.json"));
+    expect(privateSitemap.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(privateSitemap.headers.get("ETag")).toBeNull();
+  });
+
+  it("allow-lists a configured api_key header name in the CORS preflight response", async () => {
+    const aadp = makeServer({
+      resources: [makePostResource({ security: "apikey" })],
+      securitySchemes: { apikey: { type: "api_key", in: "header", name: "X-API-Key" } },
+    });
+    const res = await aadp.handleRequest(
+      new Request("https://example.com/ai/v1.0/entities/post/first-post.json", { method: "OPTIONS" })
+    );
+    expect(res.headers.get("Access-Control-Allow-Headers")).toContain("X-API-Key");
+  });
 });
