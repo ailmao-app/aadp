@@ -186,6 +186,27 @@ describe("defineAADP() sitemap index and sitemap", () => {
     await expect(aadp.sitemap("unknown")).rejects.toBeInstanceOf(AadpServerError);
     await expect(aadp.sitemap("unknown")).rejects.toMatchObject({ code: "unsupported_type", status: 404 });
   });
+
+  it("rejects an empty-string wire cursor as malformed rather than treating it as absent", async () => {
+    const list = vi.fn(() => ({ items: [], nextCursor: null }));
+    const aadp = makeServer({ resources: [makePostResource({ list })] });
+    await expect(aadp.sitemap("post", "")).rejects.toMatchObject({ code: "invalid_request" });
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("round-trips an application-minted empty-string nextCursor as a real cursor, not end-of-pagination", async () => {
+    const list = vi.fn(({ cursor }: ListArgs) =>
+      cursor === null ? { items: [POSTS[0]], nextCursor: "" } : { items: [POSTS[1]], nextCursor: null }
+    );
+    const aadp = makeServer({ resources: [makePostResource({ list })] });
+
+    const page1 = await aadp.sitemap("post", null);
+    expect(page1.cursor?.next).not.toBeNull();
+
+    const page2 = await aadp.sitemap("post", page1.cursor!.next);
+    expect(page2.items[0].id).toBe("post:second-post");
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: "" }));
+  });
 });
 
 describe("defineAADP() entity", () => {
@@ -217,6 +238,27 @@ describe("defineAADP() entity", () => {
       ],
     });
     await expect(aadp.entity("post", "second-post")).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it.each(["UPPER", "..", "has space", "has.dot", "", "has/slash"])(
+    "rejects an entity id %j that violates the canonical grammar, without calling get()",
+    async (id) => {
+      const get = vi.fn(() => null);
+      const aadp = makeServer({ resources: [makePostResource({ get })] });
+      await expect(aadp.entity("post", id)).rejects.toMatchObject({ code: "invalid_request" });
+      expect(get).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["first-post", "has_underscore", "has-hyphen"])("accepts a canonical-grammar id %j", async (id) => {
+    const aadp = makeServer({
+      resources: [
+        makePostResource({
+          get: ({ id: requestedId }) => (requestedId === id ? { slug: id, title: "T", updatedAt: POSTS[0].updatedAt } : null),
+        }),
+      ],
+    });
+    await expect(aadp.entity("post", id)).resolves.toMatchObject({ id: `post:${id}` });
   });
 });
 

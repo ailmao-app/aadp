@@ -287,7 +287,10 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
 
   async function sitemap(type: string, cursorParam?: string | null, request?: Request): Promise<SitemapV1> {
     const resource = findResource(type);
-    const appCursor = cursorParam ? decodeCursor(type, version, cursorParam) : null;
+    // Nullish, not truthy: an empty-string wire cursor ("?cursor=") is a
+    // present-but-malformed cursor that must fail decodeCursor()'s own
+    // shape check, not silently collapse to "no cursor" and replay page 1.
+    const appCursor = cursorParam == null ? null : decodeCursor(type, version, cursorParam);
     const { items: records, nextCursor } = await resource.list({
       cursor: appCursor,
       limit: pageSize,
@@ -313,7 +316,11 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
       generated_at: new Date().toISOString(),
       checksum: checksumOf(items),
       items,
-      cursor: { next: nextCursor ? encodeCursor(type, version, nextCursor) : null },
+      // Strict null check: `ListResult.nextCursor` distinguishes "no more
+      // pages" (`null`) from an application-minted opaque cursor that
+      // happens to be the empty string — the latter must still round-trip
+      // as a real wire cursor, not collapse into end-of-pagination.
+      cursor: { next: nextCursor === null ? null : encodeCursor(type, version, nextCursor) },
     };
     const result = validateDocument({ version, kind: "sitemap", data: doc });
     if (!result.valid) {
@@ -326,6 +333,13 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
 
   async function entity(type: string, id: string, request?: Request): Promise<EntityV1> {
     const resource = findResource(type);
+    // Canonical ID grammar (spec v1.0 §2) is a protocol boundary, not an
+    // implementation detail of any one resource — reject before the id
+    // ever reaches application data access, so a path-traversal-shaped or
+    // otherwise unsafe id is never handed to get().
+    if (!RESOURCE_TYPE_GRAMMAR.test(id)) {
+      throw invalidRequest(`"${id}" is not a valid AADP canonical id segment.`);
+    }
     const record = await resource.get({ id, request } as GetArgs);
     if (record === null || record === undefined) {
       throw notFound(`Entity ${type}:${id} was not found.`);
