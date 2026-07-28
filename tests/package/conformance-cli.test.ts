@@ -52,6 +52,18 @@ function runCli(args: string[]): Promise<{ status: number; stdout: string; stder
   });
 }
 
+/**
+ * The runner never derives a URL for the negative-path checks, so a run
+ * meant to reach a conclusive verdict has to name them (see
+ * `ConformanceOptions.negativeTargets`).
+ */
+const NEGATIVE_TARGET_FLAGS = (): string[] => [
+  "--unknown-entity-url",
+  `${server.baseUrl}/ai/v1.0/entities/example/aadp-conformance-does-not-exist.json`,
+  "--unknown-type-url",
+  `${server.baseUrl}/ai/v1.0/sitemaps/aadp-conformance-unknown-type.json`,
+];
+
 beforeAll(async () => {
   server = await startMockServer();
 
@@ -92,14 +104,14 @@ describe("aadp-conformance, run from the packed tarball", () => {
   });
 
   it("exits 0 and prints a passing text report for a conformant deployment", async () => {
-    const result = await runCli([server.baseUrl, "--allow-private-network"]);
+    const result = await runCli([server.baseUrl, "--allow-private-network", ...NEGATIVE_TARGET_FLAGS()]);
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("manifest.http");
     expect(result.stdout).toContain("RESULT: PASSED");
   });
 
   it("emits a parseable report on stdout with --json, and nothing else", async () => {
-    const result = await runCli([server.baseUrl, "--allow-private-network", "--json"]);
+    const result = await runCli([server.baseUrl, "--allow-private-network", "--json", ...NEGATIVE_TARGET_FLAGS()]);
     expect(result.status, result.stderr).toBe(0);
     const report = JSON.parse(result.stdout) as { report_version: string; status: string; checks: unknown[] };
     expect(report.report_version).toBe("1");
@@ -110,9 +122,34 @@ describe("aadp-conformance, run from the packed tarball", () => {
   it("exits 1 when a check fails", async () => {
     // --fail-on-warning turns the mock's instruction-shaped usage_guidance
     // warning into a failing verdict, without needing a broken fixture.
-    const result = await runCli([server.baseUrl, "--allow-private-network", "--fail-on-warning"]);
+    const result = await runCli([
+      server.baseUrl,
+      "--allow-private-network",
+      "--fail-on-warning",
+      ...NEGATIVE_TARGET_FLAGS(),
+    ]);
     expect(result.status).toBe(1);
     expect(result.stdout).toContain("RESULT: FAILED");
+  });
+
+  it("exits 4 when a traversal budget leaves the run unfinished", async () => {
+    const result = await runCli([server.baseUrl, "--allow-private-network", "--max-pages", "1"]);
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("RESULT: INCONCLUSIVE");
+  });
+
+  it("exits 4 when the error envelope was never exercised", async () => {
+    // No --unknown-entity-url/--unknown-type-url: those checks reach no
+    // verdict, so the run must not report success.
+    const result = await runCli([server.baseUrl, "--allow-private-network"]);
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("RESULT: INCONCLUSIVE");
+  });
+
+  it("exits 2 for an option value the runner cannot use", async () => {
+    const result = await runCli([server.baseUrl, "--allow-private-network", "--max-pages", "0"]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Invalid conformance option");
   });
 
   it("exits 2 when the run cannot be performed", async () => {

@@ -22,7 +22,6 @@ import {
   fetchSitemapIndex,
   fetchSitemap,
   fetchEntity,
-  iterateSitemap,
   type ClientOptions,
   type ManifestV1,
   type SitemapIndexV1,
@@ -31,7 +30,11 @@ import {
 } from "../client/v1.0/index.js";
 import { AadpRequestError } from "../client/errors.js";
 import { fetchJson, probeUrl } from "../client/http.js";
-import { AadpDiscoveryBudgetExceededError, type DiscoveryBudgetState } from "../client/discovery-budget.js";
+import {
+  AadpDiscoveryBudgetExceededError,
+  chargeDiscoveryBudget,
+  type DiscoveryBudgetState,
+} from "../client/discovery-budget.js";
 import { validateDocument, checkManifestSemantics, type SemanticIssue } from "../validator/index.js";
 import { checksumOf } from "../canonical-json/checksum.js";
 import type { CheckStatus } from "./types.js";
@@ -44,6 +47,8 @@ export interface CheckOutcome {
   status: Exclude<CheckStatus, "failed">;
   message?: string;
   details?: string[];
+  /** See `CheckResult.inconclusive`. Only meaningful with `status: "skipped"`. */
+  inconclusive?: boolean;
 }
 
 /** Thrown by a check to record a non-pass without an exception stack. */
@@ -72,14 +77,29 @@ export interface RunState {
 
 export interface CheckContext {
   baseUrl: string;
-  /** Client options (URL policy, timeouts, headers) shared by every request. */
+  /**
+   * Client options for requests to `baseUrl`'s own origin. Never pass
+   * these to a URL a *document* supplied — use `scoped()`.
+   */
   client: ClientOptions;
-  /** Traversal budget shared across every paginating check in the run. */
+  /**
+   * Client options for `targetUrl`, with caller-configured headers
+   * stripped when the URL leaves `baseUrl`'s origin. Every fetch of a
+   * document-supplied URL (sitemap index, sitemap, entity, advertised
+   * link) must go through this: the caller's `--header` may be an API
+   * key for the deployment under test, and a manifest can point anywhere.
+   */
+  scoped(targetUrl: string): ClientOptions;
+  /** Traversal budget shared by every document fetch in the run. */
   budget: DiscoveryBudgetState;
   maxSitemaps: number;
+  /** Caller-supplied URLs for the negative-path checks, if any. */
+  negativeTargets: { unknownEntityUrl?: string; unknownTypeUrl?: string };
   state: RunState;
   /** Record a non-fatal observation and stop this check. */
   skip(message: string, details?: string[]): never;
+  /** Stop this check without a verdict, and mark the whole run incomplete. */
+  inconclusive(message: string, details?: string[]): never;
   warn(message: string, details?: string[]): never;
   fail(message: string, details?: string[]): never;
 }
@@ -130,13 +150,51 @@ export function collectAdvertisedUrls(manifest: ManifestV1): string[] {
   return [...new Set(urls)];
 }
 
-/** Replaces the last path segment of `url`, keeping origin and query. */
-function withLastSegment(url: string, segment: string): string {
-  const target = new URL(url);
-  const segments = target.pathname.split("/");
-  segments[segments.length - 1] = segment;
-  target.pathname = segments.join("/");
-  return target.toString();
+/**
+ * Why the negative-path checks never invent their own target.
+ *
+ * AADP fixes each document's *authoritative* URL and nothing else (spec
+ * v1.0 §5): there is no routing template, so no URL can be constructed
+ * that is known to name a resource this deployment does not publish.
+ * Nothing about a URL's shape proves otherwise — an entity URL may be
+ * content-addressed (`/objects/sha256-abc`), signed, opaque, or served
+ * through a gateway that answers unknown paths with a generic HTML 404
+ * that is not an AADP response at all. Swapping a path segment on any of
+ * those produces a request the deployment never promised anything about,
+ * and failing it would fail a conformant server.
+ *
+ * So the target must be named by whoever knows the deployment's routing:
+ * `negativeTargets` from the caller. Without it the checks report
+ * `inconclusive` — the error envelope was not exercised, which is not the
+ * same as it being correct.
+ */
+const NEGATIVE_TARGET_RATIONALE =
+  "AADP defines each document's authoritative URL but no routing template, so this runner cannot " +
+  "construct a URL that is known not to exist without risking a request the deployment never " +
+  "promised anything about";
+
+/**
+ * Charges the shared budget for one sitemap-page or entity request, then
+ * performs it. `maxPages`/`maxEntities` are documented as bounding these
+ * requests across the whole run, so every check that requests one of
+ * those document kinds — traversal, pagination, cache validators,
+ * negative targets — must come through here (or charge before its own
+ * fetch); a check making an uncharged request would let the runner exceed
+ * the load the caller configured.
+ */
+async function budgetedFetchSitemap(
+  ctx: CheckContext,
+  url: string,
+  cursor: string | null | undefined,
+  context: string
+): Promise<SitemapV1> {
+  chargeDiscoveryBudget(ctx.budget, "page", context);
+  return fetchSitemap(url, cursor, ctx.scoped(url));
+}
+
+async function budgetedFetchEntity(ctx: CheckContext, url: string, context: string): Promise<EntityV1> {
+  chargeDiscoveryBudget(ctx.budget, "entity", context);
+  return fetchEntity(url, ctx.scoped(url));
 }
 
 /**
@@ -145,14 +203,27 @@ function withLastSegment(url: string, segment: string): string {
  * agreeing with the document's own timestamp, and a conditional GET that
  * answers `304` with no body — for both the strong and weak form of the
  * tag (spec v1.0 §7).
+ *
+ * Makes three requests (one full GET, two conditional GETs). Each is
+ * charged to the shared budget under `budgetKind` — a 304 answer carries
+ * no document, but it is still a request this runner sends, and the
+ * page/entity budgets are documented as request bounds for the whole
+ * run. The sitemap index has no budget kind and passes `undefined`.
  */
 async function assertCacheValidators(
   ctx: CheckContext,
   url: string,
   declaredChecksum: string,
-  declaredTimestamp: string
+  declaredTimestamp: string,
+  budgetKind: "page" | "entity" | undefined,
+  context: string
 ): Promise<void> {
-  const first = await fetchJson(url, ctx.client);
+  const client = ctx.scoped(url);
+  const charge = () => {
+    if (budgetKind) chargeDiscoveryBudget(ctx.budget, budgetKind, context);
+  };
+  charge();
+  const first = await fetchJson(url, client);
   const etag = first.headers.get("etag");
   if (!etag) ctx.fail(`${url} returned no ETag; a document carrying a checksum must expose one`);
   const strongTag = etag!.startsWith("W/") ? etag!.slice(2) : etag!;
@@ -173,10 +244,19 @@ async function assertCacheValidators(
     );
   }
 
-  for (const tag of [etag!, strongTag.startsWith("W/") ? strongTag : `W/${strongTag}`]) {
-    const conditional = await fetchJson(url, { ...ctx.client, headers: { ...ctx.client.headers, "If-None-Match": tag } });
+  // Both forms of the same validator, always as two *different* strings:
+  // spec v1.0 §7 mandates weak comparison, under which `"cs"` and
+  // `W/"cs"` are the same validator. Deriving one form from the observed
+  // ETag would send the weak tag twice whenever the server answered with
+  // one, letting an exact-match-only implementation through.
+  for (const tag of [strongTag, `W/${strongTag}`]) {
+    charge();
+    const conditional = await fetchJson(url, { ...client, headers: { ...client.headers, "If-None-Match": tag } });
     if (conditional.status !== 304) {
-      ctx.fail(`${url} answered If-None-Match: ${tag} with ${conditional.status}, expected 304`);
+      ctx.fail(
+        `${url} answered If-None-Match: ${tag} with ${conditional.status}, expected 304 ` +
+          `(spec v1.0 §7 requires weak comparison, so both "..." and W/"..." must match)`
+      );
     }
     if (conditional.bodyBytes !== 0) {
       ctx.fail(`${url} returned a ${conditional.bodyBytes}-byte body on a 304 response`);
@@ -285,7 +365,10 @@ export const CHECKS: Check[] = [
       // fetchSitemapIndex already schema-validates and recomputes the
       // checksum; a mismatch surfaces as a thrown client error, which the
       // runner records as a failure.
-      const index = await fetchSitemapIndex(manifest.discovery.sitemap_index, ctx.client);
+      const index = await fetchSitemapIndex(
+        manifest.discovery.sitemap_index,
+        ctx.scoped(manifest.discovery.sitemap_index)
+      );
       ctx.state.index = index;
       if (index.sitemaps.length > ctx.maxSitemaps) {
         ctx.fail(
@@ -308,9 +391,12 @@ export const CHECKS: Check[] = [
     async run(ctx) {
       const index = required(ctx.state.index, "sitemap index");
       const ref = index.sitemaps[0];
-      const sitemap = await fetchSitemap(ref.url, null, ctx.client);
+      const sitemap = await budgetedFetchSitemap(ctx, ref.url, null, "traversal.sitemap");
       ctx.state.firstSitemapUrl = ref.url;
       ctx.state.firstSitemap = sitemap;
+      if (sitemap.items.length > MAX_PAGE_SIZE) {
+        ctx.fail(`Sitemap ${ref.url} returned ${sitemap.items.length} items, above the ${MAX_PAGE_SIZE}-item page cap`);
+      }
 
       if (sitemap.type !== ref.type) {
         ctx.fail(`Sitemap at ${ref.url} declares type "${sitemap.type}" but the index lists it as "${ref.type}"`);
@@ -338,7 +424,7 @@ export const CHECKS: Check[] = [
     async run(ctx) {
       const sitemap = required(ctx.state.firstSitemap, "first sitemap");
       const item = sitemap.items[0];
-      const entity = await fetchEntity(item.url, ctx.client);
+      const entity = await budgetedFetchEntity(ctx, item.url, "traversal.entity");
       ctx.state.firstEntityUrl = item.url;
       ctx.state.firstEntity = entity;
 
@@ -361,28 +447,43 @@ export const CHECKS: Check[] = [
     requires: ["traversal.sitemap_index"],
     async run(ctx) {
       const index = required(ctx.state.index, "sitemap index");
-      let budgetStop: string | undefined;
+      // Paginated here rather than through `iterateSitemap` so that every
+      // page is charged to the shared budget and asserted individually —
+      // the client helper yields items, not pages, so a per-page size cap
+      // cannot be checked through it. The page `traversal.sitemap`
+      // already fetched is reused instead of being requested again.
+      // Budget exhaustion propagates to the runner, which records it as
+      // an inconclusive skip for this check.
       for (const ref of index.sitemaps) {
-        const first = await fetchSitemap(ref.url, null, ctx.client);
-        if (first.items.length > MAX_PAGE_SIZE) {
-          ctx.fail(`Sitemap ${ref.url} returned ${first.items.length} items, above the ${MAX_PAGE_SIZE}-item page cap`);
-        }
-        const seen = new Set<string>();
-        try {
-          for await (const item of iterateSitemap(ref.url, { ...ctx.client, expectedType: ref.type, budget: ctx.budget })) {
-            if (seen.has(item.id)) {
+        const seenIds = new Set<string>();
+        const seenCursors = new Set<string>();
+        let cursor: string | null | undefined;
+        for (;;) {
+          const reusable =
+            cursor === undefined && ref.url === ctx.state.firstSitemapUrl ? ctx.state.firstSitemap : undefined;
+          const page: SitemapV1 =
+            reusable ?? (await budgetedFetchSitemap(ctx, ref.url, cursor, "pagination.contract"));
+
+          if (page.type !== ref.type) {
+            ctx.fail(`Sitemap ${ref.url} declares type "${page.type}" but the index lists it as "${ref.type}"`);
+          }
+          if (page.items.length > MAX_PAGE_SIZE) {
+            ctx.fail(`Sitemap ${ref.url} returned ${page.items.length} items, above the ${MAX_PAGE_SIZE}-item page cap`);
+          }
+          for (const item of page.items) {
+            if (seenIds.has(item.id)) {
               ctx.fail(`Sitemap ${ref.url} yielded id "${item.id}" on more than one page`);
             }
-            seen.add(item.id);
+            seenIds.add(item.id);
           }
-        } catch (err) {
-          if (!(err instanceof AadpDiscoveryBudgetExceededError)) throw err;
-          budgetStop = err.message;
-          break;
+
+          cursor = page.cursor?.next ?? null;
+          if (!cursor) break;
+          if (seenCursors.has(cursor)) {
+            ctx.fail(`Sitemap ${ref.url} repeats cursor "${cursor}"; the walk would never terminate`);
+          }
+          seenCursors.add(cursor);
         }
-      }
-      if (budgetStop) {
-        ctx.skip(`Pagination walk stopped early by this run's traversal budget: ${budgetStop}`);
       }
     },
   },
@@ -394,7 +495,14 @@ export const CHECKS: Check[] = [
     async run(ctx) {
       const manifest = required(ctx.state.manifest, "manifest");
       const index = required(ctx.state.index, "sitemap index");
-      await assertCacheValidators(ctx, manifest.discovery.sitemap_index, index.checksum, index.generated_at);
+      await assertCacheValidators(
+        ctx,
+        manifest.discovery.sitemap_index,
+        index.checksum,
+        index.generated_at,
+        undefined,
+        "http.cache.sitemap_index"
+      );
     },
   },
   {
@@ -405,7 +513,7 @@ export const CHECKS: Check[] = [
     async run(ctx) {
       const url = required(ctx.state.firstSitemapUrl, "first sitemap url");
       const sitemap = required(ctx.state.firstSitemap, "first sitemap");
-      await assertCacheValidators(ctx, url, sitemap.checksum, sitemap.generated_at);
+      await assertCacheValidators(ctx, url, sitemap.checksum, sitemap.generated_at, "page", "http.cache.sitemap");
     },
   },
   {
@@ -416,7 +524,7 @@ export const CHECKS: Check[] = [
     async run(ctx) {
       const url = required(ctx.state.firstEntityUrl, "first entity url");
       const entity = required(ctx.state.firstEntity, "first entity");
-      await assertCacheValidators(ctx, url, entity.checksum, entity.updated_at);
+      await assertCacheValidators(ctx, url, entity.checksum, entity.updated_at, "entity", "http.cache.entity");
     },
   },
   {
@@ -435,8 +543,9 @@ export const CHECKS: Check[] = [
       for (const url of urls) {
         try {
           // Body discarded and content type unchecked: these are ordinary
-          // web pages, not AADP documents.
-          const probe = await probeUrl(url, ctx.client);
+          // web pages, not AADP documents. A policy or documentation URL
+          // very often lives on another host, so headers are scoped.
+          const probe = await probeUrl(url, ctx.scoped(url));
           if (probe.status === 404 || probe.status === 410) dead.push(`${url} -> HTTP ${probe.status}`);
         } catch (err) {
           unreachable.push(`${url} -> ${(err as Error).message}`);
@@ -459,15 +568,18 @@ export const CHECKS: Check[] = [
     title: "Unknown entity id returns 404 with a schema-valid not_found envelope",
     requires: ["traversal.entity"],
     async run(ctx) {
-      const sampleUrl = required(ctx.state.firstEntityUrl, "first entity url");
-      const target = withLastSegment(sampleUrl, "aadp-conformance-runner-does-not-exist.json");
-      const err = await captureRequestError(() => fetchEntity(target, ctx.client), ctx, target);
-      if (err.status !== 404) ctx.fail(`${target} returned HTTP ${err.status}, expected 404`);
-      if (!err.envelope) ctx.fail(`${target} returned 404 without an AADP error envelope`);
-      schemaCheck("error", err.envelope, ctx);
-      if (err.envelope!.error.code !== "not_found") {
-        ctx.fail(`${target} returned error code "${err.envelope!.error.code}", expected "not_found"`);
+      const target = ctx.negativeTargets.unknownEntityUrl;
+      if (!target) {
+        return ctx.inconclusive(
+          `No entity URL to probe: ${NEGATIVE_TARGET_RATIONALE}. Pass negativeTargets.unknownEntityUrl ` +
+            `(CLI: --unknown-entity-url) with a URL your deployment does not publish, to exercise the error envelope.`
+        );
       }
+      // An entity request even though it must 404: the budgets bound the
+      // requests this runner sends, not the documents it receives.
+      await assertErrorEnvelope(ctx, target, "not_found", (url) =>
+        budgetedFetchEntity(ctx, url, "errors.not_found")
+      );
     },
   },
   {
@@ -476,15 +588,16 @@ export const CHECKS: Check[] = [
     title: "Unpublished resource type returns 404 with a schema-valid unsupported_type envelope",
     requires: ["traversal.sitemap"],
     async run(ctx) {
-      const sampleUrl = required(ctx.state.firstSitemapUrl, "first sitemap url");
-      const target = withLastSegment(sampleUrl, "aadp-conformance-runner-unknown-type.json");
-      const err = await captureRequestError(() => fetchSitemap(target, null, ctx.client), ctx, target);
-      if (err.status !== 404) ctx.fail(`${target} returned HTTP ${err.status}, expected 404`);
-      if (!err.envelope) ctx.fail(`${target} returned 404 without an AADP error envelope`);
-      schemaCheck("error", err.envelope, ctx);
-      if (err.envelope!.error.code !== "unsupported_type") {
-        ctx.fail(`${target} returned error code "${err.envelope!.error.code}", expected "unsupported_type"`);
+      const target = ctx.negativeTargets.unknownTypeUrl;
+      if (!target) {
+        return ctx.inconclusive(
+          `No sitemap URL to probe: ${NEGATIVE_TARGET_RATIONALE}. Pass negativeTargets.unknownTypeUrl ` +
+            `(CLI: --unknown-type-url) with a sitemap URL for a type your deployment does not publish.`
+        );
       }
+      await assertErrorEnvelope(ctx, target, "unsupported_type", (url) =>
+        budgetedFetchSitemap(ctx, url, null, "errors.unsupported_type")
+      );
     },
   },
   {
@@ -514,17 +627,50 @@ export const CHECKS: Check[] = [
   },
 ];
 
-/** Runs `fn`, requiring it to reject with an `AadpRequestError`. */
-async function captureRequestError(
-  fn: () => Promise<unknown>,
+/**
+ * Requests `target` — a URL the caller stated the deployment does not
+ * publish — and asserts the AADP error envelope contract of spec v1.0
+ * §9: HTTP 404, a schema-valid envelope, and `expectedCode`.
+ *
+ * A successful response is a failure, not an inconclusive result: the
+ * target is caller-supplied (this runner never derives one), so a 200
+ * means the deployment served something it was declared not to have.
+ */
+async function assertErrorEnvelope(
   ctx: CheckContext,
-  target: string
-): Promise<AadpRequestError> {
+  target: string,
+  expectedCode: string,
+  fetcher: (url: string) => Promise<unknown>
+): Promise<void> {
+  let err: AadpRequestError | undefined;
   try {
-    await fn();
-  } catch (err) {
-    if (err instanceof AadpRequestError) return err;
-    ctx.fail(`${target} failed with ${(err as Error).name}: ${(err as Error).message}, expected an AADP error envelope`);
+    await fetcher(target);
+  } catch (caught) {
+    // Budget exhaustion belongs to the runner, not the deployment. Let
+    // runCheck convert it to an inconclusive skip instead of disguising
+    // it as a malformed error-envelope failure.
+    if (caught instanceof AadpDiscoveryBudgetExceededError) throw caught;
+    if (!(caught instanceof AadpRequestError)) {
+      ctx.fail(
+        `${target} failed with ${(caught as Error).name}: ${(caught as Error).message}, expected an AADP error envelope`
+      );
+    }
+    err = caught as AadpRequestError;
   }
-  return ctx.fail(`${target} returned a successful response, expected a 404 error envelope`);
+
+  // Signalled outside the catch: `ctx.*` throws to unwind the check, and
+  // doing that inside the `try` would land in this function's own handler.
+  if (!err) {
+    return ctx.fail(
+      `${target} was supplied as a URL this deployment does not publish, but it returned a successful ` +
+        `response instead of a 404 ${expectedCode} envelope`
+    );
+  }
+
+  if (err.status !== 404) ctx.fail(`${target} returned HTTP ${err.status}, expected 404`);
+  if (!err.envelope) ctx.fail(`${target} returned 404 without an AADP error envelope`);
+  schemaCheck("error", err.envelope, ctx);
+  if (err.envelope!.error.code !== expectedCode) {
+    ctx.fail(`${target} returned error code "${err.envelope!.error.code}", expected "${expectedCode}"`);
+  }
 }

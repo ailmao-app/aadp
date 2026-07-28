@@ -290,7 +290,10 @@ async function requestWithPolicy<T>(
       if (isRedirect) {
         // Drain the (typically empty) redirect body to release the socket.
         await res.body?.cancel().catch(() => {});
-        if (hop + 1 >= maxRedirects) {
+        // `hop` counts redirects already followed, so this one is number
+        // `hop + 1`: `maxRedirects: 1` follows exactly one redirect and
+        // rejects the second, and only `0` refuses the first.
+        if (hop + 1 > maxRedirects) {
           throw new TooManyRedirectsError(originalUrl, maxRedirects);
         }
         const next = new URL(res.headers.get("location")!, current);

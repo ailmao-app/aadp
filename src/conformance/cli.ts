@@ -34,6 +34,8 @@ interface CliOptions {
   maxEntities?: number;
   maxSitemaps?: number;
   deadline?: number;
+  unknownEntityUrl?: string;
+  unknownTypeUrl?: string;
   allowPrivateNetwork?: boolean;
   header: string[];
   crossOriginSafeHeader: string[];
@@ -44,10 +46,16 @@ interface CliOptions {
   color?: boolean;
 }
 
-function positiveInt(value: string): number {
+/**
+ * Parses an integer flag. Range checking is deliberately left to
+ * `runConformance`, so the CLI and a programmatic caller enforce exactly
+ * the same bounds instead of drifting apart (`--max-redirects 0`, for
+ * one, is a meaningful value the API accepts).
+ */
+function intOption(value: string): number {
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new InvalidArgumentError(`expected a positive integer, got "${value}"`);
+  if (!Number.isInteger(parsed)) {
+    throw new InvalidArgumentError(`expected an integer, got "${value}"`);
   }
   return parsed;
 }
@@ -76,7 +84,8 @@ program
   .description(
     "Run the AADP conformance suite against a deployment.\n\n" +
       "Exit codes: 0 conformant, 1 one or more checks failed, 2 the run could not be " +
-      "performed, 3 the deployment does not speak the requested AADP version."
+      "performed, 3 the deployment does not speak the requested AADP version, 4 the run " +
+      "left checks unfinished and certifies nothing."
   )
   .argument("<base-url>", "origin to exercise, e.g. https://example.com")
   .option(
@@ -84,13 +93,13 @@ program
     `AADP wire version to exercise (${SUPPORTED_CONFORMANCE_VERSIONS.join(", ")})`,
     "1.0"
   )
-  .option("--timeout <ms>", "per-request timeout in milliseconds", positiveInt)
-  .option("--max-redirects <n>", "maximum redirect hops per request", positiveInt)
-  .option("--max-response-bytes <n>", "maximum response body size in bytes", positiveInt)
-  .option("--max-pages <n>", "traversal budget: maximum sitemap pages fetched", positiveInt)
-  .option("--max-entities <n>", "traversal budget: maximum entities fetched", positiveInt)
-  .option("--max-sitemaps <n>", "traversal budget: maximum sitemaps the index may list", positiveInt)
-  .option("--deadline <ms>", "traversal budget: wall-clock deadline for the walk", positiveInt)
+  .option("--timeout <ms>", "per-request timeout in milliseconds", intOption)
+  .option("--max-redirects <n>", "maximum redirect hops per request", intOption)
+  .option("--max-response-bytes <n>", "maximum response body size in bytes", intOption)
+  .option("--max-pages <n>", "traversal budget: maximum sitemap pages fetched", intOption)
+  .option("--max-entities <n>", "traversal budget: maximum entities fetched", intOption)
+  .option("--max-sitemaps <n>", "traversal budget: maximum sitemaps the index may list", intOption)
+  .option("--deadline <ms>", "traversal budget: wall-clock deadline for the walk", intOption)
   .option(
     "--allow-private-network",
     "allow the target (and its redirects) to resolve to a private/loopback/link-local address. " +
@@ -104,6 +113,15 @@ program
       "dropped when a document points at another origin.",
     collect,
     []
+  )
+  .option(
+    "--unknown-entity-url <url>",
+    "URL of an entity that does not exist, for the not_found envelope check. Needed when entity " +
+      "URLs are query-based, opaque or signed, since AADP defines no routing template to derive one."
+  )
+  .option(
+    "--unknown-type-url <url>",
+    "URL of a sitemap for an unpublished type, for the unsupported_type envelope check."
   )
   .option("--json", "print the machine-readable report to stdout instead of the text report")
   .option("--output <file>", "also write the JSON report to <file>")
@@ -148,6 +166,12 @@ program
       failOnWarning: opts.failOnWarning,
       onCheck,
     };
+    if (opts.unknownEntityUrl || opts.unknownTypeUrl) {
+      options.negativeTargets = {
+        ...(opts.unknownEntityUrl ? { unknownEntityUrl: opts.unknownEntityUrl } : {}),
+        ...(opts.unknownTypeUrl ? { unknownTypeUrl: opts.unknownTypeUrl } : {}),
+      };
+    }
     const headers = parseHeaders(opts.header);
     if (Object.keys(headers).length > 0) options.headers = headers;
     if (opts.crossOriginSafeHeader.length > 0) options.crossOriginSafeHeaders = opts.crossOriginSafeHeader;

@@ -35,6 +35,18 @@ export interface CheckResult {
   message?: string;
   /** Supporting lines (schema errors, offending URLs, ...). */
   details?: string[];
+  /**
+   * Set on a `skipped` check that *should* have reached a verdict but
+   * could not — a traversal budget stopped the walk, or no trustworthy
+   * target could be derived. Such a run is reported `inconclusive`
+   * overall rather than `passed`: an incomplete run must never be
+   * certified as conformant by exit code `0`.
+   *
+   * A skip without this flag is a legitimate nothing-to-test (the server
+   * publishes no `usage_guidance`, no sitemaps, ...), which does not
+   * taint the verdict.
+   */
+  inconclusive?: boolean;
 }
 
 export interface ConformanceSummary {
@@ -43,6 +55,8 @@ export interface ConformanceSummary {
   failed: number;
   warnings: number;
   skipped: number;
+  /** Subset of `skipped` that left the run incomplete. See `CheckResult.inconclusive`. */
+  inconclusive: number;
 }
 
 /**
@@ -51,7 +65,7 @@ export interface ConformanceSummary {
  * failed check: the server was never fully exercised.
  */
 export interface ConformanceFatal {
-  code: "unsupported_version" | "unreachable" | "invalid_options";
+  code: "unsupported_version" | "unreachable";
   message: string;
 }
 
@@ -65,8 +79,13 @@ export interface ConformanceReport {
   started_at: string;
   finished_at: string;
   duration_ms: number;
-  /** `failed` if any check failed, a fatal occurred, or `failOnWarning` and any check warned. */
-  status: "passed" | "failed";
+  /**
+   * `failed` if any check failed, a fatal occurred, or `failOnWarning`
+   * and any check warned. `inconclusive` if nothing failed but the run
+   * could not complete every check it should have (see
+   * `CheckResult.inconclusive`) — never reported as `passed`.
+   */
+  status: "passed" | "failed" | "inconclusive";
   summary: ConformanceSummary;
   fatal?: ConformanceFatal;
   checks: CheckResult[];
@@ -83,9 +102,17 @@ export interface ConformanceOptions {
   maxRedirects?: number;
   /** Maximum response body size in bytes. Default 2 MiB (client default). */
   maxResponseBytes?: number;
-  /** Traversal budget: maximum sitemap pages fetched across the whole run. Default 100. */
+  /**
+   * Maximum sitemap-page requests across the whole run — traversal,
+   * pagination, cache-validator requests (a 304 is still a request this
+   * runner sent) and a caller-supplied negative target all count.
+   * Default 100.
+   */
   maxPages?: number;
-  /** Traversal budget: maximum entities fetched across the whole run. Default 200. */
+  /**
+   * Maximum entity requests across the whole run, counted the same way
+   * as `maxPages`. Default 200.
+   */
   maxEntities?: number;
   /** Traversal budget: maximum sitemaps listed by the index. Default 100. */
   maxSitemaps?: number;
@@ -105,10 +132,46 @@ export interface ConformanceOptions {
   headers?: Record<string, string>;
   /** Header names that may survive a cross-origin hop. See `FetchJsonOptions`. */
   crossOriginSafeHeaders?: string[];
+  /**
+   * URLs for the negative-path checks. Required to exercise them: AADP
+   * fixes the *authoritative* URL of each document but no routing
+   * template, so no URL can be constructed that is known not to exist —
+   * an entity URL may be content-addressed, signed, opaque, or behind a
+   * gateway that answers unknown paths outside AADP entirely. The runner
+   * therefore never derives one, and reports `inconclusive` for these
+   * two checks when they are not supplied.
+   *
+   * A URL given here is treated as authoritative: if the deployment
+   * answers it successfully, that is a failure, not an inconclusive
+   * result.
+   */
+  negativeTargets?: {
+    /** URL of an entity that does not exist. Must answer `404` + a `not_found` envelope. */
+    unknownEntityUrl?: string;
+    /** URL of a sitemap for an unpublished type. Must answer `404` + an `unsupported_type` envelope. */
+    unknownTypeUrl?: string;
+  };
   /** Treat `warning` results as failures in `report.status`. Default false. */
   failOnWarning?: boolean;
   /** Called as each check settles, for progress output. Never throws into the run. */
   onCheck?: (result: CheckResult) => void;
+}
+
+/**
+ * A `ConformanceOptions` value is unusable. Thrown before any request is
+ * made, so a misconfigured runner can never be recorded as a
+ * nonconformant deployment.
+ */
+export class InvalidConformanceOptionsError extends Error {
+  readonly code = "invalid_options" as const;
+
+  constructor(
+    public readonly option: string,
+    message: string
+  ) {
+    super(`Invalid conformance option "${option}": ${message}`);
+    this.name = "InvalidConformanceOptionsError";
+  }
 }
 
 /** `options.version` names a protocol version this runner cannot exercise. */

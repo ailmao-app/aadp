@@ -9,11 +9,13 @@
  */
 import { createRequire } from "node:module";
 import { createStrictUrlPolicy, createPermissiveUrlPolicy } from "../client/url-policy.js";
-import { createDiscoveryBudget } from "../client/discovery-budget.js";
+import { scopeHeadersToOrigin } from "../client/http.js";
+import { createDiscoveryBudget, AadpDiscoveryBudgetExceededError } from "../client/discovery-budget.js";
 import type { ClientOptions } from "../client/v1.0/index.js";
 import { CHECKS, CheckSignal, type Check, type CheckContext, type CheckOutcome, type RunState } from "./checks.js";
 import {
   SUPPORTED_CONFORMANCE_VERSIONS,
+  InvalidConformanceOptionsError,
   UnsupportedConformanceVersionError,
   type CheckResult,
   type CheckStatus,
@@ -54,16 +56,74 @@ function assertSupportedVersion(version: string): asserts version is Conformance
   }
 }
 
-function emptySummary(): ConformanceSummary {
-  return { total: 0, passed: 0, failed: 0, warnings: 0, skipped: 0 };
+/**
+ * Numeric options, and the smallest value each accepts. `maxRedirects`
+ * allows `0` — "do not follow redirects" is a meaningful policy — while
+ * every limit whose job is to permit at least one unit of work does not:
+ * `maxPages: 0` would make the first fetch throw a budget error, which
+ * `runCheck` would otherwise record as a failing check and blame on the
+ * deployment.
+ */
+export const NUMERIC_OPTION_MINIMUMS = {
+  timeoutMs: 1,
+  maxRedirects: 0,
+  maxResponseBytes: 1,
+  maxPages: 1,
+  maxEntities: 1,
+  maxSitemaps: 1,
+  deadlineMs: 1,
+} as const satisfies Record<string, number>;
+
+/**
+ * Rejects unusable options before any request is made. A configuration
+ * mistake must surface as an error the caller owns, never as a
+ * nonconformant verdict for the deployment under test.
+ */
+function assertUsableOptions(options: ConformanceOptions): void {
+  for (const [name, minimum] of Object.entries(NUMERIC_OPTION_MINIMUMS)) {
+    const value = options[name as keyof typeof NUMERIC_OPTION_MINIMUMS];
+    if (value === undefined) continue;
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new InvalidConformanceOptionsError(name, `expected a finite number, got ${JSON.stringify(value)}`);
+    }
+    if (!Number.isInteger(value)) {
+      throw new InvalidConformanceOptionsError(name, `expected an integer, got ${value}`);
+    }
+    if (value < minimum) {
+      throw new InvalidConformanceOptionsError(name, `must be at least ${minimum}, got ${value}`);
+    }
+  }
+
+  for (const [name, url] of Object.entries(options.negativeTargets ?? {})) {
+    if (url === undefined) continue;
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new InvalidConformanceOptionsError(`negativeTargets.${name}`, `not an absolute URL: ${JSON.stringify(url)}`);
+    }
+    if (!/^https?:$/.test(parsed.protocol)) {
+      throw new InvalidConformanceOptionsError(
+        `negativeTargets.${name}`,
+        `must be an http(s) URL, got "${parsed.protocol}"`
+      );
+    }
+  }
 }
 
-function tally(summary: ConformanceSummary, status: CheckStatus): void {
+function emptySummary(): ConformanceSummary {
+  return { total: 0, passed: 0, failed: 0, warnings: 0, skipped: 0, inconclusive: 0 };
+}
+
+function tally(summary: ConformanceSummary, result: CheckResult): void {
   summary.total++;
-  if (status === "passed") summary.passed++;
-  else if (status === "failed") summary.failed++;
-  else if (status === "warning") summary.warnings++;
-  else summary.skipped++;
+  if (result.status === "passed") summary.passed++;
+  else if (result.status === "failed") summary.failed++;
+  else if (result.status === "warning") summary.warnings++;
+  else {
+    summary.skipped++;
+    if (result.inconclusive) summary.inconclusive++;
+  }
 }
 
 /**
@@ -85,12 +145,15 @@ function describeThrown(err: unknown): { message: string; details?: string[] } {
  *
  * Never throws for a nonconformant server — that is what the report is
  * for. It throws only when the *request to run* is unusable
- * (`UnsupportedConformanceVersionError`, an unparseable base URL), so a
- * caller cannot mistake a misconfigured run for a passing deployment.
+ * (`UnsupportedConformanceVersionError`, `InvalidConformanceOptionsError`,
+ * an unparseable base URL), so a caller can neither mistake a
+ * misconfigured run for a passing deployment nor blame their own
+ * misconfiguration on the deployment.
  */
 export async function runConformance(options: ConformanceOptions): Promise<ConformanceReport> {
   const version = options.version ?? "1.0";
   assertSupportedVersion(version);
+  assertUsableOptions(options);
 
   let origin: string;
   try {
@@ -109,10 +172,21 @@ export async function runConformance(options: ConformanceOptions): Promise<Confo
     ...(options.crossOriginSafeHeaders ? { crossOriginSafeHeaders: options.crossOriginSafeHeaders } : {}),
   };
 
+  // Caller-configured headers may be a credential for the deployment
+  // under test, and a manifest can point its sitemap/entity/policy URLs
+  // at any host. Every fetch of a document-supplied URL goes through
+  // this, so such a URL only receives headers the caller allow-listed as
+  // cross-origin-safe — same rule the reference client applies in
+  // `discoverAllEntities`.
+  const homeOrigin = new URL(origin).origin;
+  const scoped = (targetUrl: string): ClientOptions => scopeHeadersToOrigin(client, targetUrl, homeOrigin);
+
   const state: RunState = { manifestUrl: new URL(WELL_KNOWN_PATH, `${origin}/`).toString() };
   const ctxBase = {
     baseUrl: origin,
     client,
+    scoped,
+    negativeTargets: options.negativeTargets ?? {},
     budget: createDiscoveryBudget({
       maxPages: options.maxPages ?? DEFAULT_MAX_PAGES,
       maxEntities: options.maxEntities ?? DEFAULT_MAX_ENTITIES,
@@ -132,7 +206,7 @@ export async function runConformance(options: ConformanceOptions): Promise<Confo
   const record = (result: CheckResult): void => {
     results.push(result);
     statusById.set(result.id, result.status);
-    tally(summary, result.status);
+    tally(summary, result);
     try {
       options.onCheck?.(result);
     } catch {
@@ -170,6 +244,10 @@ export async function runConformance(options: ConformanceOptions): Promise<Confo
 
   const finishedAt = new Date();
   const failed = summary.failed > 0 || fatal !== undefined || (options.failOnWarning === true && summary.warnings > 0);
+  // An incomplete run is reported as such rather than as a pass: a
+  // traversal budget that cut the walk short, or a check that could not
+  // derive a trustworthy target, leaves conformance unproven.
+  const status = failed ? "failed" : summary.inconclusive > 0 ? "inconclusive" : "passed";
 
   return {
     report_version: "1",
@@ -179,7 +257,7 @@ export async function runConformance(options: ConformanceOptions): Promise<Confo
     started_at: startedAt.toISOString(),
     finished_at: finishedAt.toISOString(),
     duration_ms: Date.now() - startedMs,
-    status: failed ? "failed" : "passed",
+    status,
     summary,
     ...(fatal ? { fatal } : {}),
     checks: results,
@@ -206,13 +284,17 @@ function unmetPrerequisite(
   return undefined;
 }
 
-async function runCheck(check: Check, ctxBase: Omit<CheckContext, "skip" | "warn" | "fail">): Promise<CheckResult> {
+async function runCheck(
+  check: Check,
+  ctxBase: Omit<CheckContext, "skip" | "inconclusive" | "warn" | "fail">
+): Promise<CheckResult> {
   const signal = (outcome: CheckOutcome | { status: "failed"; message: string; details?: string[] }): never => {
     throw new CheckSignal(outcome);
   };
   const ctx: CheckContext = {
     ...ctxBase,
     skip: (message, details) => signal({ status: "skipped", message, details }),
+    inconclusive: (message, details) => signal({ status: "skipped", message, details, inconclusive: true }),
     warn: (message, details) => signal({ status: "warning", message, details }),
     fail: (message, details) => signal({ status: "failed", message, details }),
   };
@@ -227,6 +309,7 @@ async function runCheck(check: Check, ctxBase: Omit<CheckContext, "skip" | "warn
       duration_ms: Date.now() - startedMs,
       ...(outcome?.message ? { message: outcome.message } : {}),
       ...(outcome?.details ? { details: outcome.details } : {}),
+      ...(outcome?.inconclusive ? { inconclusive: true } : {}),
     };
   } catch (err) {
     if (err instanceof CheckSignal) {
@@ -236,6 +319,21 @@ async function runCheck(check: Check, ctxBase: Omit<CheckContext, "skip" | "warn
         duration_ms: Date.now() - startedMs,
         ...(err.outcome.message ? { message: err.outcome.message } : {}),
         ...(err.outcome.details ? { details: err.outcome.details } : {}),
+        ...("inconclusive" in err.outcome && err.outcome.inconclusive ? { inconclusive: true } : {}),
+      };
+    }
+    // Handled here, once, for every check: running out of the caller's
+    // traversal budget is the runner stopping itself, not the deployment
+    // misbehaving — recording it as a failed check would blame the server
+    // for the caller's own limit. The run is incomplete, so the skip is
+    // marked inconclusive and the overall verdict cannot be "passed".
+    if (err instanceof AadpDiscoveryBudgetExceededError) {
+      return {
+        ...base,
+        status: "skipped",
+        duration_ms: Date.now() - startedMs,
+        message: `Stopped by this run's traversal budget: ${err.message}`,
+        inconclusive: true,
       };
     }
     const described = describeThrown(err);

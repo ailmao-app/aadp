@@ -272,8 +272,21 @@ Exit codes are stable for CI:
 | `1` | At least one check failed |
 | `2` | The run could not be performed (unreachable origin, unusable options) |
 | `3` | The deployment does not speak the requested AADP version |
+| `4` | Nothing failed, but the run left checks unfinished, so it certifies nothing |
 
-A `skipped` check reached no verdict — a prerequisite failed, the server publishes nothing to exercise, or a traversal budget stopped the walk early. It is never evidence of conformance.
+A `skipped` check reached no verdict — a prerequisite failed, the server publishes nothing to exercise, or a traversal budget stopped the walk early. It is never evidence of conformance. When the skip means the run itself was incomplete, the verdict is `inconclusive` and the exit code is `4`, never `0`.
+
+AADP fixes each document's authoritative URL but no routing template, so the runner cannot construct a URL that is known not to exist — entity URLs may be content-addressed, signed, opaque, or served through a gateway that answers unknown paths outside AADP entirely. The two error-envelope checks are therefore `inconclusive` until you name the targets yourself:
+
+```bash
+npx aadp-conformance https://example.com \
+  --unknown-entity-url "https://example.com/ai/v1.0/entities/article/does-not-exist.json" \
+  --unknown-type-url "https://example.com/ai/v1.0/sitemaps/does-not-exist.json"
+```
+
+A URL you pass here is taken as authoritative: if the deployment answers it successfully, the check fails.
+
+Headers you pass with `--header` are sent to the target origin only. A manifest can point its sitemap, entity, policy or documentation URLs at any host, so those requests drop your headers unless you allow-list them with `--cross-origin-safe-header`.
 
 The runner never sends a credential it was not given, never follows a URL from a document it has not validated, and never treats free text in a manifest as an instruction.
 
@@ -282,9 +295,14 @@ The runner never sends a credential it was not given, never follows a URL from a
 ```ts
 import { runConformance, exitCodeFor, renderTextReport } from "ail-aadp/conformance";
 
+// Throws UnsupportedConformanceVersionError or InvalidConformanceOptionsError
+// for a run it cannot perform; a nonconformant deployment is reported, not thrown.
 const report = await runConformance({
   baseUrl: "https://example.com",
   maxPages: 20,
+  negativeTargets: {
+    unknownEntityUrl: "https://example.com/ai/v1.0/entities/article/does-not-exist.json",
+  },
   onCheck: (check) => console.log(check.status, check.id),
 });
 
