@@ -438,3 +438,113 @@ AADP v1.0 được coi là triển khai xong khi một application độc lập 
 3. Publish manifest tại well-known URL.
 4. Được reference client discovery an toàn.
 5. Chạy conformance suite mà không cần code hoặc knowledge riêng của Ailmao.
+
+## 11. Roadmap sau AADP v1.0
+
+> Ghi chú định hướng: roadmap này mô tả thứ tự ưu tiên sau khi core v1.0
+> đạt release gate. Đây chưa phải cam kết về wire contract hoặc lịch phát hành.
+
+### Ưu tiên 1 — Conformance runner độc lập
+
+> **Đã triển khai** — `AADP-CONFORMANCE-001` và `AADP-CONFORMANCE-002` nằm ở
+> `src/conformance/` (runner, checks, report, CLI `aadp-conformance`), test tại
+> `tests/conformance/v1.0/runner.test.ts` và clean-install test tại
+> `tests/package/conformance-cli.test.ts`. `AADP-CONFORMANCE-003` (report JUnit
+> và GitHub Actions example) chưa làm.
+
+Biến conformance suite thành công cụ người triển khai có thể chạy trực tiếp từ
+package đã phát hành, không phụ thuộc source tree hoặc Vitest:
+
+```sh
+npx aadp-conformance https://example.com
+```
+
+Phạm vi đề xuất:
+
+- Cung cấp API programmatic `runConformance(...)`.
+- Cung cấp CLI với output terminal, JSON và exit code ổn định cho CI.
+- Hỗ trợ chọn protocol version, timeout, traversal budget và page limit.
+- Phân biệt rõ `error`, `warning` và `skipped`.
+- Thêm clean-install test để xác nhận CLI chạy từ npm tarball.
+
+Conformance check nằm trong service/module riêng; CLI chỉ parse input, gọi runner
+và render report.
+
+### Ưu tiên 2 — Server implementation SDK
+
+Cung cấp builder/serializer trung lập để application tạo document AADP an toàn:
+
+- Manifest, sitemap index, sitemap page, entity và error envelope builder.
+- Tự động canonicalize payload và sinh checksum khi phù hợp.
+- Helper cho timestamp, `ETag`, conditional GET và cache header.
+- Validate schema và semantic rule trước khi document được publish.
+
+SDK không phụ thuộc Next.js, Ailmao hoặc domain model cụ thể. Adapter framework
+và adapter application phải là layer mỏng nằm bên ngoài core.
+
+### Ưu tiên 3 — Interoperability và production certification
+
+- Tạo reference server trung lập, không dùng dữ liệu hoặc knowledge riêng của Ailmao.
+- Chạy conformance định kỳ với deployment staging/production.
+- Cung cấp GitHub Actions example và report JSON/JUnit cho CI.
+- Kiểm tra external consumer bằng package clean-install.
+- Công bố kết quả conformance có version và thời điểm chạy rõ ràng.
+
+Mục tiêu của phase này là chứng minh một bên thứ ba có thể triển khai AADP chỉ
+từ specification và package public.
+
+### Ưu tiên 4 — Module versioning và Relations Module
+
+Trước khi triển khai module mới, phải có ADR chốt:
+
+- Quan hệ giữa protocol core version và module version.
+- Module discovery, compatibility và export path.
+- Cách module mở rộng entity hoặc định nghĩa document riêng.
+- Traversal budget, cycle guard và authorization boundary.
+
+Sau ADR, ưu tiên triển khai Relations Module trước Answer Module và Evidence &
+Provenance Module, vì các module đó cần một contract liên kết resource thống nhất.
+Không dùng lại ví dụ version `0.2` trong design draft như một quyết định mặc định;
+version wire/module chính thức phải được chốt qua ADR.
+
+### Ưu tiên 5 — AI Usage Policy Extension
+
+Chuẩn hóa metadata machine-readable để publisher công bố cách dữ liệu có thể được
+sử dụng trong các hệ thống AI, tối thiểu gồm discovery, indexing, inference/RAG,
+model training, redistribution và commercial use.
+
+Extension này chỉ truyền tải tuyên bố policy của publisher; nó không tự tạo quyền
+pháp lý, không xác minh publisher có quyền cấp phép và không thay thế terms hoặc
+content license. Mỗi khai báo cấp quyền hoặc đặt điều kiện phải tham chiếu tới văn
+bản pháp lý đầy đủ qua `policies.content_license` hoặc một policy URL tương đương.
+
+Trước khi chuẩn hóa field mới, phải có ADR chốt:
+
+- Vocabulary, trạng thái `allowed`/`disallowed`/`conditional` và semantics khi omit.
+- Phạm vi áp dụng ở cấp manifest, resource type và entity.
+- Điều kiện attribution, compensation, thời hạn, jurisdiction và khả năng thu hồi.
+- Quy tắc xử lý xung đột với terms, content license, `robots.txt`,
+  `X-Robots-Tag` và resource metadata; mặc định áp dụng policy hạn chế hơn.
+- Cách client phân biệt publisher-declared metadata với quyền pháp lý đã được xác minh.
+- Versioning và compatibility giữa extension thử nghiệm với AADP core.
+
+Nên thử nghiệm dưới extension `x_ai_usage` của AADP v1.0. Chỉ đưa `ai_usage` thành
+field chuẩn trong một protocol version mới sau khi vocabulary, legal review và
+interoperability test đã ổn định. Conformance chỉ kiểm tra shape, reference và
+conflict semantics; không được tuyên bố một license có hiệu lực pháp lý.
+
+### Thứ tự issue đề xuất
+
+1. `AADP-CONFORMANCE-001`: Programmatic conformance runner.
+2. `AADP-CONFORMANCE-002`: CLI `aadp-conformance`.
+3. `AADP-CONFORMANCE-003`: JSON/JUnit report và CI example.
+4. `AADP-SERVER-001`: Typed document builders.
+5. `AADP-SERVER-002`: HTTP cache, checksum và validation helpers.
+6. `AADP-INTEROP-001`: Neutral reference server và clean-install verification.
+7. `AADP-MODULE-001`: ADR cho module versioning.
+8. `AADP-RELATIONS-001`: Relations schema, validator, conformance và client traversal.
+9. `AADP-ANSWER-001`: Answer Module.
+10. `AADP-EVIDENCE-001`: Evidence & Provenance Module.
+11. `AADP-AI-POLICY-001`: ADR cho AI usage vocabulary, legal boundary và conflict semantics.
+12. `AADP-AI-POLICY-002`: Experimental `x_ai_usage` schema, validator và examples.
+13. `AADP-AI-POLICY-003`: Interoperability, legal review và đề xuất chuẩn hóa cho protocol version mới.

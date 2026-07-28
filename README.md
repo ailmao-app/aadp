@@ -78,7 +78,7 @@ AADP has a read-only core. It does not replace OpenAPI, an authorization server,
 
 ## Installation
 
-Node.js 20.18.1 trở lên là bắt buộc.
+Node.js 20.18.1 or later is required.
 
 ```bash
 npm install ail-aadp
@@ -240,13 +240,85 @@ See the [v1.0 server implementation guide](docs/implementation-guide-v1.0.md) fo
 
 ## Run conformance tests
 
+### Command line
+
+Check any deployment straight from the published package. No source tree, no test framework:
+
+```bash
+npx aadp-conformance https://example.com
+```
+
+Useful flags:
+
+```bash
+# Machine-readable report on stdout, for CI
+npx aadp-conformance https://example.com --json --output conformance.json
+
+# Bound the traversal on a large catalogue
+npx aadp-conformance https://example.com --max-pages 20 --max-entities 50 --timeout 15000
+
+# Send an API key to the target origin only
+npx aadp-conformance https://example.com --header "Authorization: Bearer $TOKEN"
+
+# Local deployment: opt out of the strict anti-SSRF policy explicitly
+npx aadp-conformance http://localhost:3000 --allow-private-network
+```
+
+Exit codes are stable for CI:
+
+| Code | Meaning |
+|---|---|
+| `0` | Conformant. Warnings do not fail the run unless `--fail-on-warning` is passed |
+| `1` | At least one check failed |
+| `2` | The run could not be performed (unreachable origin, unusable options) |
+| `3` | The deployment does not speak the requested AADP version |
+| `4` | Nothing failed, but the run left checks unfinished, so it certifies nothing |
+
+A `skipped` check reached no verdict — a prerequisite failed, the server publishes nothing to exercise, or a traversal budget stopped the walk early. It is never evidence of conformance. When the skip means the run itself was incomplete, the verdict is `inconclusive` and the exit code is `4`, never `0`.
+
+AADP fixes each document's authoritative URL but no routing template, so the runner cannot construct a URL that is known not to exist — entity URLs may be content-addressed, signed, opaque, or served through a gateway that answers unknown paths outside AADP entirely. The two error-envelope checks are therefore `inconclusive` until you name the targets yourself:
+
+```bash
+npx aadp-conformance https://example.com \
+  --unknown-entity-url "https://example.com/ai/v1.0/entities/article/does-not-exist.json" \
+  --unknown-type-url "https://example.com/ai/v1.0/sitemaps/does-not-exist.json"
+```
+
+A URL you pass here is taken as authoritative: if the deployment answers it successfully, the check fails.
+
+Headers you pass with `--header` are sent to the target origin only. A manifest can point its sitemap, entity, policy or documentation URLs at any host, so those requests drop your headers unless you allow-list them with `--cross-origin-safe-header`.
+
+The runner never sends a credential it was not given, never follows a URL from a document it has not validated, and never treats free text in a manifest as an instruction.
+
+### TypeScript
+
+```ts
+import { runConformance, exitCodeFor, renderTextReport } from "ail-aadp/conformance";
+
+// Throws UnsupportedConformanceVersionError or InvalidConformanceOptionsError
+// for a run it cannot perform; a nonconformant deployment is reported, not thrown.
+const report = await runConformance({
+  baseUrl: "https://example.com",
+  maxPages: 20,
+  negativeTargets: {
+    unknownEntityUrl: "https://example.com/ai/v1.0/entities/article/does-not-exist.json",
+  },
+  onCheck: (check) => console.log(check.status, check.id),
+});
+
+console.log(renderTextReport(report));
+process.exitCode = exitCodeFor(report);
+```
+
+### In this repository
+
 Run the complete test suite, including the bundled mock servers:
 
 ```bash
 npm test
 ```
 
-Run the v1.0 conformance suite against a deployment:
+Run the v1.0 Vitest conformance suite against a deployment:
 
 ```bash
 AADP_BASE_URL=https://example.com \
@@ -262,6 +334,7 @@ AADP_BASE_URL=https://example.com \
 | `ail-aadp/client/v0.1` | Legacy v0.1 reference client and types |
 | `ail-aadp/client` | Compatibility entry point with v0.1 exports and the `v1` namespace |
 | `ail-aadp/validator` | Version-aware schema registry and semantic validator |
+| `ail-aadp/conformance` | Programmatic conformance runner, report renderers, and exit-code mapping |
 | `ail-aadp/canonical-json` | Canonicalization and checksum utilities |
 | `ail-aadp/schemas/v1.0/*` | v1.0 JSON Schemas |
 | `ail-aadp/schemas/v0.1/*` | v0.1 JSON Schemas |
@@ -302,8 +375,8 @@ Main directories:
 schemas/   JSON Schemas grouped by protocol version
 spec/      normative specifications grouped by version
 examples/  example payloads
-src/       reference clients, validators, and canonical JSON
-tests/     schema, semantic, checksum, and conformance tests
+src/       reference clients, validators, canonical JSON, and the conformance runner
+tests/     schema, semantic, checksum, conformance, and packaging tests
 docs/      ADRs, designs, and implementation guides
 ```
 
