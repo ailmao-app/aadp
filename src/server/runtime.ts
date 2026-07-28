@@ -14,7 +14,7 @@
 import { checksumOf } from "../canonical-json/index.js";
 import { validateDocument } from "../validator/index.js";
 import { checkManifestSemantics, hasSemanticErrors } from "../validator/semantic.js";
-import { notFound, unsupportedType, upstreamUnavailable } from "./errors.js";
+import { notFound, invalidRequest, unsupportedType, upstreamUnavailable } from "./errors.js";
 import { encodeCursor, decodeCursor } from "./cursor.js";
 import { cacheableJsonResponse, manifestResponse, errorResponse, preflightResponse } from "./http.js";
 import { RESOURCE_TYPE_GRAMMAR } from "./types.js";
@@ -66,6 +66,15 @@ function resolveUrl(baseUrl: string, maybeRelative: string): string {
   return new URL(maybeRelative, baseUrl).toString();
 }
 
+/** A malformed percent-encoded path segment (e.g. `%ZZ`) is a client request error, not a data-source failure — `decodeURIComponent` throwing `URIError` must not surface as `upstream_unavailable`. */
+function safeDecodeURIComponent(value: string, pathname: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw invalidRequest(`Malformed percent-encoding in path "${pathname}".`);
+  }
+}
+
 /** Splits a serialized entity's `${type}:${routeId}` id and confirms it belongs to `resource`. */
 function routeIdOf(resource: ResourceDefinition<unknown>, serialized: SerializedEntity): string {
   const prefix = `${resource.type}:`;
@@ -82,7 +91,7 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
   const baseUrl = config.baseUrl.replace(/\/+$/, "");
   const cacheMaxAgeSeconds = config.cacheMaxAgeSeconds ?? DEFAULT_CACHE_MAX_AGE_SECONDS;
   const pageSize = Math.min(config.pageSize ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
-  const basePath = `/ai/${version}`;
+  const basePath = `/ai/v${version}`; // spec/v1.0/specification.md:355-356 — wire base path is "/ai/v1.0", not "/ai/1.0"
   const sitemapIndexPath = `${basePath}/sitemap-index.json`;
 
   const resourcesByType = new Map<string, ResourceDefinition<unknown>>();
@@ -167,10 +176,14 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
     return doc;
   }
 
-  async function sitemap(type: string, cursorParam?: string | null): Promise<SitemapV1> {
+  async function sitemap(type: string, cursorParam?: string | null, request?: Request): Promise<SitemapV1> {
     const resource = findResource(type);
     const appCursor = cursorParam ? decodeCursor(type, version, cursorParam) : null;
-    const { items: records, nextCursor } = await resource.list({ cursor: appCursor, limit: pageSize } as ListArgs);
+    const { items: records, nextCursor } = await resource.list({
+      cursor: appCursor,
+      limit: pageSize,
+      request,
+    } as ListArgs);
 
     const items = await Promise.all(
       records.map(async (record) => {
@@ -202,9 +215,9 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
     return doc;
   }
 
-  async function entity(type: string, id: string): Promise<EntityV1> {
+  async function entity(type: string, id: string, request?: Request): Promise<EntityV1> {
     const resource = findResource(type);
-    const record = await resource.get({ id } as GetArgs);
+    const record = await resource.get({ id, request } as GetArgs);
     if (record === null || record === undefined) {
       throw notFound(`Entity ${type}:${id} was not found.`);
     }
@@ -255,10 +268,11 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
 
       const sitemapsPrefix = `${basePath}/sitemaps/`;
       if (pathname.startsWith(sitemapsPrefix) && pathname.endsWith(".json")) {
-        const type = decodeURIComponent(
-          pathname.slice(sitemapsPrefix.length, -".json".length)
+        const type = safeDecodeURIComponent(
+          pathname.slice(sitemapsPrefix.length, -".json".length),
+          pathname
         );
-        const doc = await sitemap(type, url.searchParams.get("cursor"));
+        const doc = await sitemap(type, url.searchParams.get("cursor"), request);
         return cacheableJsonResponse(request, doc, doc.checksum, doc.generated_at, cacheMaxAgeSeconds);
       }
 
@@ -270,8 +284,8 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
           throw notFound(`No route for ${pathname}`);
         }
         const type = rest.slice(0, slashIndex);
-        const id = decodeURIComponent(rest.slice(slashIndex + 1));
-        const doc = await entity(type, id);
+        const id = safeDecodeURIComponent(rest.slice(slashIndex + 1), pathname);
+        const doc = await entity(type, id, request);
         return cacheableJsonResponse(request, doc, doc.checksum, doc.updated_at, cacheMaxAgeSeconds);
       }
 

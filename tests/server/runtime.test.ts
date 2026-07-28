@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { defineAADP, defineResource, AadpServerError } from "../../src/server/index.js";
+import { describe, expect, it, vi } from "vitest";
+import { defineAADP, defineResource, AadpServerError, unauthorized } from "../../src/server/index.js";
 import type { ListArgs } from "../../src/server/index.js";
 
 interface Post {
@@ -57,7 +57,7 @@ describe("defineAADP() manifest", () => {
     const aadp = makeServer();
     const manifest = aadp.manifest();
     expect(manifest.aadp_version).toBe("1.0");
-    expect(manifest.discovery.sitemap_index).toBe("https://example.com/ai/1.0/sitemap-index.json");
+    expect(manifest.discovery.sitemap_index).toBe("https://example.com/ai/v1.0/sitemap-index.json");
     expect(manifest.resources).toEqual([{ type: "post" }]);
   });
 
@@ -78,7 +78,7 @@ describe("defineAADP() sitemap index and sitemap", () => {
   it("builds a valid sitemap index referencing each resource's sitemap URL", () => {
     const aadp = makeServer();
     const index = aadp.sitemapIndex();
-    expect(index.sitemaps).toEqual([{ type: "post", url: "https://example.com/ai/1.0/sitemaps/post.json" }]);
+    expect(index.sitemaps).toEqual([{ type: "post", url: "https://example.com/ai/v1.0/sitemaps/post.json" }]);
     expect(index.checksum).toMatch(/^sha256:[a-f0-9]{64}$/);
   });
 
@@ -87,7 +87,7 @@ describe("defineAADP() sitemap index and sitemap", () => {
     const page1 = await aadp.sitemap("post", null);
     expect(page1.items).toHaveLength(2);
     expect(page1.items[0].id).toBe("post:first-post");
-    expect(page1.items[0].url).toBe("https://example.com/ai/1.0/entities/post/first-post.json");
+    expect(page1.items[0].url).toBe("https://example.com/ai/v1.0/entities/post/first-post.json");
     expect(page1.cursor?.next).toBeTruthy();
 
     const page2 = await aadp.sitemap("post", page1.cursor!.next);
@@ -155,13 +155,13 @@ describe("defineAADP() handleRequest", () => {
 
   it("serves sitemap-index and entity routes with ETag + conditional GET", async () => {
     const aadp = makeServer();
-    const first = await aadp.handleRequest(new Request("https://example.com/ai/1.0/sitemaps/post.json"));
+    const first = await aadp.handleRequest(new Request("https://example.com/ai/v1.0/sitemaps/post.json"));
     expect(first.status).toBe(200);
     const etag = first.headers.get("ETag");
     expect(etag).toBeTruthy();
 
     const conditional = await aadp.handleRequest(
-      new Request("https://example.com/ai/1.0/sitemaps/post.json", {
+      new Request("https://example.com/ai/v1.0/sitemaps/post.json", {
         headers: { "If-None-Match": etag! },
       })
     );
@@ -170,13 +170,13 @@ describe("defineAADP() handleRequest", () => {
 
   it("serves an entity route and returns a 404 error envelope for an unknown id", async () => {
     const aadp = makeServer();
-    const ok = await aadp.handleRequest(new Request("https://example.com/ai/1.0/entities/post/first-post.json"));
+    const ok = await aadp.handleRequest(new Request("https://example.com/ai/v1.0/entities/post/first-post.json"));
     expect(ok.status).toBe(200);
     const okBody = await ok.json();
     expect(okBody.data.title).toBe("First post");
 
     const missing = await aadp.handleRequest(
-      new Request("https://example.com/ai/1.0/entities/post/nope.json")
+      new Request("https://example.com/ai/v1.0/entities/post/nope.json")
     );
     expect(missing.status).toBe(404);
     const body = await missing.json();
@@ -193,9 +193,51 @@ describe("defineAADP() handleRequest", () => {
   it("answers CORS preflight", async () => {
     const aadp = makeServer();
     const res = await aadp.handleRequest(
-      new Request("https://example.com/ai/1.0/sitemap-index.json", { method: "OPTIONS" })
+      new Request("https://example.com/ai/v1.0/sitemap-index.json", { method: "OPTIONS" })
     );
     expect(res.status).toBe(204);
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+  });
+
+  it("does not serve the legacy /ai/1.0/* path (spec base path is /ai/v1.0)", async () => {
+    const aadp = makeServer();
+    const res = await aadp.handleRequest(new Request("https://example.com/ai/1.0/sitemap-index.json"));
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 400 invalid_request for malformed percent-encoding, without calling the resource", async () => {
+    const get = vi.fn(() => null);
+    const aadp = makeServer({ resources: [makePostResource({ get })] });
+
+    const res = await aadp.handleRequest(new Request("https://example.com/ai/v1.0/entities/post/%ZZ.json"));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("invalid_request");
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("passes the inbound Request through to list()/get(), so a resource can enforce its own declared security", async () => {
+    const get = vi.fn(({ request }: { request?: Request }) => {
+      if (request?.headers.get("authorization") !== "Bearer secret") {
+        throw unauthorized("Missing or invalid credentials.");
+      }
+      return POSTS[0];
+    });
+    const aadp = makeServer({
+      resources: [makePostResource({ get, security: "bearer" })],
+      securitySchemes: { bearer: { type: "api_key", in: "header", name: "Authorization" } },
+    });
+
+    const unauthed = await aadp.handleRequest(new Request("https://example.com/ai/v1.0/entities/post/first-post.json"));
+    expect(unauthed.status).toBe(401);
+    const body = await unauthed.json();
+    expect(body.error.code).toBe("unauthorized");
+
+    const authed = await aadp.handleRequest(
+      new Request("https://example.com/ai/v1.0/entities/post/first-post.json", {
+        headers: { Authorization: "Bearer secret" },
+      })
+    );
+    expect(authed.status).toBe(200);
   });
 });

@@ -36,6 +36,8 @@ export {
   unsupportedType,
   upstreamUnavailable,
   rateLimited,
+  unauthorized,
+  forbidden,
 } from "./errors.js";
 export type {
   AadpServer,

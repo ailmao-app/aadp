@@ -37,15 +37,14 @@ export const aadp = defineAADP({
 /**
  * Wire this into your framework's route handlers — \`handleRequest\` is a
  * plain \`(Request) => Promise<Response>\`, so no adapter is needed. For a
- * Next.js App Router project:
+ * Next.js App Router project, each of the following files needs its own
+ * local import (an \`export ... from\` re-export does not create one):
  *
  *   // app/.well-known/ai-manifest.json/route.ts
- *   export { aadp } from "../../../aadp/aadp.server";
- *   export const GET = aadp.handleRequest;
- *
- *   // app/ai/1.0/sitemap-index.json/route.ts
- *   // app/ai/1.0/sitemaps/[type].json/route.ts
- *   // app/ai/1.0/entities/[type]/[id].json/route.ts
+ *   // app/ai/v1.0/sitemap-index.json/route.ts
+ *   // app/ai/v1.0/sitemaps/[type].json/route.ts
+ *   // app/ai/v1.0/entities/[type]/[id].json/route.ts
+ *   import { aadp } from "../../../aadp/aadp.server"; // adjust the relative path per route depth
  *   export const GET = aadp.handleRequest;
  *
  * Run \`npx aadp add-resource <type>\` to scaffold a new resource file

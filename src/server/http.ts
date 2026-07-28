@@ -3,7 +3,7 @@ import { AadpServerError } from "./errors.js";
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "If-None-Match, If-Modified-Since",
+  "Access-Control-Allow-Headers": "If-None-Match, If-Modified-Since, Authorization",
 };
 
 // RFC 9110 §8.8.3.2: conditional GET uses *weak* comparison — a CDN in

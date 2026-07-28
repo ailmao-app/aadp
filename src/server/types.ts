@@ -15,6 +15,16 @@ export interface ListArgs {
   /** `null` for the first page. Never a raw client string — see `../cursor.ts`. */
   cursor: string | null;
   limit: number;
+  /**
+   * The inbound request, when this call was triggered by `handleRequest()`.
+   * `undefined` when the resource is invoked directly through `AadpServer.sitemap()`
+   * (e.g. from build-time/SSG code, which has no HTTP request to inspect).
+   * `defineAADP()` never inspects `ResourceConfig.security` itself — if this
+   * resource declares one, this is where the resource's own code must read
+   * credentials off `request` and throw `unauthorized()`/`forbidden()` to
+   * enforce it.
+   */
+  request?: Request;
 }
 
 export interface ListResult<T> {
@@ -26,6 +36,8 @@ export interface ListResult<T> {
 export interface GetArgs {
   /** The id segment recovered from the entity URL — see `ResourceConfig.serialize`. */
   id: string;
+  /** See `ListArgs.request` — same caveat: `defineAADP()` does not enforce `security` itself. */
+  request?: Request;
 }
 
 export interface SerializedEntity<T = unknown> {
@@ -51,7 +63,13 @@ export interface ResourceConfig<T> {
   /** AADP resource type, e.g. `"post"`. Must match `^[a-z][a-z0-9_-]*$`. */
   type: string;
   mediaTypes?: string[];
-  /** Key into `AadpServerConfig.securitySchemes`, if this resource requires auth. */
+  /**
+   * Key into `AadpServerConfig.securitySchemes`, advertised in the manifest
+   * for this resource. This is metadata only — `defineAADP()` does not
+   * validate credentials or gate `list`/`get` on it. If set, `list`/`get`
+   * MUST enforce it themselves using `args.request`, or the manifest will
+   * describe a protection the server does not actually apply.
+   */
   security?: string;
   list: (args: ListArgs) => Promise<ListResult<T>> | ListResult<T>;
   get: (args: GetArgs) => Promise<T | null | undefined> | T | null | undefined;
@@ -82,8 +100,8 @@ export interface AadpServerConfig {
 export interface AadpServer {
   manifest(): ManifestV1;
   sitemapIndex(): SitemapIndexV1;
-  sitemap(type: string, cursor?: string | null): Promise<SitemapV1>;
-  entity(type: string, id: string): Promise<EntityV1>;
+  sitemap(type: string, cursor?: string | null, request?: Request): Promise<SitemapV1>;
+  entity(type: string, id: string, request?: Request): Promise<EntityV1>;
   /** Framework-agnostic Fetch handler — pass directly as a Next.js route handler `GET` export. */
   handleRequest(request: Request): Promise<Response>;
 }
