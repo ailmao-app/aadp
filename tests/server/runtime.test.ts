@@ -117,6 +117,38 @@ describe("defineAADP() config validation", () => {
     const aadp = makeServer({ cacheMaxAgeSeconds: 0 });
     expect(() => aadp.manifest()).not.toThrow();
   });
+
+  it.each([1e21, Number.MAX_SAFE_INTEGER + 1, 31536001])(
+    "rejects cacheMaxAgeSeconds %s (unsafe or over the upper bound)",
+    (cacheMaxAgeSeconds) => {
+      expect(() => makeServer({ cacheMaxAgeSeconds })).toThrow(/cacheMaxAgeSeconds must be a non-negative integer/);
+    }
+  );
+
+  it("accepts cacheMaxAgeSeconds at the upper bound", () => {
+    expect(() => makeServer({ cacheMaxAgeSeconds: 31536000 })).not.toThrow();
+  });
+
+  it.each(["X-Key\nInjected", "X-Key,Other", "X-Key: value", "X-Key value", "X-Kéy"])(
+    "rejects an api_key security scheme header name %j that is not a valid HTTP token",
+    (name) => {
+      expect(() =>
+        makeServer({
+          resources: [makePostResource({ security: "apikey" })],
+          securitySchemes: { apikey: { type: "api_key", in: "header", name } },
+        })
+      ).toThrow(/not a valid HTTP field name/);
+    }
+  );
+
+  it("accepts a valid api_key security scheme header name", () => {
+    expect(() =>
+      makeServer({
+        resources: [makePostResource({ security: "apikey" })],
+        securitySchemes: { apikey: { type: "api_key", in: "header", name: "X-API-Key" } },
+      })
+    ).not.toThrow();
+  });
 });
 
 describe("defineAADP() sitemap index and sitemap", () => {

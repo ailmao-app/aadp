@@ -52,6 +52,7 @@ export { AadpServerError, type AadpServerErrorCode } from "./errors.js";
 
 const WELL_KNOWN_PATH = "/.well-known/ai-manifest.json";
 const DEFAULT_CACHE_MAX_AGE_SECONDS = 300;
+const MAX_CACHE_MAX_AGE_SECONDS = 31536000; // 1 year — RFC 9111 delta-seconds has no hard cap, but this is a sane upper bound
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100; // schemas/v1.0/sitemap.schema.json items.maxItems
 
@@ -128,27 +129,45 @@ function validateBaseUrl(raw: string): string {
 
 function validatePositiveInt(value: number | undefined, defaultValue: number, name: string): number {
   if (value === undefined) return defaultValue;
-  if (!Number.isInteger(value) || value < 1) {
+  if (!Number.isSafeInteger(value) || value < 1) {
     throw new Error(`defineAADP(): ${name} must be a positive integer, got ${value}.`);
   }
   return value;
 }
 
-function validateNonNegativeInt(value: number | undefined, defaultValue: number, name: string): number {
+/**
+ * `Number.isInteger()` alone still accepts values like `1e21`, which
+ * round-trip through template interpolation as exponent notation
+ * (`"1e+21"`) — not a valid HTTP `delta-seconds` token, so a
+ * downstream proxy/browser silently ignores the `Cache-Control`
+ * directive built from it. `Number.isSafeInteger()` plus an explicit
+ * `max` keeps every accepted value representable as a plain decimal
+ * string.
+ */
+function validateBoundedNonNegativeInt(
+  value: number | undefined,
+  defaultValue: number,
+  name: string,
+  max: number
+): number {
   if (value === undefined) return defaultValue;
-  if (!Number.isInteger(value) || value < 0) {
-    throw new Error(`defineAADP(): ${name} must be a non-negative integer, got ${value}.`);
+  if (!Number.isSafeInteger(value) || value < 0 || value > max) {
+    throw new Error(`defineAADP(): ${name} must be a non-negative integer <= ${max}, got ${value}.`);
   }
   return value;
 }
 
+/** RFC 7230 §3.2.6 `token` grammar — what an HTTP header field-name must match. A `securitySchemes` `api_key` header `name` that fails this would either throw when placed into a `Headers` object or be silently misinterpreted by a browser. */
+const HTTP_TOKEN_GRAMMAR = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
 export function defineAADP(config: AadpServerConfig): AadpServer {
   const version = config.version ?? "1.0";
   const baseUrl = validateBaseUrl(config.baseUrl);
-  const cacheMaxAgeSeconds = validateNonNegativeInt(
+  const cacheMaxAgeSeconds = validateBoundedNonNegativeInt(
     config.cacheMaxAgeSeconds,
     DEFAULT_CACHE_MAX_AGE_SECONDS,
-    "cacheMaxAgeSeconds"
+    "cacheMaxAgeSeconds",
+    MAX_CACHE_MAX_AGE_SECONDS
   );
   const pageSize = Math.min(
     validatePositiveInt(config.pageSize, DEFAULT_PAGE_SIZE, "pageSize"),
@@ -164,6 +183,13 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
     .filter((scheme): scheme is { type: "api_key"; in: "header" | "query"; name: string } => scheme.type === "api_key")
     .filter((scheme) => scheme.in === "header")
     .map((scheme) => scheme.name);
+  for (const name of apiKeyHeaderNames) {
+    if (!HTTP_TOKEN_GRAMMAR.test(name)) {
+      throw new Error(
+        `defineAADP(): security scheme header name "${name}" is not a valid HTTP field name (must match ${HTTP_TOKEN_GRAMMAR}).`
+      );
+    }
+  }
   const corsAllowHeaders = buildCorsAllowHeaders(apiKeyHeaderNames);
 
   const resourcesByType = new Map<string, ResourceDefinition<unknown>>();
