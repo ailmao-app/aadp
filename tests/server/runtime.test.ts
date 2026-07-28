@@ -183,6 +183,70 @@ describe("defineAADP() manifest", () => {
       })
     ).not.toThrow();
   });
+
+  it("accepts a null-prototype plain object", () => {
+    const nullProtoObj = Object.assign(Object.create(null), { a: 1 });
+    expect(() =>
+      makeServer({
+        application: {
+          name: "Example App",
+          description: "An example AADP application.",
+          publisher: { name: "Example Publisher", url: "https://example.com" },
+          x_extra: nullProtoObj,
+        },
+      })
+    ).not.toThrow();
+  });
+
+  it("accepts the same non-cyclic object referenced from two sibling branches", () => {
+    const shared = { id: 1 };
+    expect(() =>
+      makeServer({
+        application: {
+          name: "Example App",
+          description: "An example AADP application.",
+          publisher: { name: "Example Publisher", url: "https://example.com" },
+          x_extra: { first: shared, second: shared },
+        },
+      })
+    ).not.toThrow();
+  });
+
+  it.each([
+    ["a Map", new Map([["key", "value"]])],
+    ["a Set", new Set([1, 2, 3])],
+    ["a Date", new Date()],
+    ["a typed array", new Uint8Array([1, 2, 3])],
+    ["a class instance", new (class Foo { x = 1; })()],
+  ])(
+    "rejects an x_* extension value that is %s, which would silently reshape on the wire",
+    (_label, value) => {
+      expect(() =>
+        makeServer({
+          application: {
+            name: "Example App",
+            description: "An example AADP application.",
+            publisher: { name: "Example Publisher", url: "https://example.com" },
+            x_extra: value,
+          },
+        })
+      ).toThrow(/is not JSON-safe/);
+    }
+  );
+
+  it("rejects a sparse array in an x_* extension value", () => {
+    const sparse = [1, , 3]; // eslint-disable-line no-sparse-arrays
+    expect(() =>
+      makeServer({
+        application: {
+          name: "Example App",
+          description: "An example AADP application.",
+          publisher: { name: "Example Publisher", url: "https://example.com" },
+          x_extra: sparse,
+        },
+      })
+    ).toThrow(/hole at index/);
+  });
 });
 
 describe("defineAADP() config validation", () => {

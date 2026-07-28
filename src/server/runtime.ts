@@ -138,8 +138,31 @@ function assertJsonSafe(value: unknown, path: string, seen: Set<object> = new Se
     }
     seen.add(obj);
     if (Array.isArray(obj)) {
+      // `.forEach()`/`.map()` silently skip holes in a sparse array, so a
+      // hole would pass validation here but come back as `null` from
+      // `JSON.stringify` — check every index is actually present first,
+      // the same way `canonical-json/canonicalize.ts` does.
+      for (let i = 0; i < obj.length; i++) {
+        if (!(i in obj)) {
+          throw new Error(`defineAADP(): manifest array at "${path || "/"}" has a hole at index ${i}, which is not JSON-safe.`);
+        }
+      }
       obj.forEach((item, i) => assertJsonSafe(item, `${path}/${i}`, seen));
     } else {
+      // `typeof` alone can't tell a plain object from a `Map`/`Set`/`Date`/
+      // typed array/class instance — all report `"object"`, but each
+      // serializes to something JSON.stringify produces with no relation
+      // to what was just walked here (`{}`, an ISO string, `{}`, an index
+      // object, ...). Only a plain object literal or `Object.create(null)`
+      // is accepted; anything else is rejected instead of silently
+      // re-shaped on the wire.
+      const proto = Object.getPrototypeOf(obj);
+      if (proto !== Object.prototype && proto !== null) {
+        const ctorName = (obj as { constructor?: { name?: string } }).constructor?.name ?? "non-plain object";
+        throw new Error(
+          `defineAADP(): manifest value at "${path || "/"}" is a ${ctorName} instance, which is not JSON-safe — only plain objects and arrays are supported in x_* extension values.`
+        );
+      }
       for (const [key, v] of Object.entries(obj as Record<string, unknown>)) {
         assertJsonSafe(v, `${path}/${key}`, seen);
       }
