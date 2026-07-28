@@ -108,6 +108,48 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+/**
+ * Confirms `value` is entirely within the JSON value domain (string,
+ * finite number, boolean, null, plain object, array — no `undefined`,
+ * function, symbol, bigint, non-finite number, or circular reference)
+ * before it is ever handed to `JSON.stringify()`. Schema validation
+ * confirms *shape*; it says nothing about `x_*` extension values (typed
+ * `unknown`), which is exactly where a non-JSON value would slip through
+ * and only fail once a request tries to serialize the response body.
+ * `seen` tracks objects currently on the recursion stack (not every
+ * object ever visited), so a value legitimately referenced from two
+ * sibling branches is fine — only a true cycle (an object containing
+ * itself) is rejected.
+ */
+function assertJsonSafe(value: unknown, path: string, seen: Set<object> = new Set()): void {
+  if (value === null) return;
+  const t = typeof value;
+  if (t === "string" || t === "boolean") return;
+  if (t === "number") {
+    if (!Number.isFinite(value as number)) {
+      throw new Error(`defineAADP(): manifest value at "${path || "/"}" is not JSON-safe: ${value} is not a finite number.`);
+    }
+    return;
+  }
+  if (t === "object") {
+    const obj = value as object;
+    if (seen.has(obj)) {
+      throw new Error(`defineAADP(): manifest contains a circular reference at "${path || "/"}".`);
+    }
+    seen.add(obj);
+    if (Array.isArray(obj)) {
+      obj.forEach((item, i) => assertJsonSafe(item, `${path}/${i}`, seen));
+    } else {
+      for (const [key, v] of Object.entries(obj as Record<string, unknown>)) {
+        assertJsonSafe(v, `${path}/${key}`, seen);
+      }
+    }
+    seen.delete(obj);
+    return;
+  }
+  throw new Error(`defineAADP(): manifest value at "${path || "/"}" is a ${t}, which is not JSON-safe.`);
+}
+
 /** Validates the shape `resource.list()` MUST return before its `nextCursor` is ever encoded into a published wire cursor — a malformed result (missing/undefined/non-string `nextCursor`, non-array `items`) must fail loudly now, not two requests later when a client tries to decode a cursor that was never valid. */
 function assertValidListResult(
   type: string,
@@ -290,6 +332,13 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
       policies: config.policies,
       ...(config.usageGuidance ? { usage_guidance: config.usageGuidance } : {}),
     };
+    // Schema validation only constrains shape; `x_*` extension fields are
+    // typed `unknown` and can carry a value schema validation would never
+    // catch (a BigInt, a function, a cycle) that only fails once a request
+    // tries to JSON.stringify the response body. Reject that here, before
+    // structuredClone (which tolerates BigInt) or JSON.stringify ever run
+    // against it.
+    assertJsonSafe(manifest, "");
     const snapshot = structuredClone(manifest);
 
     const schemaResult = validateDocument({ version, kind: "manifest", data: snapshot });
@@ -307,8 +356,14 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
     return deepFreeze(snapshot);
   })();
 
+  // `manifest()`'s declared return type is `ManifestV1` — an ordinary
+  // mutable interface — so handing out the frozen `manifestDoc` itself
+  // would let code that type-checks fine (`aadp.manifest().application.name
+  // = "x"`) throw a `TypeError` at runtime. Returning a fresh clone each
+  // call keeps the internal frozen snapshot as the single source of truth
+  // while making the public API's mutability contract actually true.
   function manifest(): ManifestV1 {
-    return manifestDoc;
+    return structuredClone(manifestDoc);
   }
 
   function sitemapIndex(): SitemapIndexV1 {

@@ -102,16 +102,22 @@ describe("defineAADP() manifest", () => {
     await expect(aadp.sitemap("note")).rejects.toMatchObject({ code: "unsupported_type" });
   });
 
-  it("returns a manifest object a caller cannot mutate to affect what handleRequest later serves", async () => {
+  it("returns a genuinely mutable manifest object (matching its ManifestV1 type) that handleRequest is unaffected by", async () => {
     const aadp = makeServer();
     const manifest = aadp.manifest();
+    // Must NOT throw: manifest()'s declared type is ordinary mutable
+    // ManifestV1, so mutating the returned object has to actually work —
+    // it just must not reach the internal frozen snapshot.
     expect(() => {
       (manifest.discovery as { sitemap_index: string }).sitemap_index = "not a uri";
-    }).toThrow();
+    }).not.toThrow();
 
     const res = await aadp.handleRequest(new Request("https://example.com/.well-known/ai-manifest.json"));
     const body = await res.json();
     expect(body.discovery.sitemap_index).toBe("https://example.com/ai/v1.0/sitemap-index.json");
+
+    // And each call returns its own independent clone.
+    expect(aadp.manifest().discovery.sitemap_index).toBe("https://example.com/ai/v1.0/sitemap-index.json");
   });
 
   it("is unaffected by mutating the application/policies objects passed into defineAADP() after it returns", () => {
@@ -128,6 +134,54 @@ describe("defineAADP() manifest", () => {
     });
     application.name = "Mutated after the fact";
     expect(aadp.manifest().application.name).toBe("Example App");
+  });
+
+  it.each([
+    ["a BigInt", 1n],
+    ["a function", () => {}],
+    ["a symbol", Symbol("x")],
+    ["undefined", undefined],
+    ["NaN", NaN],
+    ["Infinity", Infinity],
+  ])("rejects an x_* extension value that is %s, at defineAADP() time rather than at request time", (_label, value) => {
+    expect(() =>
+      makeServer({
+        application: {
+          name: "Example App",
+          description: "An example AADP application.",
+          publisher: { name: "Example Publisher", url: "https://example.com" },
+          x_extra: value,
+        },
+      })
+    ).toThrow(/not JSON-safe/);
+  });
+
+  it("rejects a manifest containing a circular reference", () => {
+    const cyclic: Record<string, unknown> = { name: "cyclic" };
+    cyclic.self = cyclic;
+    expect(() =>
+      makeServer({
+        application: {
+          name: "Example App",
+          description: "An example AADP application.",
+          publisher: { name: "Example Publisher", url: "https://example.com" },
+          x_extra: cyclic,
+        },
+      })
+    ).toThrow(/circular reference/);
+  });
+
+  it("accepts a plain-object/array x_* extension value", () => {
+    expect(() =>
+      makeServer({
+        application: {
+          name: "Example App",
+          description: "An example AADP application.",
+          publisher: { name: "Example Publisher", url: "https://example.com" },
+          x_extra: { nested: [1, "two", true, null] },
+        },
+      })
+    ).not.toThrow();
   });
 });
 
