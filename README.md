@@ -337,10 +337,11 @@ npx aadp init                    # creates ./aadp/aadp.server.ts
 npx aadp add-resource blog-post  # creates ./aadp/resources/blog-post.ts
 ```
 
-Both commands only ever create new files — they never parse or rewrite an
-existing config, so re-running `add-resource` for a second type does not
-risk corrupting the first. Pass `--dir <path>` to change where files land,
-and `--force` to overwrite a file that already exists.
+By default, both commands only create missing files and refuse to overwrite
+an existing one, so re-running `add-resource` for a second type does not
+risk corrupting the first. `--force` overwrites the exact target file; the
+CLI never parses or merges an existing config either way. Pass `--dir <path>`
+to change where files land.
 
 ## Run conformance tests
 
