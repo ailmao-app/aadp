@@ -18,7 +18,6 @@ import { notFound, invalidRequest, unsupportedType, upstreamUnavailable } from "
 import { encodeCursor, decodeCursor } from "./cursor.js";
 import {
   cacheableJsonResponse,
-  privateJsonResponse,
   manifestResponse,
   errorResponse,
   preflightResponse,
@@ -93,11 +92,68 @@ function routeIdOf(resource: ResourceDefinition<unknown>, serialized: Serialized
   return serialized.id.slice(prefix.length);
 }
 
+/**
+ * `baseUrl` is published verbatim as the prefix of every URL this server
+ * advertises (manifest discovery, sitemap/entity URLs), but `handleRequest`
+ * only ever matches an absolute root path (`/ai/v1.0/...`) against the
+ * *inbound* request's pathname — it has no way to also require and strip
+ * a path prefix. A `baseUrl` with a path, query, fragment or embedded
+ * credentials would therefore make the manifest advertise a URL nothing
+ * actually serves, so all of those are rejected here rather than at
+ * request time.
+ */
+function validateBaseUrl(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`defineAADP(): baseUrl "${raw}" is not a valid absolute URL.`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`defineAADP(): baseUrl "${raw}" must use http or https.`);
+  }
+  if (url.username || url.password) {
+    throw new Error(`defineAADP(): baseUrl "${raw}" must not contain userinfo credentials.`);
+  }
+  if (url.pathname !== "/" && url.pathname !== "") {
+    throw new Error(
+      `defineAADP(): baseUrl "${raw}" must be a bare origin with no path — got path "${url.pathname}". A path prefix is not supported: handleRequest() only matches an absolute root path.`
+    );
+  }
+  if (url.search || url.hash) {
+    throw new Error(`defineAADP(): baseUrl "${raw}" must not contain a query string or fragment.`);
+  }
+  return url.origin;
+}
+
+function validatePositiveInt(value: number | undefined, defaultValue: number, name: string): number {
+  if (value === undefined) return defaultValue;
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`defineAADP(): ${name} must be a positive integer, got ${value}.`);
+  }
+  return value;
+}
+
+function validateNonNegativeInt(value: number | undefined, defaultValue: number, name: string): number {
+  if (value === undefined) return defaultValue;
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`defineAADP(): ${name} must be a non-negative integer, got ${value}.`);
+  }
+  return value;
+}
+
 export function defineAADP(config: AadpServerConfig): AadpServer {
   const version = config.version ?? "1.0";
-  const baseUrl = config.baseUrl.replace(/\/+$/, "");
-  const cacheMaxAgeSeconds = config.cacheMaxAgeSeconds ?? DEFAULT_CACHE_MAX_AGE_SECONDS;
-  const pageSize = Math.min(config.pageSize ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+  const baseUrl = validateBaseUrl(config.baseUrl);
+  const cacheMaxAgeSeconds = validateNonNegativeInt(
+    config.cacheMaxAgeSeconds,
+    DEFAULT_CACHE_MAX_AGE_SECONDS,
+    "cacheMaxAgeSeconds"
+  );
+  const pageSize = Math.min(
+    validatePositiveInt(config.pageSize, DEFAULT_PAGE_SIZE, "pageSize"),
+    MAX_PAGE_SIZE
+  );
   const basePath = `/ai/v${version}`; // spec/v1.0/specification.md:355-356 — wire base path is "/ai/v1.0", not "/ai/1.0"
   const sitemapIndexPath = `${basePath}/sitemap-index.json`;
 
@@ -122,6 +178,17 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
     const resource = resourcesByType.get(type);
     if (!resource) throw unsupportedType(`Type "${type}" is not published by this server.`);
     return resource;
+  }
+
+  /**
+   * `Cache-Control` is the one axis allowed to differ for a resource that
+   * declared a `security` scheme — `private, no-store` keeps a shared
+   * cache from serving one principal's authorized response to another.
+   * `ETag`/`Last-Modified`/conditional-GET stay identical either way
+   * (spec v1.0 §7 applies unconditionally to sitemap/entity 2xx responses).
+   */
+  function cacheControlFor(type: string): string {
+    return resourcesByType.get(type)?.security ? "private, no-store" : `public, max-age=${cacheMaxAgeSeconds}`;
   }
 
   function entityUrl(type: string, routeId: string): string {
@@ -279,7 +346,14 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
 
       if (pathname === sitemapIndexPath) {
         const doc = sitemapIndex();
-        return cacheableJsonResponse(request, doc, doc.checksum, doc.generated_at, cacheMaxAgeSeconds, corsAllowHeaders);
+        return cacheableJsonResponse(
+          request,
+          doc,
+          doc.checksum,
+          doc.generated_at,
+          `public, max-age=${cacheMaxAgeSeconds}`,
+          corsAllowHeaders
+        );
       }
 
       const sitemapsPrefix = `${basePath}/sitemaps/`;
@@ -289,9 +363,14 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
           pathname
         );
         const doc = await sitemap(type, url.searchParams.get("cursor"), request);
-        return resourcesByType.get(type)?.security
-          ? privateJsonResponse(doc, corsAllowHeaders)
-          : cacheableJsonResponse(request, doc, doc.checksum, doc.generated_at, cacheMaxAgeSeconds, corsAllowHeaders);
+        return cacheableJsonResponse(
+          request,
+          doc,
+          doc.checksum,
+          doc.generated_at,
+          cacheControlFor(type),
+          corsAllowHeaders
+        );
       }
 
       const entitiesPrefix = `${basePath}/entities/`;
@@ -304,9 +383,14 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
         const type = safeDecodeURIComponent(rest.slice(0, slashIndex), pathname);
         const id = safeDecodeURIComponent(rest.slice(slashIndex + 1), pathname);
         const doc = await entity(type, id, request);
-        return resourcesByType.get(type)?.security
-          ? privateJsonResponse(doc, corsAllowHeaders)
-          : cacheableJsonResponse(request, doc, doc.checksum, doc.updated_at, cacheMaxAgeSeconds, corsAllowHeaders);
+        return cacheableJsonResponse(
+          request,
+          doc,
+          doc.checksum,
+          doc.updated_at,
+          cacheControlFor(type),
+          corsAllowHeaders
+        );
       }
 
       throw notFound(`No route for ${pathname}`);

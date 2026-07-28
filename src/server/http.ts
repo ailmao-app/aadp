@@ -42,13 +42,22 @@ function jsonHeaders(corsAllowHeaders: string, extra: Record<string, string>): H
   return new Headers({ "Content-Type": "application/json", ...corsHeaders(corsAllowHeaders), ...extra });
 }
 
-/** Shared response builder for a *public* sitemap-index/sitemap/entity — carries a checksum + timestamp and supports conditional GET (spec v1.0 §7). Never use this for a resource that declared a `security` scheme; use `privateJsonResponse` instead, or a shared/CDN cache will serve one principal's protected data to another. */
+/**
+ * Response builder for sitemap-index/sitemap/entity — every kind that
+ * carries a `checksum` + timestamp. Spec v1.0 §7 requires `ETag` +
+ * `Last-Modified` + `If-None-Match` support on **every** 2xx response for
+ * these three kinds, with no exception for a resource that declared a
+ * `security` scheme — only `cacheControl` should differ for those (e.g.
+ * `"private, no-store"` instead of `"public, max-age=..."`, so a shared
+ * cache still won't store the authorized response for a different
+ * principal), never the presence of the validator itself.
+ */
 export function cacheableJsonResponse(
   request: Request,
   body: unknown,
   checksum: string,
   timestamp: string,
-  maxAgeSeconds: number,
+  cacheControl: string,
   corsAllowHeaders: string
 ): Response {
   const etag = `"${checksum}"`;
@@ -58,7 +67,12 @@ export function cacheableJsonResponse(
   if (ifNoneMatchHits(ifNoneMatch, etag)) {
     return new Response(null, {
       status: 304,
-      headers: new Headers({ ETag: etag, "Last-Modified": lastModified, ...corsHeaders(corsAllowHeaders) }),
+      headers: new Headers({
+        ETag: etag,
+        "Last-Modified": lastModified,
+        "Cache-Control": cacheControl,
+        ...corsHeaders(corsAllowHeaders),
+      }),
     });
   }
 
@@ -67,22 +81,8 @@ export function cacheableJsonResponse(
     headers: jsonHeaders(corsAllowHeaders, {
       ETag: etag,
       "Last-Modified": lastModified,
-      "Cache-Control": `public, max-age=${maxAgeSeconds}`,
+      "Cache-Control": cacheControl,
     }),
-  });
-}
-
-/**
- * Response builder for a sitemap/entity whose resource declared a
- * `security` scheme. No `Cache-Control: public`, no ETag, no conditional
- * GET — a shared cache (CDN, reverse proxy) MUST NOT store this, since
- * the document was only authorized for the principal that just made
- * this request.
- */
-export function privateJsonResponse(body: unknown, corsAllowHeaders: string): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: jsonHeaders(corsAllowHeaders, { "Cache-Control": "private, no-store" }),
   });
 }
 

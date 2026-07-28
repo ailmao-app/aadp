@@ -74,6 +74,51 @@ describe("defineAADP() manifest", () => {
   });
 });
 
+describe("defineAADP() config validation", () => {
+  it("rejects a baseUrl that is not an absolute URL", () => {
+    expect(() => makeServer({ baseUrl: "not a url" })).toThrow(/not a valid absolute URL/);
+  });
+
+  it("rejects a baseUrl with a non-http(s) protocol", () => {
+    expect(() => makeServer({ baseUrl: "ftp://example.com" })).toThrow(/must use http or https/);
+  });
+
+  it("rejects a baseUrl with userinfo credentials", () => {
+    expect(() => makeServer({ baseUrl: "https://user:pass@example.com" })).toThrow(/userinfo credentials/);
+  });
+
+  it("rejects a baseUrl with a non-root path", () => {
+    expect(() => makeServer({ baseUrl: "https://example.com/prefix" })).toThrow(/must be a bare origin/);
+  });
+
+  it("rejects a baseUrl with a query string or fragment", () => {
+    expect(() => makeServer({ baseUrl: "https://example.com?x=1" })).toThrow(/query string or fragment/);
+    expect(() => makeServer({ baseUrl: "https://example.com#frag" })).toThrow(/query string or fragment/);
+  });
+
+  it("accepts a baseUrl with a trailing slash and normalizes it to a bare origin", () => {
+    const aadp = makeServer({ baseUrl: "https://example.com/" });
+    expect(aadp.manifest().discovery.sitemap_index).toBe("https://example.com/ai/v1.0/sitemap-index.json");
+  });
+
+  it.each([0, -1, 1.5, NaN, Infinity])("rejects pageSize %s", (pageSize) => {
+    expect(() => makeServer({ pageSize })).toThrow(/pageSize must be a positive integer/);
+  });
+
+  it("accepts pageSize above the schema's maxItems and clamps it internally", () => {
+    expect(() => makeServer({ pageSize: 101 })).not.toThrow();
+  });
+
+  it.each([-1, 1.5, NaN, Infinity])("rejects cacheMaxAgeSeconds %s", (cacheMaxAgeSeconds) => {
+    expect(() => makeServer({ cacheMaxAgeSeconds })).toThrow(/cacheMaxAgeSeconds must be a non-negative integer/);
+  });
+
+  it("accepts cacheMaxAgeSeconds of 0", () => {
+    const aadp = makeServer({ cacheMaxAgeSeconds: 0 });
+    expect(() => aadp.manifest()).not.toThrow();
+  });
+});
+
 describe("defineAADP() sitemap index and sitemap", () => {
   it("builds a valid sitemap index referencing each resource's sitemap URL", () => {
     const aadp = makeServer();
@@ -260,7 +305,7 @@ describe("defineAADP() handleRequest", () => {
     expect(body.type).toBe("post");
   });
 
-  it("marks a public resource's sitemap/entity as shared-cacheable but a resource with a security scheme as private/no-store", async () => {
+  it("marks a public resource's sitemap/entity as shared-cacheable but a resource with a security scheme as private/no-store — while both still carry ETag/Last-Modified and support conditional GET (spec v1.0 §7 applies unconditionally)", async () => {
     const aadp = makeServer({
       resources: [
         makePostResource(),
@@ -286,11 +331,21 @@ describe("defineAADP() handleRequest", () => {
       new Request("https://example.com/ai/v1.0/entities/private-post/first-post.json")
     );
     expect(privateRes.headers.get("Cache-Control")).toBe("private, no-store");
-    expect(privateRes.headers.get("ETag")).toBeNull();
+    const privateEtag = privateRes.headers.get("ETag");
+    expect(privateEtag).toBeTruthy();
+    expect(privateRes.headers.get("Last-Modified")).toBeTruthy();
+
+    const privateConditional = await aadp.handleRequest(
+      new Request("https://example.com/ai/v1.0/entities/private-post/first-post.json", {
+        headers: { "If-None-Match": privateEtag! },
+      })
+    );
+    expect(privateConditional.status).toBe(304);
+    expect(privateConditional.headers.get("Cache-Control")).toBe("private, no-store");
 
     const privateSitemap = await aadp.handleRequest(new Request("https://example.com/ai/v1.0/sitemaps/private-post.json"));
     expect(privateSitemap.headers.get("Cache-Control")).toBe("private, no-store");
-    expect(privateSitemap.headers.get("ETag")).toBeNull();
+    expect(privateSitemap.headers.get("ETag")).toBeTruthy();
   });
 
   it("allow-lists a configured api_key header name in the CORS preflight response", async () => {
