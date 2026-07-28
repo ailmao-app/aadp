@@ -4,10 +4,14 @@ All notable changes to `ail-aadp` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Protocol compatibility follows [ADR-0004](docs/adr/0004-backward-compatibility.md); released schemas are immutable and wire-breaking changes require a new protocol version.
 
-## Unreleased
+## 1.0.5 - 2026-07-28
 
 ### Added
 
+- Added a declarative server runtime at `ail-aadp/server`: `defineAADP()`/`defineResource()` build and serve the manifest, sitemap index, sitemap, and entity documents from application-supplied `list`/`get`/`serialize` callbacks — `list`/`get` may call a database, an internal HTTP API, or anything else, and `serialize()` is the one mandatory boundary between a raw record and the published document. `handleRequest` is a plain `(Request) => Promise<Response>`, usable directly as a Next.js route handler with no adapter.
+- The runtime validates the manifest (schema + semantic rules) at `defineAADP()` time, computes checksums and sets `ETag`/`Last-Modified`/`Cache-Control` (honoring `If-None-Match` with `304`) on every sitemap/entity response, and wraps pagination cursors so one resource type's cursor is rejected if replayed against another type or protocol version.
+- A resource's `security` field is advertised in the manifest but is metadata only — `defineAADP()` never checks credentials itself. `list`/`get` receive the inbound `request` and must enforce their own declared scheme, throwing the new `unauthorized()`/`forbidden()` errors to reject it. A resource with `security` set gets `Cache-Control: private, no-store` automatically, so an authorized response is never served to a different caller from a shared cache.
+- Added the `aadp` binary (`npx aadp init`, `npx aadp add-resource <type>`) and `ail-aadp/scaffold` to scaffold a starter `defineAADP()` config and resource file. Both commands only ever create new files; they never parse or rewrite an existing config.
 - Added a standalone conformance runner at `ail-aadp/conformance`: `runConformance(...)` executes the AADP v1.0 checks against a live deployment and returns a structured report, with no test framework and no repository fixtures involved.
 - Added the `aadp-conformance` binary (`npx aadp-conformance https://example.com`) with a text report, a `--json` report for CI, `--output` to a file, and stable exit codes (`0` conformant, `1` failed check, `2` run could not be performed, `3` protocol version mismatch, `4` run left unfinished).
 - Added traversal controls to the runner and CLI: protocol version, request timeout, redirect and response-size caps, sitemap page/entity/sitemap-count budgets, and a wall-clock deadline. Every document fetch is charged to one shared budget, and a run a budget cut short is reported `inconclusive` with exit code `4` — never as a pass.
