@@ -15,6 +15,7 @@ The `ail-aadp` package provides:
 - A reference client with SSRF, timeout, redirect, and response-size controls.
 - Canonical JSON and SHA-256 checksum utilities.
 - A conformance suite for AADP server implementations.
+- A declarative `defineAADP()` server runtime and scaffold CLI for building one.
 
 The current protocol version is **AADP v1.0**.
 
@@ -238,6 +239,110 @@ Before claiming support:
 
 See the [v1.0 server implementation guide](docs/implementation-guide-v1.0.md) for details.
 
+## Build a server with `defineAADP()`
+
+`ail-aadp/server` generates and serves the four routes above from a declarative
+config, so you do not hand-write the manifest/sitemap/entity builders, checksum,
+cache headers or error envelope yourself:
+
+```ts
+import { defineAADP, defineResource } from "ail-aadp/server";
+
+interface Post {
+  slug: string;
+  title: string;
+  summary: string;
+  updatedAt: string;
+}
+
+const posts = defineResource<Post>({
+  type: "post",
+  // list/get do whatever your application does today — a database query,
+  // an internal HTTP API call, anything. defineAADP() never assumes a
+  // data source.
+  list: ({ cursor, limit }) => postRepository.listPublic({ cursor, limit }),
+  get: ({ id }) => postRepository.findPublicBySlug(id),
+  // serialize() is the one mandatory boundary: it is the only place a raw
+  // record may leak into a published document, so only return public fields.
+  serialize: (post) => ({
+    id: `post:${post.slug}`,
+    updatedAt: post.updatedAt,
+    canonicalUrl: `/posts/${post.slug}`,
+    data: { title: post.title, summary: post.summary },
+  }),
+});
+
+const aadp = defineAADP({
+  baseUrl: "https://example.com",
+  application: {
+    name: "Example Application",
+    description: "Public application description.",
+    publisher: { name: "Example Publisher", url: "https://example.com" },
+  },
+  policies: {
+    robots: "https://example.com/robots.txt",
+    terms: "https://example.com/terms",
+  },
+  resources: [posts],
+});
+
+// handleRequest is a plain (Request) => Promise<Response>, so it plugs
+// straight into a Next.js App Router route handler with no adapter:
+export const GET = aadp.handleRequest;
+```
+
+Wire one `GET` route per path (`/.well-known/ai-manifest.json`,
+`/ai/v1.0/sitemap-index.json`, `/ai/v1.0/sitemaps/[type].json`,
+`/ai/v1.0/entities/[type]/[id].json`) to the same `aadp.handleRequest` — it
+routes internally by request path.
+
+What the runtime does for you:
+
+- Validates the manifest (schema + semantic rules) at `defineAADP()` time, so
+  a misconfigured application fails at startup, not on the first request.
+- Builds sitemap/entity documents, computes their checksum, and sets `ETag`,
+  `Last-Modified`, and `Cache-Control`, honoring `If-None-Match` with `304`.
+- Wraps pagination cursors so one resource type's cursor is rejected if
+  replayed against another type or protocol version.
+- Turns a thrown `AadpServerError` (`notFound`, `invalidRequest`,
+  `unsupportedType`, `upstreamUnavailable`, `rateLimited`, `unauthorized`,
+  `forbidden`) into the spec's JSON error envelope.
+
+What it does **not** do — `security`/`securitySchemes` are advertised in the
+manifest as metadata only. `defineAADP()` never checks credentials itself. If
+a resource declares `security`, its own `list`/`get` must read `args.request`
+and throw `unauthorized()`/`forbidden()` to actually enforce it:
+
+```ts
+import { unauthorized } from "ail-aadp/server";
+
+get: ({ id, request }) => {
+  if (request?.headers.get("authorization") !== `Bearer ${process.env.API_TOKEN}`) {
+    throw unauthorized("Missing or invalid credentials.");
+  }
+  return postRepository.findPrivateBySlug(id);
+},
+```
+
+A resource with `security` set gets `Cache-Control: private, no-store`
+automatically (never the shared/CDN-cacheable `public, max-age=...` a
+public resource gets), so an authorized response for one caller is never
+served to another from a shared cache — but the authorization check itself
+is always the resource's own responsibility.
+
+### Scaffold a new server
+
+```bash
+npx aadp init                    # creates ./aadp/aadp.server.ts
+npx aadp add-resource blog-post  # creates ./aadp/resources/blog-post.ts
+```
+
+By default, both commands only create missing files and refuse to overwrite
+an existing one, so re-running `add-resource` for a second type does not
+risk corrupting the first. `--force` overwrites the exact target file; the
+CLI never parses or merges an existing config either way. Pass `--dir <path>`
+to change where files land.
+
 ## Run conformance tests
 
 ### Command line
@@ -335,9 +440,13 @@ AADP_BASE_URL=https://example.com \
 | `ail-aadp/client` | Compatibility entry point with v0.1 exports and the `v1` namespace |
 | `ail-aadp/validator` | Version-aware schema registry and semantic validator |
 | `ail-aadp/conformance` | Programmatic conformance runner, report renderers, and exit-code mapping |
+| `ail-aadp/server` | Declarative `defineAADP()`/`defineResource()` server runtime |
+| `ail-aadp/scaffold` | Programmatic API behind the `aadp` scaffold CLI |
 | `ail-aadp/canonical-json` | Canonicalization and checksum utilities |
 | `ail-aadp/schemas/v1.0/*` | v1.0 JSON Schemas |
 | `ail-aadp/schemas/v0.1/*` | v0.1 JSON Schemas |
+
+Binaries: `aadp-validate`, `aadp-conformance`, `aadp` (`aadp init` / `aadp add-resource`).
 
 ## Versioning
 
