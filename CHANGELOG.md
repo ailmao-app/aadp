@@ -4,6 +4,14 @@ All notable changes to `ail-aadp` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Protocol compatibility follows [ADR-0004](docs/adr/0004-backward-compatibility.md); released schemas are immutable and wire-breaking changes require a new protocol version.
 
+## 1.0.6 - 2026-07-29
+
+### Added
+
+- Added a `LICENSE` file (MIT) and included it in the published tarball.
+- Added a GitHub Actions CI workflow that runs `npm ci`, build, test, `npm audit --omit=dev`, and `npm pack --dry-run` on every push and pull request.
+- Added `InvalidOptionError`, thrown by `fetchJson`/`probeUrl` when `timeoutMs`, `maxRedirects`, or `maxResponseBytes` is non-finite or out of range, before any request is made.
+
 ## 1.0.5 - 2026-07-28
 
 ### Added

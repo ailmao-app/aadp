@@ -1,7 +1,7 @@
 # AADP v0.1 — Security Considerations
 
 Status: required reading before implementing an AADP server or adapter,
-per the Phase A3 release gate in `docs/IMPLEMENTATION_PLAN.md` §8.
+per the release gate in `docs/IMPLEMENTATION_PLAN.md`.
 
 ## 1. AADP is read-only by design
 
@@ -22,9 +22,9 @@ Servers MUST treat every field they expose through a sitemap or entity as
   are integrity/freshness aids, not access control.
 
 Implementers MUST run an explicit field allow-list / export audit before
-wiring an existing internal type into an AADP serializer (this is exactly
-what Phase B0 mandates for the Ailmao adapter — mapping document +
-"data exposure matrix"). Never serialize an internal model directly;
+wiring an existing internal type into an AADP serializer — see the
+"Application adapters" delivery phase in `docs/IMPLEMENTATION_PLAN.md`.
+Never serialize an internal model directly;
 never assume a field is safe because it's "already public in the UI" —
 UI rendering and JSON export have different blast radii (e.g. moderation
 state, internal IDs, soft-deleted flags visible in dev tools but not
@@ -34,8 +34,7 @@ meant for bulk machine consumption).
 
 - Canonical IDs (`{type}:{id}`) are stable public identifiers by
   construction — a server publishing them is committing to their
-  stability (see spec §2, ADR discussion in `IMPLEMENTATION_PLAN.md` §6
-  re: username-based IDs). Implementers MUST confirm the underlying ID is
+  stability (see spec §2). Implementers MUST confirm the underlying ID is
   actually immutable before using it as a canonical ID; otherwise entity
   URLs silently 404 after a rename and any external index becomes stale.
 - Sitemaps make full enumeration of a resource type trivial by design —
@@ -57,8 +56,7 @@ meant for bulk machine consumption).
   this at test time, but servers are the ones who must not produce it.
 - **Upstream fan-out**: a naive adapter that calls its origin API once per
   sitemap item defeats caching and amplifies load. Implementers SHOULD
-  batch or cache upstream reads (see `IMPLEMENTATION_PLAN.md` §4.2 data
-  source layer) rather than fan out per-request.
+  batch or cache upstream reads rather than fan out per-request.
 - Standard HTTP-layer mitigations (rate limiting, CDN caching honoring
   `Cache-Control`, WAF) are the deploying operator's responsibility; AADP
   only provides the cache headers and pagination cap that make such
@@ -89,8 +87,10 @@ v0.1.
 
 ## 7. No authentication in v0.1
 
-AADP v0.1 is unauthenticated/public-only by design (see roadmap in
-`AADP_Draft.md` — auth is deferred to v0.5+). Consequences:
+AADP v0.1 is unauthenticated/public-only by design; auth was deferred to a
+later protocol version and later shipped as the `security` field on v1.0
+manifest resources (metadata-only — see `docs/MANIFEST_V1.0_DESIGN.md`).
+Consequences for a v0.1 deployment:
 
 - Do not deploy an AADP v0.1 endpoint for data that requires access
   control. There is no protocol-level mechanism to restrict it.
@@ -100,10 +100,8 @@ AADP v0.1 is unauthenticated/public-only by design (see roadmap in
 
 ## 8. SSR / server boundary leakage (adapter-specific, forward note)
 
-For adapters that sit in front of an internal API (as planned for
-`ailmao-landing` in Chặng B), the adapter's own base URL/config and any
-upstream credentials MUST stay server-side only. The AADP layer being
-public by design makes this an easy place to accidentally leak an
-internal upstream URL or debug header into a response — Phase B4
-explicitly requires testing this boundary before pilot production
-deploy.
+For adapters that sit in front of an internal API, the adapter's own base
+URL/config and any upstream credentials MUST stay server-side only. The
+AADP layer being public by design makes this an easy place to
+accidentally leak an internal upstream URL or debug header into a
+response — test this boundary explicitly before any production deploy.

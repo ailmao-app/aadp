@@ -116,6 +116,29 @@ export class InvalidContentTypeError extends AadpClientError {
   }
 }
 
+export class InvalidOptionError extends AadpClientError {
+  constructor(name: string, value: number, reason: string) {
+    super(`Invalid "${name}" option (${value}): ${reason}`, "invalid_option");
+  }
+}
+
+/**
+ * Guards the numeric `FetchJsonOptions` against non-finite or out-of-range
+ * values before they reach `setTimeout`/redirect-counting/body-size
+ * comparisons. `setTimeout` silently clamps a negative/NaN delay to fire
+ * immediately, and `Infinity` never fires — either turns "invalid input"
+ * into a confusing hang or premature abort instead of a clear error at the
+ * call site that passed it.
+ */
+function assertValidNumberOption(name: string, value: number, min: number): void {
+  if (!Number.isFinite(value)) {
+    throw new InvalidOptionError(name, value, "must be a finite number");
+  }
+  if (value < min) {
+    throw new InvalidOptionError(name, value, `must be >= ${min}`);
+  }
+}
+
 export class MalformedJsonError extends AadpClientError {
   constructor(url: string, cause: unknown) {
     super(`Response from ${url} is not valid JSON: ${(cause as Error)?.message ?? cause}`, "malformed_json");
@@ -258,6 +281,9 @@ async function requestWithPolicy<T>(
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
   const maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+  assertValidNumberOption("timeoutMs", timeoutMs, 1);
+  assertValidNumberOption("maxRedirects", maxRedirects, 0);
+  assertValidNumberOption("maxResponseBytes", maxResponseBytes, 1);
   const safeNames = crossOriginSafeNameSet(options.crossOriginSafeHeaders);
   const dispatcher = dispatcherFor(policy);
 

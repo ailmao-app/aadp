@@ -48,6 +48,7 @@ export {
   ResponseTooLargeError,
   InvalidContentTypeError,
   MalformedJsonError,
+  InvalidOptionError,
 } from "../http.js";
 export {
   AadpSchemaValidationError,
