@@ -4,6 +4,12 @@ All notable changes to `ail-aadp` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Protocol compatibility follows [ADR-0004](docs/adr/0004-backward-compatibility.md); released schemas are immutable and wire-breaking changes require a new protocol version.
 
+## 1.0.7 - 2026-07-29
+
+### Added
+
+- Added `routes` to `AadpServerConfig`: `sitemapIndex`/`sitemap`/`entity` pathname templates let an application publish and serve AADP discovery documents at custom routes instead of the SDK's `/ai/v1.0/...` default convention. `sitemap` requires exactly one `{type}` placeholder, `entity` requires exactly one `{type}` and one `{id}`; templates are compiled once at `defineAADP()` time into both the URL builder and `handleRequest()`'s matcher, so the two can never drift apart. Malformed templates or routes that could match the same inbound pathname (including a collision with the fixed `/.well-known/ai-manifest.json`) throw immediately at definition time. Omitted fields keep the existing default, so this is fully backward compatible.
+
 ## 1.0.6 - 2026-07-29
 
 ### Added
