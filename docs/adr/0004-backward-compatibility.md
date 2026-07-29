@@ -40,5 +40,6 @@ servers.
   permanent, stable contract.
 - The project must maintain multiple schema directories in parallel once
   a new minor/major version ships, rather than editing in place.
-- This ADR is the basis for the Phase A3 release gate requirement that
-  the v0.1 artifact be versioned and checksummed as immutable.
+- This ADR is the basis for the release gate requirement (see
+  `docs/IMPLEMENTATION_PLAN.md`) that the v0.1 artifact be versioned and
+  checksummed as immutable.
