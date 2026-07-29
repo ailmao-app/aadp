@@ -48,6 +48,7 @@ export {
   ResponseTooLargeError,
   InvalidContentTypeError,
   MalformedJsonError,
+  InvalidOptionError,
 } from "../http.js";
 export { AadpRequestError, type AadpErrorEnvelope } from "../errors.js";
 export { UnsupportedAadpVersionError } from "../../validator/index.js";
