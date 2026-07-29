@@ -83,7 +83,7 @@
     "aadp": "dist/scaffold/cli.js"
   },
   "engines": {
-    "node": "^20.19.0 || >=22.12.0"
+    "node": ">=20.18.1"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
