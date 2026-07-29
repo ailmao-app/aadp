@@ -106,6 +106,40 @@ describe("compileAadpRoutes() custom routes", () => {
   });
 });
 
+describe("compileAadpRoutes() literal canonicalization (published URL must round-trip through a real Request)", () => {
+  /** Builds the URL exactly the way `defineAADP()` publishes it, then re-derives the pathname the same way `handleRequest()` reads it off an inbound `Request` — via `new URL(request.url).pathname`, never a hand-built string. */
+  function requestPathnameFor(url: string): string {
+    return new URL(new Request(url).url).pathname;
+  }
+
+  it("round-trips a Unicode literal segment through Request/URL normalization", () => {
+    const routes = compileAadpRoutes("1.0", { sitemapIndex: "/khám-phá/aadp" });
+    const publishedUrl = routes.sitemapIndexUrl("https://example.com");
+    const pathname = requestPathnameFor(publishedUrl);
+    expect(routes.match(pathname)).toEqual({ kind: "sitemap-index" });
+  });
+
+  it("round-trips a literal segment containing a space", () => {
+    const routes = compileAadpRoutes("1.0", { sitemap: "/custom maps/{type}" });
+    const publishedUrl = routes.sitemapUrl("https://example.com", "post");
+    const pathname = requestPathnameFor(publishedUrl);
+    expect(routes.match(pathname)).toEqual({ kind: "sitemap", type: "post" });
+  });
+
+  it("round-trips a Unicode literal prefix sharing a segment with a placeholder", () => {
+    const routes = compileAadpRoutes("1.0", { entity: "/thực-thể/{type}/{id}" });
+    const publishedUrl = routes.entityUrl("https://example.com", "post", "welcome");
+    const pathname = requestPathnameFor(publishedUrl);
+    expect(routes.match(pathname)).toEqual({ kind: "entity", type: "post", id: "welcome" });
+  });
+
+  it("rejects a malformed percent-escape in a literal prefix sharing a segment with a placeholder", () => {
+    expect(() => compileAadpRoutes("1.0", { sitemap: "/maps/%ZZ-{type}" })).toThrow(
+      /malformed percent-encoding/
+    );
+  });
+});
+
 describe("compileAadpRoutes() invalid configuration", () => {
   it("rejects a relative path", () => {
     expect(() => compileAadpRoutes("1.0", { sitemapIndex: "relative/path" })).toThrow(

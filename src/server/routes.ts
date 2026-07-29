@@ -111,6 +111,32 @@ function tokenizeSegment(segment: string, routeName: string, raw: string): Segme
 
 const CONTROL_OR_BACKSLASH = /[\\\x00-\x1F\x7F]/;
 
+/**
+ * WHATWG URL Standard "path percent-encode set": the C0 control
+ * percent-encode set (C0 controls and every code point above U+007E) plus
+ * space, `"`, `#`, `<`, `>`, `?`, `` ` ``, `{` and `}`. This is exactly what
+ * `new URL(...)` — and therefore `new Request(...)`/`fetch()` and this
+ * package's own `handleRequest()` reading `new URL(request.url).pathname`
+ * — normalizes a raw path literal to. A config literal canonicalized any
+ * other way (or not at all) would make `buildPath()` publish a URL that
+ * `match()` can never recognize once round-tripped through a real request.
+ */
+const PATH_PERCENT_ENCODE_BYTES = new Set([0x20, 0x22, 0x23, 0x3c, 0x3e, 0x3f, 0x60, 0x7b, 0x7d]);
+
+/** Canonicalizes one literal path token to the same percent-encoded form `new URL()` would produce — leaves an existing `%XX` triplet untouched (`%` itself is not in the path percent-encode set), so it is never double-encoded. */
+function canonicalizePathLiteral(value: string): string {
+  const bytes = Buffer.from(value, "utf8");
+  let out = "";
+  for (const byte of bytes) {
+    if (byte <= 0x1f || byte > 0x7e || PATH_PERCENT_ENCODE_BYTES.has(byte)) {
+      out += "%" + byte.toString(16).toUpperCase().padStart(2, "0");
+    } else {
+      out += String.fromCharCode(byte);
+    }
+  }
+  return out;
+}
+
 function compileTemplate(routeName: AadpRouteName | "well-known", raw: string): CompiledTemplate {
   if (typeof raw !== "string" || raw.length === 0) {
     throw configError(routeName, String(raw), "must be a non-empty string");
@@ -142,6 +168,19 @@ function compileTemplate(routeName: AadpRouteName | "well-known", raw: string): 
       const decoded = safeDecodeStatic(rawSegment, routeName, raw);
       if (decoded === "." || decoded === "..") {
         throw configError(routeName, raw, `must not contain a dot segment ("${rawSegment}")`);
+      }
+    }
+    // Validate every literal token's percent-encoding syntax — not just a
+    // fully-literal segment's — so `/maps/%ZZ-{type}` fails here instead of
+    // silently publishing a literal with a malformed escape. Then
+    // canonicalize it to the exact form `new URL()` would produce, so the
+    // regex built from `token.value` (matcher, builder, collision
+    // detection — all three read `token.value`) matches what an inbound
+    // request's normalized pathname actually contains.
+    for (const token of tokens) {
+      if (token.kind === "literal") {
+        safeDecodeStatic(token.value, routeName, raw);
+        token.value = canonicalizePathLiteral(token.value);
       }
     }
     const placeholder = tokens.find((t): t is Extract<SegmentToken, { kind: "placeholder" }> => t.kind === "placeholder")?.name;

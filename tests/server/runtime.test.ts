@@ -718,4 +718,16 @@ describe("defineAADP() custom routes (config.routes)", () => {
       makeServer({ routes: { sitemapIndex: "/aadp/index", sitemap: "/aadp/{type}" } })
     ).toThrow(/collides with/);
   });
+
+  it("serves a custom route whose literal segment contains a space, fetched via the exact URL the sitemap index published", async () => {
+    const aadp = makeServer({ routes: { sitemap: "/custom maps/{type}" } });
+    const index = aadp.sitemapIndex();
+    const publishedUrl = index.sitemaps[0].url;
+    expect(publishedUrl).toBe("https://example.com/custom%20maps/post");
+
+    const res = await aadp.handleRequest(new Request(publishedUrl));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.type).toBe("post");
+  });
 });
