@@ -260,6 +260,24 @@ describe("invalid numeric options", () => {
       discover("https://example.com", { ...PERMISSIVE, maxResponseBytes: 0 })
     ).rejects.toThrow(InvalidOptionError);
   });
+
+  it("throws InvalidOptionError for a non-integer timeoutMs", async () => {
+    await expect(
+      discover("https://example.com", { ...PERMISSIVE, timeoutMs: 1.5 })
+    ).rejects.toThrow(InvalidOptionError);
+  });
+
+  it("throws InvalidOptionError for a non-integer maxRedirects", async () => {
+    await expect(
+      discover("https://example.com", { ...PERMISSIVE, maxRedirects: 1.5 })
+    ).rejects.toThrow(InvalidOptionError);
+  });
+
+  it("throws InvalidOptionError for a non-integer maxResponseBytes", async () => {
+    await expect(
+      discover("https://example.com", { ...PERMISSIVE, maxResponseBytes: 10.5 })
+    ).rejects.toThrow(InvalidOptionError);
+  });
 });
 
 describe("timeout", () => {

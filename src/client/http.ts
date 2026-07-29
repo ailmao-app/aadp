@@ -134,6 +134,9 @@ function assertValidNumberOption(name: string, value: number, min: number): void
   if (!Number.isFinite(value)) {
     throw new InvalidOptionError(name, value, "must be a finite number");
   }
+  if (!Number.isInteger(value)) {
+    throw new InvalidOptionError(name, value, "must be an integer");
+  }
   if (value < min) {
     throw new InvalidOptionError(name, value, `must be >= ${min}`);
   }
