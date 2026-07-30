@@ -19,6 +19,7 @@ import {
   ResponseTooLargeError,
   InvalidContentTypeError,
   MalformedJsonError,
+  InvalidOptionError,
   createPermissiveUrlPolicy,
   type ClientOptions,
 } from "../../src/client/v1.0/index.js";
@@ -238,6 +239,44 @@ describe("oversized response", () => {
     await expect(
       discover(server.baseUrl, { ...PERMISSIVE, maxResponseBytes: 100 })
     ).rejects.toThrow(ResponseTooLargeError);
+  });
+});
+
+describe("invalid numeric options", () => {
+  it("throws InvalidOptionError for a non-finite timeoutMs before making any request", async () => {
+    await expect(
+      discover("https://example.com", { ...PERMISSIVE, timeoutMs: Number.NaN })
+    ).rejects.toThrow(InvalidOptionError);
+  });
+
+  it("throws InvalidOptionError for a negative maxRedirects", async () => {
+    await expect(
+      discover("https://example.com", { ...PERMISSIVE, maxRedirects: -1 })
+    ).rejects.toThrow(InvalidOptionError);
+  });
+
+  it("throws InvalidOptionError for a zero maxResponseBytes", async () => {
+    await expect(
+      discover("https://example.com", { ...PERMISSIVE, maxResponseBytes: 0 })
+    ).rejects.toThrow(InvalidOptionError);
+  });
+
+  it("throws InvalidOptionError for a non-integer timeoutMs", async () => {
+    await expect(
+      discover("https://example.com", { ...PERMISSIVE, timeoutMs: 1.5 })
+    ).rejects.toThrow(InvalidOptionError);
+  });
+
+  it("throws InvalidOptionError for a non-integer maxRedirects", async () => {
+    await expect(
+      discover("https://example.com", { ...PERMISSIVE, maxRedirects: 1.5 })
+    ).rejects.toThrow(InvalidOptionError);
+  });
+
+  it("throws InvalidOptionError for a non-integer maxResponseBytes", async () => {
+    await expect(
+      discover("https://example.com", { ...PERMISSIVE, maxResponseBytes: 10.5 })
+    ).rejects.toThrow(InvalidOptionError);
   });
 });
 

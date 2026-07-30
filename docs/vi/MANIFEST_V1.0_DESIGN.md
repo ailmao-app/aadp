@@ -2,7 +2,7 @@
 
 > Ngôn ngữ: Tiếng Việt.
 >
-> Trạng thái: Design gate closed (Phase 0, xem [ADR-0005](adr/0005-manifest-v1-discovery.md), Accepted). Tài liệu này chưa thay thế manifest v0.1 đang được pilot sử dụng — schema v1.0 chưa viết (Phase 1).
+> Trạng thái: Accepted, xem [ADR-0005](adr/0005-manifest-v1-discovery.md).
 
 ## 1. Mục tiêu
 
@@ -449,7 +449,7 @@ Khi `policies`, HTTP header và resource metadata mâu thuẫn, client phải á
 
 ## 8. Versioning và tham chiếu v0.1
 
-`aadp_version` đã là tên field trong wire contract v0.1 (rename từ `aidp_version` được áp dụng ngay trong v0.1 — xem [CHANGELOG.md](../CHANGELOG.md)). Manifest v1.0 là major version mới vì có breaking changes về cấu trúc. Theo [ADR-0004](adr/0004-backward-compatibility.md), client phải chọn schema/parser theo `aadp_version`.
+`aadp_version` đã là tên field trong wire contract v0.1 (rename từ `aidp_version` được áp dụng ngay trong v0.1 — xem [CHANGELOG.md](../../CHANGELOG.md)). Manifest v1.0 là major version mới vì có breaking changes về cấu trúc. Theo [ADR-0004](../adr/0004-backward-compatibility.md), client phải chọn schema/parser theo `aadp_version`.
 
 AADP chưa có consumer production phụ thuộc v0.1, vì vậy:
 
