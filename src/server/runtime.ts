@@ -24,9 +24,11 @@ import {
   buildCorsAllowHeaders,
 } from "./http.js";
 import { RESOURCE_TYPE_GRAMMAR } from "./types.js";
+import { compileAadpRoutes, WELL_KNOWN_PATH } from "./routes.js";
 import type {
   AadpServer,
   AadpServerConfig,
+  AadpRouteConfig,
   EntityV1,
   GetArgs,
   ListArgs,
@@ -41,6 +43,7 @@ import type {
 export type {
   AadpServer,
   AadpServerConfig,
+  AadpRouteConfig,
   GetArgs,
   ListArgs,
   ListResult,
@@ -49,8 +52,6 @@ export type {
   SerializedEntity,
 } from "./types.js";
 export { AadpServerError, type AadpServerErrorCode } from "./errors.js";
-
-const WELL_KNOWN_PATH = "/.well-known/ai-manifest.json";
 const DEFAULT_CACHE_MAX_AGE_SECONDS = 300;
 const MAX_CACHE_MAX_AGE_SECONDS = 31536000; // 1 year — RFC 9111 delta-seconds has no hard cap, but this is a sane upper bound
 const DEFAULT_PAGE_SIZE = 50;
@@ -75,15 +76,6 @@ function toIso(value: string | Date): string {
 
 function resolveUrl(baseUrl: string, maybeRelative: string): string {
   return new URL(maybeRelative, baseUrl).toString();
-}
-
-/** A malformed percent-encoded path segment (e.g. `%ZZ`) is a client request error, not a data-source failure — `decodeURIComponent` throwing `URIError` must not surface as `upstream_unavailable`. */
-function safeDecodeURIComponent(value: string, pathname: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    throw invalidRequest(`Malformed percent-encoding in path "${pathname}".`);
-  }
 }
 
 /** Splits a serialized entity's `${type}:${routeId}` id and confirms it belongs to `resource`. */
@@ -268,8 +260,11 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
     validatePositiveInt(config.pageSize, DEFAULT_PAGE_SIZE, "pageSize"),
     MAX_PAGE_SIZE
   );
-  const basePath = `/ai/v${version}`; // spec/v1.0/specification.md:355-356 — wire base path is "/ai/v1.0", not "/ai/1.0"
-  const sitemapIndexPath = `${basePath}/sitemap-index.json`;
+  // Default templates are `/ai/v{version}/...` (spec/v1.0/specification.md:355-356
+  // — wire base path is "/ai/v1.0", not "/ai/1.0"); `config.routes` overrides
+  // any subset of them. `compileAadpRoutes` validates and, if ambiguous,
+  // throws here at definition time rather than at first request.
+  const routes = compileAadpRoutes(version, config.routes);
 
   // A configured `api_key` (`in: "header"`) scheme's header name must be
   // preflight-allowed, or a browser blocks the request before the
@@ -319,11 +314,11 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
   }
 
   function entityUrl(type: string, routeId: string): string {
-    return `${baseUrl}${basePath}/entities/${type}/${encodeURIComponent(routeId)}.json`;
+    return routes.entityUrl(baseUrl, type, routeId);
   }
 
   function sitemapUrl(type: string): string {
-    return `${baseUrl}${basePath}/sitemaps/${type}.json`;
+    return routes.sitemapUrl(baseUrl, type);
   }
 
   // Built and validated once at definition time — resources/policies are
@@ -341,7 +336,7 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
       aadp_version: version,
       application: config.application,
       ...(config.links ? { links: config.links } : {}),
-      discovery: { sitemap_index: `${baseUrl}${sitemapIndexPath}` },
+      discovery: { sitemap_index: routes.sitemapIndexUrl(baseUrl) },
       ...(resourceList.length > 0
         ? {
             resources: resourceList.map((r) => ({
@@ -507,7 +502,16 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
         return manifestResponse(manifest(), cacheMaxAgeSeconds, corsAllowHeaders);
       }
 
-      if (pathname === sitemapIndexPath) {
+      // `routes.match()` is the single source of truth for both which
+      // pathname a request landed on and the decoded `type`/`id` it carries
+      // — compiled once from the same template that built the published
+      // URLs, so this can never drift from `manifest()`/`sitemapIndex()`.
+      const routeMatch = routes.match(pathname);
+      if (!routeMatch) {
+        throw notFound(`No route for ${pathname}`);
+      }
+
+      if (routeMatch.kind === "sitemap-index") {
         const doc = sitemapIndex();
         return cacheableJsonResponse(
           request,
@@ -519,12 +523,8 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
         );
       }
 
-      const sitemapsPrefix = `${basePath}/sitemaps/`;
-      if (pathname.startsWith(sitemapsPrefix) && pathname.endsWith(".json")) {
-        const type = safeDecodeURIComponent(
-          pathname.slice(sitemapsPrefix.length, -".json".length),
-          pathname
-        );
+      if (routeMatch.kind === "sitemap") {
+        const { type } = routeMatch;
         const doc = await sitemap(type, url.searchParams.get("cursor"), request);
         return cacheableJsonResponse(
           request,
@@ -536,27 +536,16 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
         );
       }
 
-      const entitiesPrefix = `${basePath}/entities/`;
-      if (pathname.startsWith(entitiesPrefix) && pathname.endsWith(".json")) {
-        const rest = pathname.slice(entitiesPrefix.length, -".json".length);
-        const slashIndex = rest.indexOf("/");
-        if (slashIndex === -1) {
-          throw notFound(`No route for ${pathname}`);
-        }
-        const type = safeDecodeURIComponent(rest.slice(0, slashIndex), pathname);
-        const id = safeDecodeURIComponent(rest.slice(slashIndex + 1), pathname);
-        const doc = await entity(type, id, request);
-        return cacheableJsonResponse(
-          request,
-          doc,
-          doc.checksum,
-          doc.updated_at,
-          cacheControlFor(type),
-          corsAllowHeaders
-        );
-      }
-
-      throw notFound(`No route for ${pathname}`);
+      const { type, id } = routeMatch;
+      const doc = await entity(type, id, request);
+      return cacheableJsonResponse(
+        request,
+        doc,
+        doc.checksum,
+        doc.updated_at,
+        cacheControlFor(type),
+        corsAllowHeaders
+      );
     } catch (error) {
       return errorResponse(error, corsAllowHeaders);
     }
