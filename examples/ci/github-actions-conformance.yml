@@ -1,0 +1,60 @@
+# Example GitHub Actions workflow for running the AADP conformance suite
+# against a deployment and publishing the result as a JUnit test report.
+#
+# This file is not wired into this repository's own CI (see
+# `.github/workflows/ci.yml`, which tests the package itself, not a
+# deployment). Copy it into a consuming application's `.github/workflows/`
+# and adjust `AADP_BASE_URL` and the negative-target URLs for that
+# deployment.
+#
+# `dorny/test-reporter` renders `--junit` as a check-run annotation;
+# swap it for any other JUnit-consuming action, or drop it and rely on
+# the `--json --output` artifact and the exit code alone.
+name: AADP conformance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  AADP_BASE_URL: https://example.com
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run aadp-conformance
+        # Exit codes: 0 conformant, 1 failed check, 2 run could not be
+        # performed, 3 unsupported protocol version, 4 run left unfinished.
+        # `continue-on-error` lets the report-publishing steps run even on
+        # a non-zero exit, so a failing run still gets an annotated report
+        # instead of only a red job.
+        id: conformance
+        continue-on-error: true
+        run: |
+          npx aadp-conformance "$AADP_BASE_URL" \
+            --junit conformance-junit.xml \
+            --json --output conformance.json \
+            --unknown-entity-url "$AADP_BASE_URL/ai/v1.0/entities/example/does-not-exist.json" \
+            --unknown-type-url "$AADP_BASE_URL/ai/v1.0/sitemaps/does-not-exist.json"
+
+      - name: Publish JUnit report
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: AADP conformance
+          path: conformance-junit.xml
+          reporter: java-junit
+
+      - name: Upload JSON report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aadp-conformance-report
+          path: conformance.json
+
+      - name: Fail the job if the run was not conformant
+        if: steps.conformance.outcome == 'failure'
+        run: exit 1

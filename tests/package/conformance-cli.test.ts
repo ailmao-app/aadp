@@ -119,6 +119,23 @@ describe("aadp-conformance, run from the packed tarball", () => {
     expect(report.checks.length).toBeGreaterThan(0);
   });
 
+  it("writes a JUnit XML report to --junit without disturbing stdout", async () => {
+    const junitPath = path.join(workDir, "report.junit.xml");
+    const result = await runCli([
+      server.baseUrl,
+      "--allow-private-network",
+      "--junit",
+      junitPath,
+      ...NEGATIVE_TARGET_FLAGS(),
+    ]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("RESULT: PASSED");
+    const junit = readFileSync(junitPath, "utf8");
+    expect(junit).toContain("<?xml version=\"1.0\"");
+    expect(junit).toContain("<testsuite ");
+    expect(junit).toContain("manifest.http");
+  });
+
   it("exits 1 when a check fails", async () => {
     // --fail-on-warning turns the mock's instruction-shaped usage_guidance
     // warning into a failing verdict, without needing a broken fixture.

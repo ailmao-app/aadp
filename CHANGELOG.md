@@ -4,6 +4,13 @@ All notable changes to `ail-aadp` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Protocol compatibility follows [ADR-0004](docs/adr/0004-backward-compatibility.md); released schemas are immutable and wire-breaking changes require a new protocol version.
 
+## 1.0.8 - 2026-07-30
+
+### Added
+
+- Added `renderJUnitReport` to `ail-aadp/conformance` and a `--junit <file>` flag to the `aadp-conformance` CLI: a JUnit XML report alongside the existing text/JSON report, for CI systems that render test results (GitHub Actions test-reporter, GitLab, Jenkins, ...) instead of parsing JSON. A `warning` check is a passing `<testcase>` with its message kept in `<system-out>` unless `failOnWarning` (the same option `runConformance` already takes) asks for `<failure>` instead; JUnit has no native warning status.
+- Added `examples/ci/github-actions-conformance.yml`, a copy-paste GitHub Actions workflow that runs `aadp-conformance` against a deployment, publishes the `--junit` report as check-run annotations, and uploads the `--json` report as a build artifact (`AADP-CONFORMANCE-003`).
+
 ## 1.0.7 - 2026-07-29
 
 ### Added

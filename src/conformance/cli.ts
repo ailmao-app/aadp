@@ -17,7 +17,7 @@
 import { writeFileSync } from "node:fs";
 import { Command, InvalidArgumentError } from "commander";
 import { runConformance } from "./runner.js";
-import { renderJsonReport, renderCheckLines, renderSummary, exitCodeFor } from "./report.js";
+import { renderJsonReport, renderJUnitReport, renderCheckLines, renderSummary, exitCodeFor } from "./report.js";
 import {
   SUPPORTED_CONFORMANCE_VERSIONS,
   UnsupportedConformanceVersionError,
@@ -41,6 +41,7 @@ interface CliOptions {
   crossOriginSafeHeader: string[];
   json?: boolean;
   output?: string;
+  junit?: string;
   failOnWarning?: boolean;
   quiet?: boolean;
   color?: boolean;
@@ -125,6 +126,11 @@ program
   )
   .option("--json", "print the machine-readable report to stdout instead of the text report")
   .option("--output <file>", "also write the JSON report to <file>")
+  .option(
+    "--junit <file>",
+    "also write a JUnit XML report to <file>, for CI systems that render test results (GitHub Actions " +
+      "test-reporter, GitLab, Jenkins, ...) instead of parsing JSON"
+  )
   .option("--fail-on-warning", "treat warnings as failures in the exit code")
   .option("--quiet", "text report: print only non-passing checks and the summary")
   .option("--color", "colorize the text report")
@@ -199,6 +205,15 @@ program
         writeFileSync(opts.output, `${json}\n`, "utf8");
       } catch (err) {
         process.stderr.write(`Could not write report to ${opts.output}: ${(err as Error).message}\n`);
+        process.exitCode = 2;
+        return;
+      }
+    }
+    if (opts.junit) {
+      try {
+        writeFileSync(opts.junit, `${renderJUnitReport(report, { failOnWarning: opts.failOnWarning })}\n`, "utf8");
+      } catch (err) {
+        process.stderr.write(`Could not write JUnit report to ${opts.junit}: ${(err as Error).message}\n`);
         process.exitCode = 2;
         return;
       }

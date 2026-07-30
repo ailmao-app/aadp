@@ -103,6 +103,90 @@ export function renderJsonReport(report: ConformanceReport): string {
   return JSON.stringify(report, null, 2);
 }
 
+export interface JUnitReportOptions {
+  /**
+   * Report a `warning` check as a JUnit failure too. Default false: JUnit
+   * has no native warning status, so a warning is reported as a passing
+   * `<testcase>` with its message kept in `<system-out>` unless the caller
+   * wants CI to treat it as red — matching `ConformanceOptions.failOnWarning`.
+   */
+  failOnWarning?: boolean;
+}
+
+function xmlEscape(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+/**
+ * JUnit XML, for CI systems that render test results rather than parse
+ * JSON (GitHub Actions test-reporter annotations, GitLab/Jenkins test
+ * summaries, ...). One `<testcase>` per check, grouped into a single
+ * `<testsuite>` since a conformance run has no nested suite structure.
+ *
+ * `failed` maps to `<failure>`, `skipped` to `<skipped>` — including a
+ * skip that leaves the run `inconclusive`, since JUnit has no separate
+ * status for that; the message says so. `warning` is a passing
+ * `<testcase>` with a `<system-out>` note unless `failOnWarning` asks for
+ * `<failure>` instead, matching the same option name in `runConformance`.
+ */
+export function renderJUnitReport(report: ConformanceReport, options: JUnitReportOptions = {}): string {
+  const failOnWarning = options.failOnWarning ?? false;
+  const isFailure = (check: CheckResult) => check.status === "failed" || (failOnWarning && check.status === "warning");
+
+  const fatalTestCase = report.fatal ? 1 : 0;
+  const failures = report.checks.filter(isFailure).length + fatalTestCase;
+  const skipped = report.checks.filter((check) => check.status === "skipped").length;
+  const tests = report.checks.length + fatalTestCase;
+  const timeSeconds = (report.duration_ms / 1000).toFixed(3);
+
+  const lines: string[] = ['<?xml version="1.0" encoding="UTF-8"?>'];
+  lines.push(
+    `<testsuite name="${xmlEscape(`aadp-conformance ${report.base_url}`)}" tests="${tests}" ` +
+      `failures="${failures}" errors="0" skipped="${skipped}" time="${timeSeconds}" ` +
+      `timestamp="${xmlEscape(report.started_at)}">`
+  );
+
+  if (report.fatal) {
+    lines.push(`  <testcase classname="aadp.conformance" name="run" time="0.000">`);
+    lines.push(`    <failure message="${xmlEscape(report.fatal.message)}" type="${xmlEscape(report.fatal.code)}"/>`);
+    lines.push("  </testcase>");
+  }
+
+  for (const check of report.checks) {
+    const timeS = (check.duration_ms / 1000).toFixed(3);
+    const attrs =
+      `classname="${xmlEscape(`aadp.conformance.${check.group}`)}" ` +
+      `name="${xmlEscape(`${check.id} ${check.title}`)}" time="${timeS}"`;
+
+    if (isFailure(check)) {
+      lines.push(`  <testcase ${attrs}>`);
+      lines.push(`    <failure message="${xmlEscape(check.message ?? check.status)}" type="${xmlEscape(check.status)}">`);
+      for (const detail of check.details ?? []) lines.push(`      ${xmlEscape(detail)}`);
+      lines.push("    </failure>");
+      lines.push("  </testcase>");
+    } else if (check.status === "skipped") {
+      const message = check.message ?? (check.inconclusive ? "inconclusive" : "not applicable");
+      lines.push(`  <testcase ${attrs}>`);
+      lines.push(`    <skipped message="${xmlEscape(message)}"/>`);
+      lines.push("  </testcase>");
+    } else if (check.status === "warning") {
+      lines.push(`  <testcase ${attrs}>`);
+      if (check.message) lines.push(`    <system-out>${xmlEscape(check.message)}</system-out>`);
+      lines.push("  </testcase>");
+    } else {
+      lines.push(`  <testcase ${attrs}/>`);
+    }
+  }
+
+  lines.push("</testsuite>");
+  return lines.join("\n");
+}
+
 /**
  * Exit code contract for CI. Stable across releases:
  * `0` conformant, `1` at least one failed check, `2` the run could not be
