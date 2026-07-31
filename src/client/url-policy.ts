@@ -1,6 +1,6 @@
 /**
  * URL safety policy for the AADP v1.0 reference client (spec v1.0 §"SSRF"
- * in MANIFEST_V1.0_DESIGN.md §7, ADR-0005). Every URL the client follows
+ * in docs/design/manifest-v1.0-design.md §7 and ADR-0005). Every URL the client follows
  * — manifest well-known URL, `discovery.sitemap_index`, sitemap item
  * `url`, redirect `Location` hops — MUST pass through a policy before the
  * client dereferences it.

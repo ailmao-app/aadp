@@ -1,8 +1,27 @@
 # AADP Relations Module Design
 
-> Status: Design draft.
->
-> Vietnamese edition: [`vi/RELATIONS_MODULE_DESIGN.md`](vi/RELATIONS_MODULE_DESIGN.md).
+| Field | Value |
+|---|---|
+| Document type | Design memo |
+| Status | Draft |
+| Audience | Module designers and reviewers |
+| Normative authority | None until accepted by ADR and versioned module specification |
+| Decision owner | AADP maintainers |
+| Blocking dependency | Module versioning ADR |
+| Vietnamese internal edition | [`../vi/design/relations-module-design.md`](../vi/design/relations-module-design.md) |
+
+## Abstract
+
+This memo proposes typed relationships between AADP entities. All identifiers,
+versions, shapes, and URLs in this draft are non-normative until the module
+versioning ADR and a module specification are accepted.
+
+## Status of This Memo
+
+This document is a design input, not an implemented protocol extension. A server
+MUST NOT advertise the proposed module merely because an example appears here.
+
+Requirement words follow [the AADP documentation conventions](../document-conventions.md).
 
 ## Purpose
 
@@ -66,3 +85,9 @@ Collections should use a separate paginated relation document rather than embedd
 - Add module fixtures, validator support, and conformance tests.
 - Resolve cycle-handling guidance for graph traversal clients.
 
+## Draft exit criteria
+
+This memo may move from Draft to Proposed only when the module-versioning ADR is
+accepted, open envelope/cursor questions are closed, and schema plus conformance
+fixtures exist. It may move to Accepted only after interoperability review. The
+example version `0.1` is not allocated by this memo.

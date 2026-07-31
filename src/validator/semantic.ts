@@ -8,7 +8,7 @@
  * Reference-URL reachability and cross-document consistency (e.g.
  * `resources[].type` vs the live sitemap index) are conformance-suite
  * concerns (Phase 5), not semantic-validator concerns — see ADR-0005
- * "Resource authority" and `docs/IMPLEMENTATION_PLAN.md` §4
+ * "Resource authority" and `docs/records/implementation-record-v1.0.md` §4
  * ("Validator không tự thực hiện HTTP request").
  */
 
@@ -292,7 +292,7 @@ function checkSecretShapedValues(manifest: ManifestLike, issues: SemanticIssue[]
           level: "error",
           code: `possible_secret_value:${code}`,
           path,
-          message: `"${path}" contains a value matching a known credential shape (${code}). A public AADP manifest MUST NOT contain live credentials (spec v1.0 §3.1.7, security-considerations.md §2).`,
+          message: `"${path}" contains a value matching a known credential shape (${code}). A public AADP manifest MUST NOT contain live credentials (spec v1.0 §3.1.7, docs/guides/security-considerations.md §2).`,
         });
       }
     }

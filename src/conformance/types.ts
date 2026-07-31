@@ -1,6 +1,6 @@
 /**
  * Public shapes of the standalone conformance runner
- * (`docs/vi/IMPLEMENTATION_PLAN.md` §11 "Ưu tiên 1", issues
+ * (`docs/vi/plans/implementation-plan.md` §11 "Ưu tiên 1", issues
  * AADP-CONFORMANCE-001/002). Kept free of Vitest, of `node:test`, and of
  * any repo-only fixture so the same report shape is produced whether the
  * runner is called from this repo, from a published tarball, or from the

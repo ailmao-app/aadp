@@ -1,8 +1,26 @@
 # AADP Manifest v1.0 Design
 
-> Status: Accepted through [ADR-0005](adr/0005-manifest-v1-discovery.md).
->
-> Vietnamese edition: [`vi/MANIFEST_V1.0_DESIGN.md`](vi/MANIFEST_V1.0_DESIGN.md).
+| Field | Value |
+|---|---|
+| Document type | Design memo |
+| Status | Accepted through [ADR-0005](../adr/0005-manifest-v1-discovery.md) |
+| Audience | Protocol implementers and reviewers |
+| Normative source | [AADP v1.0 specification](../../spec/v1.0/specification.md) |
+| Vietnamese internal edition | [`../vi/design/manifest-v1.0-design.md`](../vi/design/manifest-v1.0-design.md) |
+
+## Abstract
+
+This memo explains the accepted structure and semantic boundaries of the AADP
+v1.0 manifest. It is informative; the versioned specification and schema define
+the released wire contract.
+
+## Status of This Memo
+
+The design decisions in this memo were accepted by ADR-0005. This document MUST
+NOT be used to introduce fields or validation behavior that are absent from the
+released v1.0 specification and schema.
+
+Requirement words follow [the AADP documentation conventions](../document-conventions.md).
 
 ## Purpose
 
@@ -77,6 +95,6 @@ Manifest v1.0 is a breaking redesign of the v0.1 manifest:
 
 The complete normative field definitions are in:
 
-- [AADP v1.0 specification](../spec/v1.0/specification.md)
-- [Manifest v1.0 JSON Schema](../schemas/v1.0/manifest.schema.json)
-- [ADR-0005](adr/0005-manifest-v1-discovery.md)
+- [AADP v1.0 specification](../../spec/v1.0/specification.md)
+- [Manifest v1.0 JSON Schema](../../schemas/v1.0/manifest.schema.json)
+- [ADR-0005](../adr/0005-manifest-v1-discovery.md)

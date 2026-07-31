@@ -1,8 +1,26 @@
 # AEO and GEO Integration Plan for AADP
 
-> Status: Design plan.
->
-> Vietnamese edition: [`vi/AEO_GEO_INTEGRATION_PLAN.md`](vi/AEO_GEO_INTEGRATION_PLAN.md).
+| Field | Value |
+|---|---|
+| Document type | Design plan |
+| Status | Draft |
+| Audience | Module designers, application adapters, and reviewers |
+| Normative authority | None |
+| Decision owner | AADP maintainers |
+| Blocking dependencies | Module versioning ADR and Relations Module contract |
+| Vietnamese internal edition | [`../vi/design/aeo-geo-integration-plan.md`](../vi/design/aeo-geo-integration-plan.md) |
+
+## Abstract
+
+This memo describes a delivery sequence for Answer Engine Optimization and
+Generative Engine Optimization modules. Proposed module identifiers and versions
+are examples, not allocated wire contracts.
+
+## Status of This Memo
+
+The work remains subject to module-versioning ADRs, schemas, interoperability
+tests, and independent conformance. Requirement words follow
+[the AADP documentation conventions](../document-conventions.md).
 
 ## Objective
 
@@ -63,8 +81,15 @@ Define Answer Engine Optimization and Generative Engine Optimization as versione
 - Unknown modules remain safely ignorable by core-only clients.
 - Module free text remains untrusted data.
 
+## Draft exit criteria
+
+This plan may move to Proposed only after module versioning and the Relations
+Module boundary are accepted. Answer and Evidence schemas, fixtures, citation
+integrity rules, and independent conformance checks are required before the plan
+can move to Accepted. Versions shown in examples are non-normative placeholders.
+
 See also:
 
-- [Manifest v1.0 design](MANIFEST_V1.0_DESIGN.md)
-- [Relations Module design](RELATIONS_MODULE_DESIGN.md)
-- [AADP v1.0 specification](../spec/v1.0/specification.md)
+- [Manifest v1.0 design](manifest-v1.0-design.md)
+- [Relations Module design](relations-module-design.md)
+- [AADP v1.0 specification](../../spec/v1.0/specification.md)

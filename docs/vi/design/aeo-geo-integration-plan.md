@@ -1,5 +1,14 @@
 # Kế hoạch tích hợp AEO và GEO vào AADP
 
+> Trạng thái: Design Draft.
+>
+> Owner quyết định: AADP maintainers.
+>
+> Dependency bắt buộc: ADR module versioning và contract Relations Module.
+
+Version module trong ví dụ chỉ là placeholder, không phải version wire đã được
+cấp. Tài liệu chỉ chuyển sang Proposed sau khi các dependency trên được Accepted.
+
 > Ngôn ngữ: Tiếng Việt.
 
 ## 1. Mục tiêu
@@ -62,7 +71,7 @@ Change event
 Ranh giới layer:
 
 - AADP transport core chứa envelope, discovery, validator nền, canonicalization và conformance harness.
-- Relations là module graph linking dùng chung cho Answer và Evidence modules; thiết kế chi tiết nằm tại [`RELATIONS_MODULE_DESIGN.md`](RELATIONS_MODULE_DESIGN.md).
+- Relations là module graph linking dùng chung cho Answer và Evidence modules; thiết kế chi tiết nằm tại [`relations-module-design.md`](relations-module-design.md).
 - Answer và Evidence/Provenance là module chính thức trong cùng AADP package; mỗi module có semantic contract nhưng không chứa type riêng của Ailmao.
 - Adapter Ailmao mapping domain data sang module AADP tương ứng.
 - Landing route chỉ làm HTTP boundary; business mapping nằm trong `lib/aadp`.
@@ -161,7 +170,7 @@ Module gồm ba type chuẩn có thể liên kết:
 
 ## 6. Discovery và module capability
 
-Thiết kế chi tiết của application identity, links, resources, interfaces, security, policies và usage guidance nằm tại [`MANIFEST_V1.0_DESIGN.md`](MANIFEST_V1.0_DESIGN.md). Answer/Evidence là module built-in được manifest công bố; chúng không phải protocol tách rời.
+Thiết kế chi tiết của application identity, links, resources, interfaces, security, policies và usage guidance nằm tại [`manifest-v1.0-design.md`](manifest-v1.0-design.md). Answer/Evidence là module built-in được manifest công bố; chúng không phải protocol tách rời.
 
 Manifest công bố module bằng identifier chuẩn, không dùng nhãn marketing mơ hồ. Wire contract mục tiêu:
 

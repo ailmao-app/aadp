@@ -1,5 +1,22 @@
 # AADP v0.1 — Implementation Guide
 
+| Field | Value |
+|---|---|
+| Document type | Implementation guide |
+| Status | Historical and frozen for compatibility |
+| Audience | AADP v0.1 server implementers |
+| Normative source | [AADP v0.1 specification](../../spec/v0.1/specification.md) |
+
+## Abstract
+
+This guide summarizes the operational steps for an AADP v0.1 server. It is
+informational and does not replace the specification or schemas.
+
+Requirement words follow [the AADP documentation conventions](../document-conventions.md).
+
+> New implementations SHOULD target AADP v1.0. This guide is retained only for
+> compatibility testing and maintenance of explicit v0.1 consumers.
+
 For anyone implementing an AADP v0.1 **server** (a future adapter, not
 just this repo's mock server).
 
@@ -12,7 +29,7 @@ just this repo's mock server).
    `schemas/v0.1/sitemap.schema.json`.
 3. Publish entities matching `schemas/v0.1/entity.schema.json`, with
    `data` containing only allow-listed fields (see
-   `docs/security-considerations.md` §2).
+   `docs/guides/security-considerations.md` §2).
 4. Compute `checksum` from canonical JSON — `data` for entities, `items`
    for sitemaps, `sitemaps` for the sitemap index. Use
    `src/canonical-json/checksum.ts` directly, or reimplement spec §6
@@ -27,17 +44,16 @@ just this repo's mock server).
 7. On error, return the error envelope
    (`schemas/v0.1/error.schema.json`) with an appropriate standard `code`
    (spec §9).
-8. Run `npm run validate -- <kind> <url-or-file>` against every live
-   endpoint, and run the conformance suite against your deployment before
-   claiming v0.1 conformance:
+8. Run `npm run validate -- <kind> <url-or-file>` against every live endpoint.
+   Repository maintainers MAY run the historical source conformance suite:
 
    ```sh
    AADP_BASE_URL=https://your-domain.example \
      npx vitest run tests/conformance/conformance.test.ts
    ```
 
-   Without `AADP_BASE_URL`, that same command runs against this repo's
-   own in-process mock server (self-test mode) instead.
+   The standalone `aadp-conformance` CLI targets v1.0 and MUST NOT be presented
+   as a v0.1 certification tool.
 
 ## What NOT to do
 

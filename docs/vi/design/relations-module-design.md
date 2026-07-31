@@ -3,6 +3,14 @@
 > Ngôn ngữ: Tiếng Việt.
 >
 > Trạng thái: Design Draft. Đây là module built-in của AADP, không phải protocol hoặc add-on bên ngoài.
+>
+> Owner quyết định: AADP maintainers.
+>
+> Dependency bắt buộc: ADR module versioning.
+
+Tài liệu chỉ chuyển sang Proposed khi ADR module versioning được Accepted, các
+câu hỏi envelope/cursor đã đóng và có schema cùng fixture conformance. Version
+trong ví dụ không phải version wire đã được cấp.
 
 ## 1. Mục tiêu
 

@@ -1,7 +1,25 @@
-# AADP v0.1 — Security Considerations
+# AADP Security Considerations
 
-Status: required reading before implementing an AADP server or adapter,
-per the release gate in `docs/IMPLEMENTATION_PLAN.md`.
+| Field | Value |
+|---|---|
+| Document type | Security guidance |
+| Status | Active; version-specific differences are identified in context |
+| Audience | Server, adapter, client, and deployment implementers |
+| Normative source | Versioned specifications and schemas |
+
+## Abstract
+
+This memo records the exposure, integrity, availability, and trust-boundary risks
+shared by AADP versions, plus safeguards specific to v0.1 and v1.0. It is required
+reading by the implementation release gate but does not independently extend the
+wire contract.
+
+## Status of This Memo
+
+Version-specific statements are labeled in context. Implementers of v1.0 MUST
+also follow the v1.0 specification, URL policy, semantic validation, and security
+scheme rules. Requirement words follow
+[the AADP documentation conventions](../document-conventions.md).
 
 ## 1. AADP is read-only by design
 
@@ -23,7 +41,7 @@ Servers MUST treat every field they expose through a sitemap or entity as
 
 Implementers MUST run an explicit field allow-list / export audit before
 wiring an existing internal type into an AADP serializer — see the
-"Application adapters" delivery phase in `docs/IMPLEMENTATION_PLAN.md`.
+"Application adapters" delivery phase in `docs/records/implementation-record-v1.0.md`.
 Never serialize an internal model directly;
 never assume a field is safe because it's "already public in the UI" —
 UI rendering and JSON export have different blast radii (e.g. moderation
@@ -89,7 +107,7 @@ v0.1.
 
 AADP v0.1 is unauthenticated/public-only by design; auth was deferred to a
 later protocol version and later shipped as the `security` field on v1.0
-manifest resources (metadata-only — see `docs/MANIFEST_V1.0_DESIGN.md`).
+manifest resources (metadata-only — see `docs/design/manifest-v1.0-design.md`).
 Consequences for a v0.1 deployment:
 
 - Do not deploy an AADP v0.1 endpoint for data that requires access
@@ -98,10 +116,44 @@ Consequences for a v0.1 deployment:
   until that lands, "AADP-shaped but requires an API key" is not v0.1
   conformant and must not claim conformance in its manifest.
 
-## 8. SSR / server boundary leakage (adapter-specific, forward note)
+## 8. SSRF and server-boundary leakage
 
 For adapters that sit in front of an internal API, the adapter's own base
 URL/config and any upstream credentials MUST stay server-side only. The
 AADP layer being public by design makes this an easy place to
 accidentally leak an internal upstream URL or debug header into a
 response — test this boundary explicitly before any production deploy.
+
+Clients and conformance runners processing discovered URLs MUST apply their URL
+policy to the initial URL and every redirect hop. A public-web profile SHOULD:
+
+- allow only HTTP(S), preferring HTTPS;
+- reject loopback, private, link-local, and otherwise non-public destinations;
+- resolve and pin DNS to reduce rebinding risk;
+- remove sensitive headers on cross-origin redirects;
+- limit redirects, response bytes, request timeout, traversal requests, and total deadline;
+- abort outstanding work after cancellation or budget exhaustion.
+
+An intentionally private deployment MAY use a permissive policy only through an
+explicit operator choice. That policy exception is not proof that a document is
+invalid under the wire contract.
+
+## 9. Authentication metadata in v1.0
+
+AADP v1.0 may publish security-scheme metadata, but the manifest MUST NOT contain
+live credentials. Every resource or interface security reference MUST resolve to
+a declared scheme. API-key placement and OAuth metadata MUST be complete enough
+for a client to identify the advertised flow; otherwise the scheme is omitted.
+
+Conformance tooling MUST NOT log credentials or include them in JSON/JUnit
+reports. Authenticated checks run only when the operator explicitly supplies test
+credentials. A client MUST NOT automatically invoke an advertised interface merely
+because its authentication metadata validates.
+
+## 10. Untrusted text and AI boundaries
+
+All publisher-controlled free text, including `usage_guidance`, names,
+descriptions, error messages, and extension fields, is untrusted data. A client
+MUST NOT promote it to system/developer instructions, execute tools because of
+it, or let it override verified source facts. Prompt-like wording may produce a
+warning but detection is not a security boundary.
