@@ -446,11 +446,12 @@ AADP v1.0 được coi là triển khai xong khi một application độc lập 
 
 ### Ưu tiên 1 — Conformance runner độc lập
 
-> **Đã triển khai** — `AADP-CONFORMANCE-001` và `AADP-CONFORMANCE-002` nằm ở
-> `src/conformance/` (runner, checks, report, CLI `aadp-conformance`), test tại
-> `tests/conformance/v1.0/runner.test.ts` và clean-install test tại
-> `tests/package/conformance-cli.test.ts`. `AADP-CONFORMANCE-003` (report JUnit
-> và GitHub Actions example) chưa làm.
+> **Đã triển khai** — `AADP-CONFORMANCE-001`, `AADP-CONFORMANCE-002` và
+> `AADP-CONFORMANCE-003` nằm ở `src/conformance/` (runner, checks, report,
+> CLI `aadp-conformance`), test tại `tests/conformance/v1.0/runner.test.ts`
+> và clean-install test tại `tests/package/conformance-cli.test.ts`.
+> `renderJUnitReport` và `--junit <file>` sinh report JUnit; ví dụ GitHub
+> Actions nằm ở `examples/ci/github-actions-conformance.yml`.
 
 Biến conformance suite thành công cụ người triển khai có thể chạy trực tiếp từ
 package đã phát hành, không phụ thuộc source tree hoặc Vitest:
@@ -556,7 +557,7 @@ conflict semantics; không được tuyên bố một license có hiệu lực p
 
 1. `AADP-CONFORMANCE-001`: Programmatic conformance runner.
 2. `AADP-CONFORMANCE-002`: CLI `aadp-conformance`.
-3. `AADP-CONFORMANCE-003`: JSON/JUnit report và CI example.
+3. `AADP-CONFORMANCE-003`: JSON/JUnit report và CI example. **Đã triển khai.**
 4. `AADP-SERVER-001`: Declarative `defineAADP()` server runtime. **Đã triển khai.**
 5. `AADP-SERVER-002`: Typed `defineResource()` contract và public serializer boundary. **Đã triển khai.**
 6. `AADP-SERVER-003`: Document generation, HTTP cache, checksum và validation helpers. **Đã triển khai.**

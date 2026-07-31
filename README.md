@@ -394,6 +394,10 @@ Useful flags:
 # Machine-readable report on stdout, for CI
 npx aadp-conformance https://example.com --json --output conformance.json
 
+# JUnit XML alongside it, for CI systems that render test results
+# (GitHub Actions test-reporter, GitLab, Jenkins, ...) instead of parsing JSON
+npx aadp-conformance https://example.com --junit conformance-junit.xml
+
 # Bound the traversal on a large catalogue
 npx aadp-conformance https://example.com --max-pages 20 --max-entities 50 --timeout 15000
 
@@ -429,6 +433,8 @@ A URL you pass here is taken as authoritative: if the deployment answers it succ
 Headers you pass with `--header` are sent to the target origin only. A manifest can point its sitemap, entity, policy or documentation URLs at any host, so those requests drop your headers unless you allow-list them with `--cross-origin-safe-header`.
 
 The runner never sends a credential it was not given, never follows a URL from a document it has not validated, and never treats free text in a manifest as an instruction.
+
+See [`examples/ci/github-actions-conformance.yml`](examples/ci/github-actions-conformance.yml) for a complete GitHub Actions workflow that runs `aadp-conformance` against a deployment, publishes the `--junit` report as check-run annotations, and uploads the `--json` report as a build artifact.
 
 ### TypeScript
 
