@@ -623,3 +623,111 @@ describe("defineAADP() handleRequest", () => {
     expect(res.headers.get("Access-Control-Allow-Headers")).toContain("X-API-Key");
   });
 });
+
+describe("defineAADP() custom routes (config.routes)", () => {
+  it("publishes and serves the plan's acceptance-criteria custom routes end to end", async () => {
+    const aadp = makeServer({
+      routes: {
+        sitemapIndex: "/aadp/index",
+        sitemap: "/aadp/maps/{type}",
+        entity: "/aadp/resources/{type}/{id}",
+      },
+    });
+
+    const manifestRes = await aadp.handleRequest(new Request("https://example.com/.well-known/ai-manifest.json"));
+    const manifestBody = await manifestRes.json();
+    expect(manifestBody.discovery.sitemap_index).toBe("https://example.com/aadp/index");
+
+    const indexRes = await aadp.handleRequest(new Request("https://example.com/aadp/index"));
+    expect(indexRes.status).toBe(200);
+    const indexBody = await indexRes.json();
+    expect(indexBody.sitemaps).toEqual([{ type: "post", url: "https://example.com/aadp/maps/post" }]);
+
+    const sitemapRes = await aadp.handleRequest(new Request("https://example.com/aadp/maps/post"));
+    expect(sitemapRes.status).toBe(200);
+    const sitemapBody = await sitemapRes.json();
+    expect(sitemapBody.items[0].url).toBe("https://example.com/aadp/resources/post/first-post");
+
+    const entityRes = await aadp.handleRequest(new Request("https://example.com/aadp/resources/post/first-post"));
+    expect(entityRes.status).toBe(200);
+    const entityBody = await entityRes.json();
+    expect(entityBody.id).toBe("post:first-post");
+
+    // Default route is no longer served once overridden.
+    const legacyRes = await aadp.handleRequest(new Request("https://example.com/ai/v1.0/sitemap-index.json"));
+    expect(legacyRes.status).toBe(404);
+  });
+
+  it("keeps the well-known manifest path fixed even when every other route is customized", async () => {
+    const aadp = makeServer({
+      routes: {
+        sitemapIndex: "/custom/index",
+        sitemap: "/custom/maps/{type}",
+        entity: "/custom/resources/{type}/{id}",
+      },
+    });
+    const res = await aadp.handleRequest(new Request("https://example.com/.well-known/ai-manifest.json"));
+    expect(res.status).toBe(200);
+  });
+
+  it("only overrides the fields provided, keeping the others at their v1.0 default", async () => {
+    const aadp = makeServer({ routes: { sitemapIndex: "/custom/index" } });
+
+    const customIndex = await aadp.handleRequest(new Request("https://example.com/custom/index"));
+    expect(customIndex.status).toBe(200);
+
+    const defaultSitemap = await aadp.handleRequest(new Request("https://example.com/ai/v1.0/sitemaps/post.json"));
+    expect(defaultSitemap.status).toBe(200);
+
+    const defaultEntity = await aadp.handleRequest(
+      new Request("https://example.com/ai/v1.0/entities/post/first-post.json")
+    );
+    expect(defaultEntity.status).toBe(200);
+  });
+
+  it("reads the cursor query param on a custom sitemap route the same way as the default route", async () => {
+    const aadp = makeServer({ routes: { sitemap: "/aadp/maps/{type}" } });
+    const page1 = await aadp.handleRequest(new Request("https://example.com/aadp/maps/post"));
+    const page1Body = await page1.json();
+    expect(page1Body.items).toHaveLength(2);
+    expect(page1Body.cursor.next).toBeTruthy();
+
+    const page2 = await aadp.handleRequest(
+      new Request(`https://example.com/aadp/maps/post?cursor=${encodeURIComponent(page1Body.cursor.next)}`)
+    );
+    const page2Body = await page2.json();
+    expect(page2Body.items).toHaveLength(1);
+  });
+
+  it("decodes type/id from a custom entity route the same way as the default route", async () => {
+    const aadp = makeServer({ routes: { entity: "/aadp/resources/{type}/{id}" } });
+    const res = await aadp.handleRequest(new Request("https://example.com/aadp/resources/%70ost/first-post"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.type).toBe("post");
+  });
+
+  it("throws at defineAADP() time for an invalid route config, before any request is served", () => {
+    expect(() => makeServer({ routes: { sitemap: "/aadp/no-placeholder" } })).toThrow(
+      /must contain exactly one \{type\} placeholder/
+    );
+  });
+
+  it("throws at defineAADP() time when a custom route collides with another", () => {
+    expect(() =>
+      makeServer({ routes: { sitemapIndex: "/aadp/index", sitemap: "/aadp/{type}" } })
+    ).toThrow(/collides with/);
+  });
+
+  it("serves a custom route whose literal segment contains a space, fetched via the exact URL the sitemap index published", async () => {
+    const aadp = makeServer({ routes: { sitemap: "/custom maps/{type}" } });
+    const index = aadp.sitemapIndex();
+    const publishedUrl = index.sitemaps[0].url;
+    expect(publishedUrl).toBe("https://example.com/custom%20maps/post");
+
+    const res = await aadp.handleRequest(new Request(publishedUrl));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.type).toBe("post");
+  });
+});

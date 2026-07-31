@@ -80,6 +80,24 @@ export interface ResourceDefinition<T> extends ResourceConfig<T> {
   readonly __aadpResource: true;
 }
 
+/**
+ * Overrides the pathname AADP publishes for the sitemap index, sitemap and
+ * entity documents. Every field is an origin-relative pathname template —
+ * absolute URLs, query strings and fragments are rejected. `{type}`/`{id}`
+ * are the only supported placeholders; each must occupy exactly the field's
+ * required count (see `defineAADP()`'s validation). Omitted fields keep the
+ * `/ai/v{version}/...` default. The well-known manifest path
+ * (`/.well-known/ai-manifest.json`) is never configurable here.
+ */
+export interface AadpRouteConfig {
+  /** Static pathname for the sitemap index. Default: `/ai/v{version}/sitemap-index.json`. */
+  sitemapIndex?: string;
+  /** Sitemap pathname template. Must contain exactly one `{type}` token. Default: `/ai/v{version}/sitemaps/{type}.json`. */
+  sitemap?: string;
+  /** Entity pathname template. Must contain exactly one `{type}` token and one `{id}` token. Default: `/ai/v{version}/entities/{type}/{id}.json`. */
+  entity?: string;
+}
+
 export interface AadpServerConfig {
   /** Origin the manifest and every resolved URL is published under, e.g. `"https://example.com"`. No trailing slash. */
   baseUrl: string;
@@ -95,6 +113,8 @@ export interface AadpServerConfig {
   cacheMaxAgeSeconds?: number;
   /** Page size passed as `limit` to every resource's `list()`. Default 50. */
   pageSize?: number;
+  /** Override the published/matched pathname for sitemap index, sitemap and entity routes. Omit to keep the `/ai/v{version}/...` default. */
+  routes?: AadpRouteConfig;
 }
 
 export interface AadpServer {

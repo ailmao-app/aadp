@@ -330,6 +330,41 @@ public resource gets), so an authorized response for one caller is never
 served to another from a shared cache — but the authorization check itself
 is always the resource's own responsibility.
 
+### Custom routes
+
+`/ai/v1.0/...` is this SDK's default convention, not a routing contract the
+wire protocol requires — only `/.well-known/ai-manifest.json` is fixed. Pass
+`routes` to publish and serve the sitemap index/sitemap/entity documents at
+whatever pathnames your application already owns:
+
+```ts
+const aadp = defineAADP({
+  baseUrl: "https://example.com",
+  routes: {
+    sitemapIndex: "/discovery/aadp-index.json",
+    sitemap: "/discovery/aadp/{type}",
+    entity: "/public/aadp/{type}/{id}",
+  },
+  application,
+  policies,
+  resources: [posts],
+});
+```
+
+`manifest().discovery.sitemap_index`, every `sitemapIndex().sitemaps[].url`
+and `sitemap().items[].url`, and `handleRequest()`'s own matching all come
+from this same config — they can never drift from each other. Rules:
+
+- Every field is an origin-relative pathname starting with `/`; absolute
+  URLs, query strings and fragments are rejected.
+- `sitemap` must contain exactly one `{type}` placeholder; `entity` must
+  contain exactly one `{type}` and one `{id}`; `sitemapIndex` accepts none.
+- Omitted fields keep the `/ai/v{version}/...` default — you only need to
+  set the ones you're actually overriding.
+- `defineAADP()` throws immediately if a template is malformed or if two
+  routes could match the same inbound pathname, rather than deciding between
+  them at request time.
+
 ### Scaffold a new server
 
 ```bash
