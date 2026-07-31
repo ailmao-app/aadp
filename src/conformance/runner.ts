@@ -5,7 +5,7 @@
  * library, no repo fixture. `./cli.ts` is a thin front-end over this: it
  * parses argv, calls `runConformance`, renders the report and picks an
  * exit code, and holds no conformance logic of its own
- * (`docs/vi/IMPLEMENTATION_PLAN.md` §11 "Ưu tiên 1").
+ * (`docs/vi/plans/implementation-plan.md` §11 "Ưu tiên 1").
  */
 import { createRequire } from "node:module";
 import { createStrictUrlPolicy, createPermissiveUrlPolicy } from "../client/url-policy.js";

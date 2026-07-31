@@ -1,8 +1,26 @@
 # AADP v1.0 Implementation Plan
 
-> Status: Implemented and released as `ail-aadp@1.0.0`.
->
-> Vietnamese edition: [`vi/IMPLEMENTATION_PLAN.md`](vi/IMPLEMENTATION_PLAN.md).
+| Field | Value |
+|---|---|
+| Document type | Implementation record |
+| Status | Implemented; maintained as a regression baseline |
+| Audience | Package maintainers and release reviewers |
+| Scope | AADP core v1.0 |
+| Vietnamese internal edition | [`../vi/plans/implementation-plan.md`](../vi/plans/implementation-plan.md) |
+
+## Abstract
+
+This memo records the architecture, delivery phases, and release gates used to
+implement AADP v1.0. It is informational and does not override the v1.0
+specification or schemas.
+
+## Status of This Memo
+
+The original v1.0 delivery is complete. The gates remain applicable to compatible
+patch and minor releases. Current maintenance work is tracked in the Vietnamese
+internal edition and the issue tracker.
+
+Requirement words follow [the AADP documentation conventions](../document-conventions.md).
 
 ## Objective
 
@@ -86,6 +104,23 @@ Layer responsibilities:
 - Maintain an explicit public-field allow-list.
 - Publish only deployed endpoints and modules.
 - Run the core conformance suite against staging before production.
+
+## Delivered maintenance capabilities
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Standalone conformance runner, JSON/JUnit reports, and CLI | Implemented | `src/conformance/`, `tests/conformance/v1.0/runner.test.ts` |
+| Declarative server SDK | Implemented | `src/server/`, `tests/server/runtime.test.ts` |
+| Scaffold CLI | Implemented | `src/scaffold/`, `tests/scaffold/scaffold.test.ts` |
+| Configurable server routes | Implemented in 1.0.7 | `src/server/routes.ts`, `tests/server/routes.test.ts` |
+| Clean-install package verification | Implemented | `tests/package/` |
+
+The standalone `aadp-conformance` CLI is the public deployment-checking surface.
+The `AADP_BASE_URL` Vitest mode remains a contributor self-test mechanism and is
+not required by external consumers.
+
+`AADP-CONFORMANCE-003` added `renderJUnitReport`, the `--junit <file>` CLI flag,
+and `examples/ci/github-actions-conformance.yml` for CI integration.
 
 ## Release gate
 

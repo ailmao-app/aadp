@@ -1,9 +1,9 @@
 /**
  * AADP v1.0 client-side types. Deliberately independent of the v0.1
- * types in `../v0.1/index.ts` — per `docs/IMPLEMENTATION_PLAN.md` Phase
+ * types in `../v0.1/index.ts` — per `docs/records/implementation-record-v1.0.md` Phase
  * 4, v1.0 does not share one loosely-optional interface with v0.1. Field
  * shapes here mirror `schemas/v1.0/manifest.schema.json` and
- * `docs/MANIFEST_V1.0_DESIGN.md`.
+ * `docs/design/manifest-v1.0-design.md`.
  */
 
 /** Every AADP v1.0 object permits `x_*` extension fields (spec v1.0 §3.1.10). */

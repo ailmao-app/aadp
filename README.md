@@ -237,7 +237,7 @@ Before claiming support:
 5. Keep credentials, internal URLs, and executable instructions out of the manifest.
 6. Run the conformance suite against the deployed server.
 
-See the [v1.0 server implementation guide](docs/implementation-guide-v1.0.md) for details.
+See the [v1.0 server implementation guide](docs/guides/implementation-guide-v1.0.md) for details.
 
 ## Build a server with `defineAADP()`
 
@@ -509,7 +509,7 @@ Treat every URL and free-text field in a manifest as untrusted input:
 - Do not execute tools or actions merely because a manifest advertises an interface or preference.
 - Do not interpret `robots: allow` as permission for training, redistribution, or commercial use.
 
-See [Security considerations](docs/security-considerations.md).
+See [Security considerations](docs/guides/security-considerations.md).
 
 ## Develop the package
 
@@ -535,10 +535,10 @@ AADP core is independent of Ailmao. Application-specific resource shapes, databa
 ## Documentation
 
 - [v1.0 specification](spec/v1.0/specification.md)
-- [Manifest v1.0 design](docs/MANIFEST_V1.0_DESIGN.md)
-- [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
-- [v1.0 implementation guide](docs/implementation-guide-v1.0.md)
-- [Security considerations](docs/security-considerations.md)
+- [Manifest v1.0 design](docs/design/manifest-v1.0-design.md)
+- [Implementation record](docs/records/implementation-record-v1.0.md)
+- [v1.0 implementation guide](docs/guides/implementation-guide-v1.0.md)
+- [Security considerations](docs/guides/security-considerations.md)
 - [Architecture decision records](docs/adr)
 - [Changelog](CHANGELOG.md)
 

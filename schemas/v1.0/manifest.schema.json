@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aadp.dev/schemas/v1.0/manifest.schema.json",
   "title": "AADP Manifest v1.0",
-  "description": "Application discovery document. See docs/MANIFEST_V1.0_DESIGN.md and ADR-0005 for design rationale.",
+  "description": "Application discovery document. See docs/design/manifest-v1.0-design.md and ADR-0005 for design rationale.",
   "type": "object",
   "required": ["aadp_version", "application", "discovery", "policies"],
   "properties": {

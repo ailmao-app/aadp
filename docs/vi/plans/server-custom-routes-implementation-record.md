@@ -1,13 +1,26 @@
-# Kế hoạch triển khai custom route cho AADP Server SDK
+# Hồ sơ triển khai custom route cho AADP Server SDK
 
 > Ngôn ngữ: Tiếng Việt.
 >
-> Trạng thái: Implementation Draft.
+> Trạng thái: Implemented trong `ail-aadp@1.0.7`.
 >
 > Phạm vi: `ail-aadp/server`, tài liệu SDK, regression test và release patch.
 >
-> Finding nguồn: Server SDK được thêm từ `1.0.5` và vẫn còn limitation ở
+> Finding lịch sử: Server SDK được thêm từ `1.0.5` và còn limitation ở
 > `1.0.6`: URL generator và route matcher cùng hardcode `/ai/v1.0`.
+
+## Trạng thái triển khai
+
+| Hạng mục | Trạng thái | Bằng chứng |
+|---|---|---|
+| Route config và compiler | Đã triển khai | `src/server/routes.ts`, `src/server/types.ts` |
+| Runtime integration | Đã triển khai | `src/server/runtime.ts` |
+| Route unit/regression tests | Đã triển khai | `tests/server/routes.test.ts`, `tests/server/runtime.test.ts` |
+| Public documentation và release | Đã triển khai | `README.md`, `CHANGELOG.md`, package `1.0.7` |
+
+Phần “đề xuất”, phase và test matrix bên dưới được giữ làm implementation record
+và regression baseline. Các câu ở thì tương lai mô tả yêu cầu ban đầu, không
+phản ánh hạng mục còn mở.
 
 ## 1. Bối cảnh
 
@@ -27,7 +40,7 @@ Các URL được công bố trong document mới là nguồn authoritative mà 
 follow. `/ai/v1.0/...` là convention và default hợp lý, nhưng không phải routing
 contract bắt buộc đối với mọi server.
 
-Server SDK hiện chưa phản ánh đúng semantics này. Trong
+Trước bản `1.0.7`, Server SDK chưa phản ánh đúng semantics này. Trong
 `src/server/runtime.ts`, một `basePath` hardcode đang đồng thời điều khiển:
 
 1. URL sitemap index được ghi vào manifest.
@@ -365,7 +378,7 @@ Files:
 
 ```text
 README.md
-docs/implementation-guide-v1.0.md
+docs/guides/implementation-guide-v1.0.md
 docs/vi/*
 CHANGELOG.md
 ERROR_LOG.md

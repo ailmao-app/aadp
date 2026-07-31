@@ -9,7 +9,7 @@ Accepted — AADP v0.1
 Not every AADP server exposes the same resource types, and future
 versions may add optional capabilities (delta sync, search, auth scopes —
 v1.0 has since shipped the `security` field on manifest resources; see
-`docs/MANIFEST_V1.0_DESIGN.md`). Clients need a way to know
+`docs/design/manifest-v1.0-design.md`). Clients need a way to know
 what a given server supports before attempting an operation, without
 hardcoding per-deployment assumptions or trial-and-erroring endpoints.
 

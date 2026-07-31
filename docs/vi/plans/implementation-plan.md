@@ -2,10 +2,10 @@
 
 > Ngôn ngữ: Tiếng Việt.
 >
-> Trạng thái: Implementation Draft
+> Trạng thái: Core v1.0 đã triển khai; tài liệu theo dõi bảo trì và roadmap
 > Phạm vi: AADP core, Manifest v1.0, validator, reference client và conformance suite.
-> Branch triển khai: `feat/aadp-v1-implementation`
-> Tài liệu thiết kế nguồn: [`MANIFEST_V1.0_DESIGN.md`](MANIFEST_V1.0_DESIGN.md).
+> Branch triển khai lịch sử: `feat/aadp-v1-implementation`
+> Tài liệu thiết kế nguồn: [`../design/manifest-v1.0-design.md`](../design/manifest-v1.0-design.md).
 
 ## Quy ước branch
 
@@ -22,6 +22,27 @@ feat/ailmao-aadp-v1-adapter
 ```
 
 Không trộn refactor hoặc tính năng ngoài phạm vi AADP vào hai branch này. Mỗi phase nên được commit độc lập để có thể review và revert theo ranh giới contract, validator, client và adapter.
+
+## Trạng thái triển khai
+
+Phần phase 0–7 bên dưới được giữ làm implementation record và acceptance baseline.
+Nhãn trạng thái phản ánh repository hiện tại, không thay thế issue tracker hoặc
+lịch sử release.
+
+| Hạng mục | Trạng thái | Bằng chứng chính |
+|---|---|---|
+| Contract, ADR, specification và schema v1.0 | Đã triển khai | `docs/adr/0005-manifest-v1-discovery.md`, `spec/v1.0/`, `schemas/v1.0/` |
+| Version-aware validator và semantic validator | Đã triển khai | `src/validator/`, `tests/schema/`, `tests/semantic/` |
+| Reference client và URL/DNS safety | Đã triển khai | `src/client/`, `tests/client/` |
+| Conformance suite và runner độc lập | Đã triển khai | Runner/CLI, JSON/JUnit report và GitHub Actions example đã có |
+| Package, tarball và clean-install tests | Đã triển khai | `tests/package/` và package exports |
+| Server SDK và scaffold CLI | Đã triển khai | `src/server/`, `src/scaffold/`, `tests/server/`, `tests/scaffold/` |
+| Custom server routes | Đã triển khai trong 1.0.7 | `src/server/routes.ts`, `tests/server/routes.test.ts` |
+| Ailmao adapter và production certification | Ngoài core/chưa xác nhận tại tài liệu này | Theo dõi ở repository/branch adapter tương ứng |
+
+Khi hoàn tất thêm một hạng mục, cập nhật đồng thời bảng này, issue tương ứng và
+`CHANGELOG.md`. Không đánh dấu `Đã triển khai` chỉ dựa trên việc file đã tồn tại;
+acceptance test của hạng mục phải xanh.
 
 ## 1. Mục tiêu
 
@@ -51,11 +72,11 @@ AADP v0.1 chưa có consumer production. Không triển khai dual manifest, cont
 
 ## 3. Design gate trước khi viết schema
 
-> **Đã đóng** — xem [ADR-0005](adr/0005-manifest-v1-discovery.md) (Accepted)
-> và `MANIFEST_V1.0_DESIGN.md` §3a cho quyết định chi tiết của cả 4 mục
+> **Đã đóng** — xem [ADR-0005](../adr/0005-manifest-v1-discovery.md) (Accepted)
+> và `../design/manifest-v1.0-design.md` §3a cho quyết định chi tiết của cả 4 mục
 > dưới đây. Mục này giữ nguyên làm lịch sử câu hỏi gốc.
 
-Các quyết định sau phải được bổ sung vào `MANIFEST_V1.0_DESIGN.md` và ADR tương ứng trước khi khóa schema:
+Các quyết định sau phải được bổ sung vào `../design/manifest-v1.0-design.md` và ADR tương ứng trước khi khóa schema:
 
 ### 3.1 Localization và language preference
 
@@ -151,14 +172,20 @@ aadp/
 ├── src/
 │   ├── client/
 │   │   ├── index.ts
-│   │   ├── types.ts
+│   │   ├── v0.1/
+│   │   ├── v1.0/
+│   │   ├── discovery-budget.ts
+│   │   ├── dns-pin.ts
 │   │   └── url-policy.ts
 │   ├── validator/
 │   │   ├── index.ts
 │   │   ├── schemas.ts
 │   │   ├── semantic.ts
 │   │   └── cli.ts
-│   └── canonical-json/
+│   ├── canonical-json/
+│   ├── conformance/
+│   ├── server/
+│   └── scaffold/
 └── tests/
     ├── fixtures/
     ├── schema/
@@ -167,6 +194,14 @@ aadp/
 ```
 
 Không bắt buộc tách file nếu implementation còn rất nhỏ, nhưng URL policy và semantic validation phải độc lập để test mà không cần chạy HTTP server.
+
+Ranh giới bổ sung của implementation hiện tại:
+
+- `src/conformance/`: runner/check là application service; CLI chỉ parse option và render report.
+- `src/server/`: runtime tạo document và xử lý contract HTTP; data access và serializer do application cung cấp.
+- `src/scaffold/`: chỉ sinh project/config mẫu, không chứa rule runtime hoặc domain rule.
+- `src/client/url-policy.ts`, `dns-pin.ts` và `discovery-budget.ts`: security infrastructure dùng chung, độc lập với wire type của từng version.
+- Public adapter/framework route phải mỏng; core không import framework hoặc domain model của consumer.
 
 ## 6. Các phase triển khai
 
@@ -294,6 +329,11 @@ Reference client phải:
 - Validate schema trước khi dùng URL lấy từ document.
 - Validate semantic rule trước discovery traversal.
 - Phát hiện cursor cycle.
+- Giới hạn tổng số sitemap, page, entity và deadline của toàn traversal.
+- Hỗ trợ caller hủy traversal; không để request nền tiếp tục sau khi abort hoặc vượt budget.
+- Áp dụng giới hạn response cho dữ liệu thực tế được parser đọc, kể cả response có content encoding.
+- Không tự retry vô hạn; retry chỉ áp dụng cho lỗi tạm thời đã định nghĩa, có backoff và tôn trọng `Retry-After`.
+- Giới hạn concurrency khi traversal song song để không gây tải đột biến cho publisher.
 - Không chèn `usage_guidance` vào system/developer prompt.
 - Không tự thực thi interface hoặc tool được manifest quảng bá.
 
@@ -304,6 +344,9 @@ Acceptance:
 - Test redirect loop, oversized response và timeout.
 - Test private-network URL bị chặn trong strict mode.
 - Test cursor cycle.
+- Test DNS rebinding/pinning, IPv4-mapped IPv6 và redirect đổi origin.
+- Test sensitive header bị loại bỏ khi redirect sang origin khác.
+- Test traversal budget, deadline, abort, retry cap và response sau giải nén.
 - Test document invalid không được dùng để tiếp tục traversal.
 
 ### Phase 5 — Conformance suite
@@ -329,12 +372,29 @@ Chế độ chạy:
 # Self-test bằng mock server
 npm test
 
-# Kiểm tra deployment
-AADP_BASE_URL=https://example.com \
-  npx vitest run tests/conformance/conformance.test.ts
+# Kiểm tra deployment bằng CLI public
+npx aadp-conformance https://example.com
 ```
 
+`AADP_BASE_URL` kết hợp Vitest chỉ dành cho contributor chạy suite từ source
+tree. Consumer và CI bên ngoài SHOULD dùng `aadp-conformance`, không phụ thuộc
+Vitest hoặc layout của repository.
+
 Conformance không được yêu cầu truy cập credential thật. Interface cần auth chỉ được kiểm tra public discovery metadata, trừ khi test environment cung cấp credential riêng.
+
+#### Conformance profile
+
+Không đồng nhất protocol conformance với security policy cục bộ của runner. Runner
+phải ghi profile và option đã dùng trong report:
+
+- `core`: schema, semantic và HTTP contract bắt buộc của protocol.
+- `public-web`: `core` cộng chính sách HTTPS, public DNS, redirect và SSRF phù hợp deployment Internet công khai.
+- `full-traversal`: traversal sitemap/entity có budget, deadline và cycle guard.
+- `authenticated`: chỉ chạy khi operator chủ động cung cấp credential qua test environment; credential không được ghi vào report/log.
+
+Một target nội bộ có thể conform với wire contract nhưng không vượt qua policy
+`public-web`. Report phải thể hiện đây là khác biệt profile/policy, không kết luận
+sai rằng protocol document invalid.
 
 ### Phase 6 — Package và tài liệu
 
@@ -364,6 +424,10 @@ Acceptance:
 - `npm test` pass.
 - Package tarball chứa đủ schema/spec/example cần công bố.
 - Test import chạy trên tarball, không chỉ trong source tree.
+- `npm ci`, build và test chạy trên clean checkout với các Node version được support.
+- `npm pack --dry-run` không thiếu artifact và không đóng gói file nội bộ ngoài chủ đích.
+- Smoke test tarball chạy trong consumer ESM độc lập, không resolve ngược vào source tree.
+- Public export, CLI exit code, report field và error/check code có compatibility test.
 
 ### Phase 7 — Ailmao adapter và staging
 
@@ -388,6 +452,14 @@ Staging gate:
 - Security review xác nhận không rò credential, private data hoặc internal URL.
 - Payload kiểm tra thủ công không chứa field ngoài public allow-list.
 
+Production rollout:
+
+- Rollout canary hoặc theo tỷ lệ trước khi công bố rộng rãi.
+- Có kế hoạch purge/invalidate cache khi manifest hoặc sitemap thay đổi.
+- Theo dõi status, latency, payload size, error rate và kết quả conformance định kỳ.
+- Report lưu protocol version, package version, target URL, profile và thời điểm chạy.
+- Xác định owner nhận cảnh báo, rollback procedure và cách xử lý sitemap stale/entity đã xóa.
+
 ## 7. Test matrix tối thiểu
 
 | Layer | Happy path | Failure bắt buộc |
@@ -399,8 +471,17 @@ Staging gate:
 | Sitemap | Một và nhiều page | Cursor cycle, type mismatch |
 | Entity | ID/type/checksum khớp | ID/type/checksum mismatch |
 | Conformance | Mock server và staging | Dead URL, sai content type, invalid JSON |
+| DNS/redirect | DNS pinning và same-origin redirect | Rebinding, IPv4-mapped IPv6, cross-origin sensitive header |
+| Resource budget | Traversal trong page/entity/deadline limit | Cycle, vượt tổng byte/request, abort và retry cap |
+| Compatibility | Public API/CLI/report hiện hành | Export, exit code, error code hoặc check ID bị đổi ngoài chủ đích |
+| Robustness | Canonical JSON và URL hợp lệ | Malformed percent encoding, deep nesting, large array và fuzz corpus |
 
 ## 8. Release gate v1.0
+
+Gate này là baseline lịch sử của release v1.0 và tiếp tục được dùng làm regression
+gate cho các bản patch/minor tương thích. Hạng mục mới chỉ được coi là đạt gate
+khi có bằng chứng CI/release tương ứng; trạng thái package hiện tại không thay thế
+việc kiểm tra lại gate trước lần publish tiếp theo.
 
 Chỉ gắn tag/release AADP v1.0 khi:
 
@@ -412,22 +493,41 @@ Chỉ gắn tag/release AADP v1.0 khi:
 - Conformance suite xanh với mock server.
 - Conformance suite xanh với Ailmao staging nếu adapter nằm trong release scope.
 - Package build/tarball/import smoke test xanh.
+- CI clean-install xanh trên Node version tối thiểu và các Node version được support.
+- Public API, CLI exit code, error/check code và JSON report compatibility test xanh.
+- Dependency/license/security audit đã được review; exception phải có owner và thời hạn.
+- Version, tag, changelog và package provenance khớp; có rollback/deprecation procedure.
 - README và implementation guide phản ánh đúng v1.0.
 
 Sau khi release, schema v1.0 là immutable. Thay đổi schema validation result phải đi qua version mới theo ADR compatibility.
 
+Tính immutable áp dụng cho wire schema v1.0, nhưng không tự động cho phép breaking
+change ở package API. Các bề mặt sau là compatibility contract riêng: TypeScript
+exports, CLI flag/exit code, validator issue code, conformance check ID, JSON/JUnit
+report shape và server runtime behavior. Message dành cho người đọc có thể được
+cải thiện nếu code ổn định không đổi; đổi code hoặc shape phải được phân loại theo
+SemVer và ghi trong changelog.
+
 ## 9. Thứ tự issue đề xuất
 
-1. `AADP-V1-001`: Khóa design gate và root required fields.
-2. `AADP-V1-002`: ADR Manifest v1.0 và canonical discovery.
-3. `AADP-V1-003`: Specification và JSON Schema v1.0.
-4. `AADP-V1-004`: Version-aware schema registry và CLI.
-5. `AADP-V1-005`: Semantic validator.
-6. `AADP-V1-006`: TypeScript types và secure reference client.
-7. `AADP-V1-007`: Mock server và conformance suite v1.0.
-8. `AADP-V1-008`: Package exports, tarball test và documentation.
-9. `AILMAO-AADP-V1-001`: Ailmao adapter inventory và public allow-list.
-10. `AILMAO-AADP-V1-002`: Staging adapter và conformance rollout.
+1. `AADP-V1-001`: Khóa design gate và root required fields. **Đã triển khai.**
+2. `AADP-V1-002`: ADR Manifest v1.0 và canonical discovery. **Đã triển khai.**
+3. `AADP-V1-003`: Specification và JSON Schema v1.0. **Đã triển khai.**
+4. `AADP-V1-004`: Version-aware schema registry và CLI. **Đã triển khai.**
+5. `AADP-V1-005`: Semantic validator. **Đã triển khai.**
+6. `AADP-V1-006`: TypeScript types và secure reference client. **Đã triển khai.**
+7. `AADP-V1-007`: Mock server và conformance suite v1.0. **Đã triển khai.**
+8. `AADP-V1-008`: Package exports, tarball test và documentation. **Đã triển khai.**
+9. `AILMAO-AADP-V1-001`: Ailmao adapter inventory và public allow-list. **Theo dõi ngoài core.**
+10. `AILMAO-AADP-V1-002`: Staging adapter và conformance rollout. **Theo dõi ngoài core.**
+
+Issue bảo trì/production còn mở nên ưu tiên sau baseline v1.0:
+
+1. `AADP-INTEROP-001`: Neutral reference server và external consumer verification.
+2. `AADP-COMPAT-001`: Contract test cho public exports, CLI, error/check code và report shape.
+3. `AADP-RELEASE-001`: Clean CI matrix, provenance, audit và rollback/deprecation procedure.
+4. `AADP-ROBUSTNESS-001`: Abort/retry/concurrency/total-byte policy và fuzz/property tests.
+5. `AADP-PROD-001`: Scheduled conformance, observability và production certification.
 
 ## 10. Definition of Done
 
@@ -506,7 +606,7 @@ và adapter application phải là layer mỏng nằm bên ngoài core.
 
 - Tạo reference server trung lập, không dùng dữ liệu hoặc knowledge riêng của Ailmao.
 - Chạy conformance định kỳ với deployment staging/production.
-- Cung cấp GitHub Actions example và report JSON/JUnit cho CI.
+- Duy trì GitHub Actions example và report JSON/JUnit tương thích cho CI.
 - Kiểm tra external consumer bằng package clean-install.
 - Công bố kết quả conformance có version và thời điểm chạy rõ ràng.
 
@@ -555,8 +655,8 @@ conflict semantics; không được tuyên bố một license có hiệu lực p
 
 ### Thứ tự issue đề xuất
 
-1. `AADP-CONFORMANCE-001`: Programmatic conformance runner.
-2. `AADP-CONFORMANCE-002`: CLI `aadp-conformance`.
+1. `AADP-CONFORMANCE-001`: Programmatic conformance runner. **Đã triển khai.**
+2. `AADP-CONFORMANCE-002`: CLI `aadp-conformance`. **Đã triển khai.**
 3. `AADP-CONFORMANCE-003`: JSON/JUnit report và CI example. **Đã triển khai.**
 4. `AADP-SERVER-001`: Declarative `defineAADP()` server runtime. **Đã triển khai.**
 5. `AADP-SERVER-002`: Typed `defineResource()` contract và public serializer boundary. **Đã triển khai.**
