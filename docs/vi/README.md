@@ -38,6 +38,7 @@ thay đổi wire contract đã release.
 - [Kế hoạch package 2.0.0](plans/implementation-plan-v2.0.0.md)
 - [Hồ sơ triển khai custom route cho Server SDK](plans/server-custom-routes-implementation-record.md)
 - [Hướng dẫn phát hành npm](operations/npm-release-guide.md)
+- [Quy trình Git (branch, release, release-gate)](operations/git-workflow.md)
 - [Bản nháp AADP lịch sử](archive/aadp-draft.md)
 - [Review Socket.dev cho 1.0.5](archive/socket-dev-review-1.0.5.md)
 - [ADR-0005 bằng tiếng Việt](adr/0005-manifest-v1-discovery.md)
