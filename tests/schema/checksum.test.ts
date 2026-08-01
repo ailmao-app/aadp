@@ -116,4 +116,32 @@ describe("canonicalizer rejects out-of-domain input instead of coercing it", () 
     expect(() => canonicalize({ a: Infinity })).toThrow(TypeError);
     expect(() => canonicalize({ a: -Infinity })).toThrow(TypeError);
   });
+
+  describe("deeply nested input", () => {
+    function nestedObject(depth: number): unknown {
+      let value: unknown = { leaf: true };
+      for (let i = 0; i < depth; i++) value = { child: value };
+      return value;
+    }
+
+    it("serializes a realistically deep document (1000 levels) without error", () => {
+      expect(() => canonicalize(nestedObject(1000))).not.toThrow();
+    });
+
+    it("rejects pathologically deep input with a TypeError, not an unhandled RangeError", () => {
+      // `checksumOf()`/`canonicalize()` run against server-supplied
+      // document fields the client has not otherwise bounded (entity
+      // `data`, sitemap `items`, ...) — see
+      // `../../src/client/validated-document.ts`. An adversarial server
+      // must not be able to turn that into a raw stack-overflow crash.
+      let caught: unknown;
+      try {
+        canonicalize(nestedObject(1_000_000));
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(TypeError);
+      expect(caught).not.toBeInstanceOf(RangeError);
+    });
+  });
 });

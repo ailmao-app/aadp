@@ -1,10 +1,8 @@
-import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startMockServer, type MockServerHandle } from "../conformance/v1.0/mock-server.js";
+import { packAndExtractTarball, cleanupTarball, runPackedCli, BUILD_TIMEOUT_MS, type PackedTarball } from "./tarball-helpers.js";
 
 /**
  * Clean-install verification for the `aadp-conformance` CLI
@@ -21,35 +19,11 @@ import { startMockServer, type MockServerHandle } from "../conformance/v1.0/mock
  * ability to resolve `ajv`.
  */
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const BUILD_TIMEOUT_MS = 180_000;
-
 let server: MockServerHandle;
-let packageDir: string;
-let workDir: string;
+let tarball: PackedTarball;
 
-function run(command: string, args: string[], cwd: string): string {
-  return execFileSync(command, args, { cwd, encoding: "utf8", shell: true, stdio: ["ignore", "pipe", "pipe"] });
-}
-
-/**
- * Runs the packed CLI, resolving with its exit code and streams instead
- * of throwing. Deliberately asynchronous: the mock server runs in *this*
- * process, so a synchronous spawn would block the event loop that has to
- * answer the CLI's requests, and every run would time out.
- */
 function runCli(args: string[]): Promise<{ status: number; stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [path.join(packageDir, "dist", "conformance", "cli.js"), ...args], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
-    child.on("error", reject);
-    child.on("close", (code) => resolve({ status: code ?? -1, stdout, stderr }));
-  });
+  return runPackedCli(tarball.packageDir, path.join("dist", "conformance", "cli.js"), args);
 }
 
 /**
@@ -66,33 +40,21 @@ const NEGATIVE_TARGET_FLAGS = (): string[] => [
 
 beforeAll(async () => {
   server = await startMockServer();
-
-  run("npm", ["run", "build"], repoRoot);
-  workDir = mkdtempSync(path.join(tmpdir(), "aadp-cli-"));
-  run("npm", ["pack", "--pack-destination", JSON.stringify(workDir)], repoRoot);
-  const tarball = readdirSync(workDir).find((entry) => entry.endsWith(".tgz"));
-  if (!tarball) throw new Error(`npm pack produced no tarball in ${workDir}`);
-  // Relative name, extracted from `workDir`: a Windows absolute path
-  // (`C:\...`) makes GNU tar read the drive letter as a remote host.
-  run("tar", ["-xzf", tarball], workDir);
-
-  packageDir = path.join(workDir, "package");
-  // `junction` needs no elevation on Windows, unlike a directory symlink.
-  symlinkSync(path.join(repoRoot, "node_modules"), path.join(packageDir, "node_modules"), "junction");
+  tarball = packAndExtractTarball();
 }, BUILD_TIMEOUT_MS);
 
 afterAll(async () => {
   await server?.close();
-  if (workDir) rmSync(workDir, { recursive: true, force: true });
+  if (tarball) cleanupTarball(tarball);
 });
 
 describe("aadp-conformance, run from the packed tarball", () => {
   it("ships the CLI entry point the bin field points at", () => {
-    const pkg = JSON.parse(readFileSync(path.join(packageDir, "package.json"), "utf8")) as {
+    const pkg = JSON.parse(readFileSync(path.join(tarball.packageDir, "package.json"), "utf8")) as {
       bin: Record<string, string>;
     };
     expect(pkg.bin["aadp-conformance"]).toBe("dist/conformance/cli.js");
-    expect(existsSync(path.join(packageDir, pkg.bin["aadp-conformance"]))).toBe(true);
+    expect(existsSync(path.join(tarball.packageDir, pkg.bin["aadp-conformance"]))).toBe(true);
   });
 
   it("prints usage without reaching the network", async () => {
@@ -120,7 +82,7 @@ describe("aadp-conformance, run from the packed tarball", () => {
   });
 
   it("writes a JUnit XML report to --junit without disturbing stdout", async () => {
-    const junitPath = path.join(workDir, "report.junit.xml");
+    const junitPath = path.join(tarball.workDir, "report.junit.xml");
     const result = await runCli([
       server.baseUrl,
       "--allow-private-network",
@@ -169,6 +131,17 @@ describe("aadp-conformance, run from the packed tarball", () => {
     expect(result.stderr).toContain("Invalid conformance option");
   });
 
+  it("exits 2, never 0, for a malformed --header — an action error must never look like an untouched success", async () => {
+    // parseHeaders() throws from inside the action callback, not through
+    // Commander's own argv parser/exitOverride() — regression for a run
+    // that never happened being silently reported as exit 0 with no
+    // stdout/stderr.
+    const result = await runCli([server.baseUrl, "--allow-private-network", "--header", "malformed"]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('--header must be "Name: value"');
+    expect(result.stdout).toBe("");
+  });
+
   it("exits 2 when the run cannot be performed", async () => {
     // Default strict policy refuses the loopback origin: the run never
     // reaches a verdict, which must not look like a pass.
@@ -180,5 +153,64 @@ describe("aadp-conformance, run from the packed tarball", () => {
     const result = await runCli([server.baseUrl, "--allow-private-network", "--protocol-version", "0.1"]);
     expect(result.status).toBe(3);
     expect(result.stderr).toContain("Unsupported AADP conformance version");
+  });
+
+  it("exits 2, never 1, for an unusable argv — a bad flag must never look like a failed conformance run", async () => {
+    // Exit 1 is documented as "one or more checks failed" — a run that
+    // never started (missing argument, unknown flag, or an unparseable
+    // numeric option) belongs in exit 2 ("could not be performed") instead,
+    // the same class `InvalidConformanceOptionsError` uses. A CI job that
+    // greps `$? === 1` for "nonconformant" must not misread a typo'd flag
+    // as a real failure.
+    const missingArg = await runCli([]);
+    expect(missingArg.status).toBe(2);
+
+    const unknownFlag = await runCli([server.baseUrl, "--not-a-real-flag"]);
+    expect(unknownFlag.status).toBe(2);
+  });
+
+  it.each([
+    ["--timeout", "abc"],
+    ["--timeout", "Infinity"],
+    ["--timeout", "-1"],
+    ["--timeout", "1.5"],
+    ["--max-redirects", "NaN"],
+    ["--max-response-bytes", "abc"],
+    ["--max-entities", "1.5"],
+    ["--max-sitemaps", "-3"],
+    ["--deadline", "Infinity"],
+  ])("exits 2 for %s %s — never 1, never a silent success", async (flag, value) => {
+    const result = await runCli([server.baseUrl, "--allow-private-network", flag, value]);
+    expect(result.status).toBe(2);
+    expect(result.stdout).not.toContain("RESULT: PASSED");
+  });
+
+  it("exits 2 and never fakes a passing report when --junit cannot be written", async () => {
+    const unwritablePath = path.join(tarball.workDir, "no-such-directory", "report.junit.xml");
+    const result = await runCli([
+      server.baseUrl,
+      "--allow-private-network",
+      "--junit",
+      unwritablePath,
+      ...NEGATIVE_TARGET_FLAGS(),
+    ]);
+    expect(result.status).toBe(2);
+    expect(result.stdout).not.toContain("RESULT: PASSED");
+    expect(result.stderr).toContain("Could not write JUnit report");
+    expect(existsSync(unwritablePath)).toBe(false);
+  });
+
+  it("exits 2 and never fakes a passing report when --output cannot be written", async () => {
+    const unwritablePath = path.join(tarball.workDir, "no-such-directory", "report.json");
+    const result = await runCli([
+      server.baseUrl,
+      "--allow-private-network",
+      "--output",
+      unwritablePath,
+      ...NEGATIVE_TARGET_FLAGS(),
+    ]);
+    expect(result.status).toBe(2);
+    expect(result.stdout).not.toContain("RESULT: PASSED");
+    expect(existsSync(unwritablePath)).toBe(false);
   });
 });

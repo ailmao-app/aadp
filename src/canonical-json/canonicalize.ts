@@ -11,7 +11,21 @@
  * way in.
  */
 export function canonicalize(value: unknown): string {
-  return serialize(value);
+  try {
+    return serialize(value);
+  } catch (err) {
+    // `serialize()` recurses once per nesting level. A document this deep
+    // is either malformed or adversarial (checksums are verified against
+    // server-supplied data an attacker can shape — see
+    // `../client/validated-document.ts`), and a raw `RangeError: Maximum
+    // call stack size exceeded` would surface as an unhandled-looking
+    // crash instead of the same clearly-typed rejection every other
+    // out-of-domain input in this module gets.
+    if (err instanceof RangeError) {
+      throw new TypeError("Canonical JSON input is too deeply nested to serialize");
+    }
+    throw err;
+  }
 }
 
 /**
