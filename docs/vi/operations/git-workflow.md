@@ -38,7 +38,7 @@ git checkout -b feat/ten-tinh-nang
 git push origin feat/ten-tinh-nang
 ```
 
-Mở PR vào `develop`. CI chạy `build-test-audit` (matrix Node 20.18.1 +
+Mở PR vào `develop`. CI chạy `build-test-audit` (matrix Node 20.19.0 +
 22.12.0: `docs:check`, `build`, `test`, `audit`, `pack --dry-run`) trên PR này.
 
 ### Bước 2 — Merge `feat/*` vào `develop`
@@ -100,7 +100,13 @@ on:
 ```
 
 - **`build-test-audit`**: chạy trên mọi `pull_request` và trên push vào
-  `main`/tag `v*`. Matrix Node `20.18.1` (sàn `engines`) và `22.12.0`. Chạy
+  `main`/tag `v*`. Matrix Node `20.19.0` và `22.12.0` — **không phải** sàn
+  `engines` của `package.json` (`>=20.18.1`, lời hứa cho consumer cài package,
+  chỉ phụ thuộc `ajv`/`commander`/`undici`). `20.19.0` là Node cũ nhất mà
+  toolchain dev của repo (`vitest@4` → `rolldown`) chạy được — `20.18.1`
+  không thỏa engine range của `rolldown` (`^20.19.0 || >=22.12.0`) và làm
+  `npm test` crash với `Cannot find native binding` (xem `ERROR_LOG.md`
+  2026-07-29 và 2026-08-01 — nhầm lẫn này đã xảy ra 2 lần). Chạy
   `docs:check`, `build`, `test`, `audit --omit=dev`, `pack --dry-run`.
 - **`release-gate`**: `if: startsWith(github.ref, 'refs/tags/v')` — **chỉ**
   chạy khi push tag dạng `vX.Y.Z`, không chạy khi push branch hay mở PR. Chạy

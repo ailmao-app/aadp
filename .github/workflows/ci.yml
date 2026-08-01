@@ -11,10 +11,16 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # 20.18.1 is the package.json "engines" floor; 22.12.0 is CI's
-        # primary Node version. Both must pass — a fix that only works on
-        # one leaves the other unsupported despite what `engines` promises.
-        node-version: ["20.18.1", "22.12.0"]
+        # NOT the package.json "engines" floor (>=20.18.1) — that promise is
+        # about the *published package*'s runtime dependencies (ajv,
+        # commander, undici), which a consumer on 20.18.1 never has trouble
+        # with. This repo's own devDependency chain (vitest 4 -> rolldown)
+        # needs Node ^20.19.0 || >=22.12.0 for rolldown's native binding;
+        # 20.18.1 fails at "npm test" with "Cannot find native binding" (see
+        # ERROR_LOG.md 2026-07-29 and 2026-08-01 for this exact mixup
+        # happening twice). 20.19.0 is the oldest Node this repo's *tooling*
+        # can run on; 22.12.0 is CI's primary version.
+        node-version: ["20.19.0", "22.12.0"]
     steps:
       - uses: actions/checkout@v4
 
