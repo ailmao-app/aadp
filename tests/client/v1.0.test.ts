@@ -225,6 +225,53 @@ describe("redirect handling", () => {
 
     await expect(discover(server.baseUrl, PERMISSIVE)).rejects.toThrow(TooManyRedirectsError);
   });
+
+  it("strips Authorization on a same-origin -> cross-origin 3xx redirect hop, but keeps it same-origin", async () => {
+    let targetReceivedAuth: string | undefined;
+    const target = await startServer((req, res, url) => {
+      targetReceivedAuth = req.headers.authorization;
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        return sendJson(res, 200, buildManifest(req.headers.host!));
+      }
+      sendJson(res, 404, {});
+    });
+
+    let originReceivedAuth: string | undefined;
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        originReceivedAuth = req.headers.authorization;
+        res.writeHead(302, { Location: `${target.baseUrl}/.well-known/ai-manifest.json` });
+        return res.end();
+      }
+      sendJson(res, 404, {});
+    });
+
+    try {
+      await discover(server.baseUrl, { ...PERMISSIVE, headers: { Authorization: "Bearer secret" } });
+      expect(originReceivedAuth).toBe("Bearer secret");
+      expect(targetReceivedAuth).toBeUndefined();
+    } finally {
+      await target.close();
+    }
+  });
+
+  it("keeps Authorization across a same-origin 3xx redirect hop", async () => {
+    let finalReceivedAuth: string | undefined;
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        res.writeHead(302, { Location: "/redirected-manifest.json" });
+        return res.end();
+      }
+      if (url.pathname === "/redirected-manifest.json") {
+        finalReceivedAuth = req.headers.authorization;
+        return sendJson(res, 200, buildManifest(req.headers.host!));
+      }
+      sendJson(res, 404, {});
+    });
+
+    await discover(server.baseUrl, { ...PERMISSIVE, headers: { Authorization: "Bearer secret" } });
+    expect(finalReceivedAuth).toBe("Bearer secret");
+  });
 });
 
 describe("oversized response", () => {

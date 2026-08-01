@@ -1,0 +1,13 @@
+{
+  "name": "aadp-reference-server-example",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Neutral example server publishing AADP discovery documents with ail-aadp's server runtime, as a third-party consumer would.",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "ail-aadp": "^1.0.9"
+  }
+}
