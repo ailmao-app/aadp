@@ -1,7 +1,7 @@
 # AADP Specification v1.0
 
-Status: Draft, pending release gate (see `docs/IMPLEMENTATION_PLAN.md` §8,
-Phase 1 acceptance criteria and Phase 6 release gate).
+Status: Stable and released. The maintenance and regression gate is recorded in
+`docs/records/implementation-record-v1.0.md`.
 
 The key words "MUST", "MUST NOT", "SHOULD", "SHOULD NOT" and "MAY" in this
 document are to be interpreted as described in RFC 2119.
@@ -19,7 +19,7 @@ changes substantially: v1.0 redefines it as an *application discovery
 document* (identity, human links, AADP discovery entry point, non-AADP
 interfaces, security metadata, policies, untrusted publisher preference),
 not the minimal protocol envelope manifest of v0.1. See
-`docs/MANIFEST_V1.0_DESIGN.md` and [ADR-0005](../../docs/adr/0005-manifest-v1-discovery.md)
+`docs/design/manifest-v1.0-design.md` and [ADR-0005](../../docs/adr/0005-manifest-v1-discovery.md)
 for the manifest's full design rationale; this document is normative for
 the wire contract.
 
@@ -82,7 +82,7 @@ no content negotiation at that URL.
 Root-level required fields: `aadp_version`, `application`, `discovery`,
 `policies`. Root-level optional fields: `links`, `modules`, `resources`,
 `interfaces`, `security_schemes`, `usage_guidance`. Full per-object
-required/optional breakdown lives in `docs/MANIFEST_V1.0_DESIGN.md` §3a.4
+required/optional breakdown lives in `docs/design/manifest-v1.0-design.md` §3a.4
 and §5; that breakdown is normative and mirrored by
 `schemas/v1.0/manifest.schema.json`.
 
@@ -160,7 +160,7 @@ authorization URL, a scope list). `security_schemes` is conditionally
 required: whenever any `resources[].security` or `interfaces[].security`
 references a scheme ID, `security_schemes` MUST be present and MUST
 contain that key (enforced by the semantic validator, not JSON Schema
-alone — see `docs/IMPLEMENTATION_PLAN.md` Phase 3).
+alone — see `docs/records/implementation-record-v1.0.md` Phase 3).
 
 #### 3.1.8 `policies`
 
@@ -400,5 +400,5 @@ validation and conformance).
 
 A server is AADP v1.0 conformant if and only if it passes the v1.0
 conformance suite unmodified, run against its live or staged deployment
-(see `docs/implementation-guide.md`). See the Phase 6 release gate in
-`docs/IMPLEMENTATION_PLAN.md` §8 for the full acceptance criteria.
+(see `docs/guides/implementation-guide-v1.0.md`). See the release gate in
+`docs/records/implementation-record-v1.0.md` for the full acceptance criteria.

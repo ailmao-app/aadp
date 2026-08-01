@@ -1,5 +1,5 @@
 /**
- * AADP server route templates — see `docs/vi/SERVER_CUSTOM_ROUTES_IMPLEMENTATION_PLAN.md`.
+ * AADP server route templates — see `docs/vi/plans/server-custom-routes-implementation-record.md`.
  *
  * Owns the one thing `runtime.ts` must never do itself: turn an
  * `AadpRouteConfig` (or the built-in `/ai/v{version}/...` default) into both

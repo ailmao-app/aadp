@@ -27,7 +27,7 @@ import { checksumOf } from "../../src/canonical-json/checksum.js";
 
 /**
  * Phase-4 reference-client tests: acceptance criteria from
- * `docs/IMPLEMENTATION_PLAN.md` §"Phase 4" — unsupported version,
+ * `docs/records/implementation-record-v1.0.md` §"Phase 4" — unsupported version,
  * malformed JSON/content type, redirect loop, oversized response,
  * timeout, private-network blocked in strict mode, cursor cycle, and
  * invalid documents never being used to continue traversal.

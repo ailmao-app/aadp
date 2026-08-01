@@ -17,7 +17,7 @@ URLs exist, what non-AADP interfaces (REST/GraphQL/MCP) are available, what
 auth they need, what policies apply, what the publisher's citation/summary
 preference is.
 
-`docs/IMPLEMENTATION_PLAN.md` §3 lists four design questions that block
+`docs/vi/plans/implementation-plan.md` §3 lists four design questions that block
 writing the v1.0 JSON Schema:
 
 1. Localization semantics — does `usage_guidance.default_language` also
@@ -71,7 +71,7 @@ This removes the two-sources-of-truth risk the plan flagged. Cross-checking
 check and therefore belongs to the conformance suite (Phase 5), not the
 pure semantic validator (Phase 3), consistent with the existing
 architecture boundary ("Validator không tự thực hiện HTTP request",
-`IMPLEMENTATION_PLAN.md` §4).
+`../plans/implementation-plan.md` §4).
 
 ### 3. Security metadata (closes gate 3.3)
 
@@ -108,7 +108,7 @@ equivalent to omission and MUST NOT be used. This avoids needing a parallel
 "section not applicable to this deployment."
 
 Full field table and per-object required/optional breakdown live in
-`MANIFEST_V1.0_DESIGN.md` §3a.4 and §5.
+`../design/manifest-v1.0-design.md` §3a.4 and §5.
 
 ### Extension points
 

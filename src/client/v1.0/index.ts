@@ -4,7 +4,7 @@
  * `../http.js` and gated by the schema/semantic validators in
  * `../../validator` — every document is schema-validated (and, for the
  * manifest, semantic-validated) BEFORE any URL it contains is trusted for
- * further traversal (`docs/IMPLEMENTATION_PLAN.md` Phase 4).
+ * further traversal (`docs/records/implementation-record-v1.0.md` Phase 4).
  *
  * Deliberately independent of the v0.1 client (`../v0.1/index.js`) and of
  * any application/Ailmao type in wire shape — but shares the

@@ -74,6 +74,6 @@ The manifest never contains live credentials. Every resource or interface securi
 
 ## References
 
-- [Manifest v1.0 design](../MANIFEST_V1.0_DESIGN.md)
+- [Manifest v1.0 design](../design/manifest-v1.0-design.md)
 - [AADP v1.0 specification](../../spec/v1.0/specification.md)
 - [Backward compatibility policy](0004-backward-compatibility.md)

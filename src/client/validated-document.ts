@@ -3,7 +3,7 @@
  * (`./v0.1/index.ts`, `./v1.0/index.ts`). This is deliberately the only
  * thing shared between them — their wire types (`Manifest` vs `ManifestV1`,
  * etc.) and public function signatures stay independent per
- * `docs/IMPLEMENTATION_PLAN.md` Phase 4 / ADR-0004. What's shared here is
+ * `docs/records/implementation-record-v1.0.md` Phase 4 / ADR-0004. What's shared here is
  * purely cross-cutting request safety that has nothing to do with either
  * version's wire shape: schema validation before any URL a document
  * contains is trusted, and recomputing each document's own declared

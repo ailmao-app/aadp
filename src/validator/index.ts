@@ -68,7 +68,7 @@ export interface ValidateDocumentInput {
  * (distinct from a schema-invalid `ValidationResult`) for any version this
  * package has no schema for — it never silently falls back to a
  * different version's schema (e.g. v1.0 -> v0.1), per
- * `docs/IMPLEMENTATION_PLAN.md` Phase 2.
+ * `docs/records/implementation-record-v1.0.md` Phase 2.
  */
 export function validateDocument(input: ValidateDocumentInput): ValidationResult {
   if (!isSupportedVersion(input.version)) {
