@@ -56,6 +56,10 @@ jobs:
 
       - run: npm ci
       - run: npm run build
+      # `npm pack --pack-destination` does not create the destination
+      # directory itself — a missing dir fails with ENOENT before any
+      # tarball is written.
+      - run: mkdir -p /tmp/floor-pack
       - run: npm pack --pack-destination /tmp/floor-pack
 
       - uses: actions/setup-node@v4
