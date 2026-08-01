@@ -44,6 +44,32 @@ Filing both so the line is explicit for whoever picks this up.
    `Accept: text/markdown` for `character`/`post` resources for free,
    instead of every app writing its own renderer per page.
 
+4. **DNSSEC-authenticated manifest checksum via DNS-AID.** ADR-0001 gives
+   every AADP manifest/resource a `sha256:<hex>` checksum over canonical
+   JSON, and explicitly frames it as "a tamper-evidence signal for AI
+   clients consuming data outside a TLS-terminated browser context" — but
+   that signal isn't actually authenticated. A checksum only proves the
+   payload matches *some* claimed hash; nothing stops whoever tampers with
+   the payload from recomputing and republishing a matching checksum
+   alongside it. AADP has no signing story of its own for this (no keys, no
+   JWS), and per ADR-0001's own philosophy ("defer to a published mechanism
+   rather than inventing a bespoke one"), it shouldn't build one from
+   scratch.
+   DNS-AID's draft SvcParamKey `cap-sha256` ("capability base64url-encoded
+   SHA-256 digest") is a natural fit: publish the manifest's own checksum
+   there, in the same `_index._agents.<domain>` SVCB record already
+   published for `ailmao.com`, under DNSSEC (also already live for
+   `ailmao.com` — see the DNS-AID work in the sibling session).  A resolver
+   that validates DNSSEC gets a cryptographically signed assertion, from
+   the domain owner, of what the manifest checksum *should* be — closing
+   the authentication gap without AADP running any PKI of its own.
+   Concretely: `aadp.dnsAidCapChecksum()` (or similar) could expose the
+   root manifest's checksum in the exact base64url form DNS-AID expects, so
+   a consumer just copies it into their SVCB record. Same Cloudflare
+   dashboard caveat as the existing `key65280` entry applies — `cap-sha256`
+   isn't IANA-registered yet either, so it'd need another private-use
+   `keyNNNNN` slot (e.g. `key65281`) until the draft is finalized.
+
 ## Deliberately not pulled in — different problem, don't force it
 
 - **DNS-AID SVCB records** (`_index._agents.ailmao.com`) — pure DNS/infra,
@@ -74,9 +100,17 @@ Filing both so the line is explicit for whoever picks this up.
   repos today. A server card describing a server that isn't there is
   fabrication, not discovery. Revisit if/when an actual MCP server ships.
 - **Agent Skills index** (`/.well-known/agent-skills/index.json`,
-  agentskills.io) — models a site as a provider of reusable "skills"/tool
-  bundles, which isn't what AI Lmao is. Forcing an entry here would be an
-  empty or misleading stub.
+  agentskills.io) — update: implemented after all, but *not* by modeling
+  AI Lmao as a skills/tools provider (it isn't one). Instead
+  `ailmao-landing/public/skills/ailmao-agent-access/SKILL.md` documents how
+  to use the *real* read-only surfaces above (AADP manifest, sitemap/entity
+  endpoints, markdown negotiation, WebMCP tools) — a genuinely useful
+  artifact, not a stub. The index route computes its `sha256` digest from
+  the file on disk at request time rather than hardcoding it, so it can't
+  drift from what `url` actually serves. Nothing here is AADP-specific
+  enough to pull into the library — it's a per-consumer authored document —
+  but the "compute digest from the live file, don't hardcode it" pattern is
+  worth keeping in mind if AADP ever ships its own skill docs.
 
 ## Housekeeping noticed along the way
 
