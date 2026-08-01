@@ -80,6 +80,32 @@ function parseHeaders(raw: string[]): Record<string, string> {
 
 const program = new Command();
 
+/**
+ * Without this, Commander's own argv-parsing failures (missing base-url,
+ * unknown flag, `--timeout abc`/NaN/non-integer) call `process.exit(1)`
+ * directly — colliding with this CLI's own documented exit code `1`
+ * ("one or more checks failed"). A CI job checking `$? === 1` to mean "the
+ * deployment is nonconformant" would misread a typo'd flag as a failed
+ * run. These never reach `runConformance`, so they belong in the same "the
+ * run could not be performed" class as `InvalidConformanceOptionsError`
+ * (exit `2`), not "a check failed".
+ *
+ * `--help`/`--version` still exit `0`: Commander reaches this same override
+ * for those too, but they are not argv errors.
+ */
+program.exitOverride((err) => {
+  // `Command._exit()` calls `process.exit(err.exitCode)` right after this
+  // callback returns *unless* the callback throws — so setting
+  // `process.exitCode` alone would be silently overwritten back to
+  // Commander's own exit code. Throwing is the only way to keep ours.
+  if (err.code === "commander.helpDisplayed" || err.code === "commander.version") {
+    process.exitCode = 0;
+  } else {
+    process.exitCode = 2;
+  }
+  throw err;
+});
+
 program
   .name("aadp-conformance")
   .description(
@@ -228,4 +254,8 @@ program
     process.exitCode = exitCodeFor(report);
   });
 
-program.parseAsync(process.argv);
+// `exitOverride()` makes Commander throw its `CommanderError` instead of
+// calling `process.exit()` after our override callback above already set
+// `process.exitCode` — this swallows that rethrow so it doesn't surface as
+// an unhandled rejection with a confusing stack trace.
+program.parseAsync(process.argv).catch(() => {});

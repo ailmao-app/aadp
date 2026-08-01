@@ -122,6 +122,29 @@ not required by external consumers.
 `AADP-CONFORMANCE-003` added `renderJUnitReport`, the `--junit <file>` CLI flag,
 and `examples/ci/github-actions-conformance.yml` for CI integration.
 
+`1.0.9` (docs/vi/plans/implementation-plan-v1.0.9.md) is compatibility and
+interoperability hardening: it locks the public export surface and machine
+contracts (`tests/package/exports.test.ts`,
+`tests/package/compatibility-contract.test.ts`), adds a neutral third-party
+reference server built only on public exports and installed from a packed
+tarball (`examples/reference-server/`,
+`tests/package/reference-server.test.ts`), and adds a release-gate script for
+package version/lockfile/changelog consistency
+(`scripts/check-release-consistency.mjs`). It does not change AADP wire
+version `1.0`, the JSON Schemas, or any validation result.
+
+The robustness regression corpus (AADP-109-005) found and fixed four bugs,
+each with a regression test and an `ERROR_LOG.md` entry: a DNS-rebinding
+block surfacing as a generic `TypeError` instead of `BlockedUrlError`
+(`src/client/http.ts`), a pathologically deep document crashing
+`canonicalize()`/`checksumOf()` with a raw `RangeError` instead of the
+module's own documented `TypeError` contract (`src/canonical-json/canonicalize.ts`),
+the `aadp-conformance` CLI exiting `1` ("a check failed") instead of `2`
+("could not be performed") for an unparseable argv (`src/conformance/cli.ts`),
+and the `examples/reference-server` standalone entry-point guard never
+matching on Windows. All four are patch-level fixes; none change the wire
+contract.
+
 ## Release gate
 
 A version is ready when:

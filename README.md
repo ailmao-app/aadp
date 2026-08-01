@@ -378,6 +378,15 @@ risk corrupting the first. `--force` overwrites the exact target file; the
 CLI never parses or merges an existing config either way. Pass `--dir <path>`
 to change where files land.
 
+### Reference server example
+
+[`examples/reference-server`](examples/reference-server) is a complete,
+neutral `defineAADP()` deployment on plain `node:http`, installed from a
+packed tarball rather than this repo's workspace — the same way a real
+third-party consumer would use the package. It demonstrates the default
+route convention and a custom `routes` configuration side by side. See its
+README for how to run it and check it with `aadp-conformance`.
+
 ## Run conformance tests
 
 ### Command line

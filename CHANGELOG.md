@@ -4,6 +4,30 @@ All notable changes to `ail-aadp` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Protocol compatibility follows [ADR-0004](docs/adr/0004-backward-compatibility.md); released schemas are immutable and wire-breaking changes require a new protocol version.
 
+## 1.0.9 - 2026-08-01
+
+Compatibility and interoperability hardening (docs/vi/plans/implementation-plan-v1.0.9.md). Does not change AADP wire version `1.0`, the JSON Schemas, or any validation result.
+
+### Added
+
+- Locked the public export surface and machine contracts with tarball-only tests (`tests/package/exports.test.ts`, `tests/package/compatibility-contract.test.ts`): every documented `exports` subpath, the three CLI binaries, conformance check IDs, the JSON/JUnit report shape, `exitCodeFor`'s exit-code mapping, `AadpServerErrorCode` HTTP statuses, and the default server route convention.
+- Added exit-code contract tests for `aadp-validate` and the `aadp` scaffold CLI (`tests/package/validate-cli.test.ts`, `tests/package/scaffold-cli.test.ts`), run from the packed tarball like the existing `aadp-conformance` CLI test.
+- Added `examples/reference-server`, a neutral third-party AADP v1.0 deployment built only on `defineAADP()`/`defineResource()`/`handleRequest()` and plain `node:http`, plus an automated smoke test (`tests/package/reference-server.test.ts`) that installs it from a packed tarball and verifies `aadp-conformance` passes against it at both the default and a custom `routes` configuration.
+- Added `scripts/check-release-consistency.mjs` (`npm run check:release-consistency`) to confirm `package.json`, `package-lock.json` and `CHANGELOG.md` agree on version before a release, and a `release-gate` CI job that runs it on `vX.Y.Z` tag pushes.
+- CI now also runs `npm run docs:check` and runs the full job matrix against both the `engines` floor (Node 20.18.1) and the primary CI Node version (22.12.0).
+- Expanded the robustness regression corpus: double percent-encoding and encoded slash/backslash in server routes (`tests/server/routes.test.ts`), cursor tampering and cross-wire-version cursor replay (`tests/server/runtime.test.ts`), an end-to-end DNS-rebinding block (`tests/client/dns-pin.test.ts`), cross-origin 3xx redirect header stripping (`tests/client/v1.0.test.ts`), and deeply-nested-document handling (`tests/schema/checksum.test.ts`).
+
+### Fixed
+
+- Fixed `examples/reference-server`'s standalone entry-point guard (`import.meta.url === \`file://${process.argv[1]}\``), which never matched on Windows (`process.argv[1]` uses backslashes; `import.meta.url` is a `file:///`-prefixed URL), so the example server silently exited without starting when run directly. Now compares against `pathToFileURL(process.argv[1]).href`. Example-only; not part of the published package.
+- Fixed the reference client (`src/client/http.ts`, shared by `ail-aadp/validator` and `ail-aadp/conformance`): a DNS-rebinding block from the pinned-DNS dispatcher (`pinnedLookup()` in `src/client/dns-pin.ts`) surfaced as a generic `TypeError: "fetch failed"` instead of `BlockedUrlError`, because `fetch()` wraps every connect-time failure in a `TypeError` with the real cause one level down in `.cause`. A caller catching `BlockedUrlError` specifically — the same way the string-level URL policy check throws it directly — silently missed this path. Patch fix: unwraps `err.cause` before rethrowing when it is a `BlockedUrlError`. See `ERROR_LOG.md` 2026-08-01.
+- Fixed `canonicalize()`/`checksumOf()` (`ail-aadp/canonical-json`): a pathologically deep document (~5000+ nesting levels) crashed with a raw `RangeError: Maximum call stack size exceeded` instead of the `TypeError` this "validating canonicalizer" documents for every other out-of-domain input. Since checksums are verified against server-supplied fields the client does not otherwise bound (entity `data`, sitemap `items`/`sitemaps`), an adversarial or misbehaving server could trigger this. See `ERROR_LOG.md` 2026-08-01.
+- Fixed the `aadp-conformance` CLI: an unparseable argv (missing `<base-url>`, an unknown flag, or a numeric option given `NaN`/`Infinity`/a negative or non-integer string) exited `1` — the same code documented as "one or more checks failed" — instead of `2` ("the run could not be performed"), so a CI job checking `$? === 1` for nonconformance could misread a typo'd flag as a real failure. See `ERROR_LOG.md` 2026-08-01.
+
+### Changed
+
+- Extracted the packed-tarball build/extract fixture shared by `tests/package/*` into `tests/package/tarball-helpers.ts`.
+
 ## 1.0.8 - 2026-07-30
 
 ### Added

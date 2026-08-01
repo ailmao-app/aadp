@@ -3,10 +3,38 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 jobs:
   build-test-audit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 20.18.1 is the package.json "engines" floor; 22.12.0 is CI's
+        # primary Node version. Both must pass — a fix that only works on
+        # one leaves the other unsupported despite what `engines` promises.
+        node-version: ["20.18.1", "22.12.0"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - run: npm ci
+      - run: npm run docs:check
+      - run: npm run build
+      - run: npm test
+      - run: npm audit --omit=dev
+      - run: npm pack --dry-run
+
+  # Release gate (docs/vi/plans/implementation-plan-v1.0.9.md §11): runs only
+  # on a `vX.Y.Z` tag push, so an in-progress branch that legitimately sits
+  # ahead of the last release never fails this check.
+  release-gate:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-test-audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,7 +44,4 @@ jobs:
           node-version: 22.12.0
 
       - run: npm ci
-      - run: npm run build
-      - run: npm test
-      - run: npm audit --omit=dev
-      - run: npm pack --dry-run
+      - run: npm run check:release-consistency
