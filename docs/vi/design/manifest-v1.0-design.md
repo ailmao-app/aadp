@@ -2,7 +2,7 @@
 
 > Ngôn ngữ: Tiếng Việt.
 >
-> Trạng thái: Accepted, xem [ADR-0005](adr/0005-manifest-v1-discovery.md).
+> Trạng thái: Accepted, xem [ADR-0005](../adr/0005-manifest-v1-discovery.md).
 
 ## 1. Mục tiêu
 
@@ -50,8 +50,8 @@ AADP Manifest
 
 ## 3a. Design gate đã chốt (Phase 0)
 
-Bốn quyết định sau đóng design gate tại `IMPLEMENTATION_PLAN.md` §3. Chi tiết
-rationale nằm ở [ADR-0005](adr/0005-manifest-v1-discovery.md); phần này là
+Bốn quyết định sau đóng design gate tại `../plans/implementation-plan.md` §3. Chi tiết
+rationale nằm ở [ADR-0005](../adr/0005-manifest-v1-discovery.md); phần này là
 bản chốt áp dụng trực tiếp cho schema Phase 1.
 
 ### 3a.1 Localization
@@ -291,7 +291,7 @@ Mỗi entry required:
 
 Không dùng token `aeo`, `geo`, `story` hoặc `chat` mà không có contract/schema cụ thể.
 
-`aadp:relations` chuẩn hóa graph link giữa entity, bao gồm cardinality, canonical target, inverse relation và paginated collection. Chi tiết nằm tại [`RELATIONS_MODULE_DESIGN.md`](RELATIONS_MODULE_DESIGN.md).
+`aadp:relations` chuẩn hóa graph link giữa entity, bao gồm cardinality, canonical target, inverse relation và paginated collection. Chi tiết nằm tại [`relations-module-design.md`](relations-module-design.md).
 
 ### 5.5 `resources`
 
@@ -449,7 +449,7 @@ Khi `policies`, HTTP header và resource metadata mâu thuẫn, client phải á
 
 ## 8. Versioning và tham chiếu v0.1
 
-`aadp_version` đã là tên field trong wire contract v0.1 (rename từ `aidp_version` được áp dụng ngay trong v0.1 — xem [CHANGELOG.md](../../CHANGELOG.md)). Manifest v1.0 là major version mới vì có breaking changes về cấu trúc. Theo [ADR-0004](../adr/0004-backward-compatibility.md), client phải chọn schema/parser theo `aadp_version`.
+`aadp_version` đã là tên field trong wire contract v0.1 (rename từ `aidp_version` được áp dụng ngay trong v0.1 — xem [CHANGELOG.md](../../../CHANGELOG.md)). Manifest v1.0 là major version mới vì có breaking changes về cấu trúc. Theo [ADR-0004](../../adr/0004-backward-compatibility.md), client phải chọn schema/parser theo `aadp_version`.
 
 AADP chưa có consumer production phụ thuộc v0.1, vì vậy:
 

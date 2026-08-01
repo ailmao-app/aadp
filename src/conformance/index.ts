@@ -16,8 +16,10 @@ export {
   renderCheckLines,
   renderSummary,
   renderJsonReport,
+  renderJUnitReport,
   exitCodeFor,
   type TextReportOptions,
+  type JUnitReportOptions,
 } from "./report.js";
 export { CHECKS, collectAdvertisedUrls, type Check } from "./checks.js";
 export {

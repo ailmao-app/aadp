@@ -6,6 +6,7 @@ import {
   exitCodeFor,
   renderTextReport,
   renderJsonReport,
+  renderJUnitReport,
   CHECKS,
   UnsupportedConformanceVersionError,
   type ConformanceOptions,
@@ -166,6 +167,55 @@ describe("runConformance against a conformant v1.0 server", () => {
     const text = renderTextReport(report);
     for (const check of CHECKS) expect(text).toContain(check.id);
     expect(text).toContain("RESULT: PASSED");
+  });
+
+  it("renders a JUnit report with one well-formed testcase per check", () => {
+    const xml = renderJUnitReport(report);
+    expect(xml).toMatch(/^<\?xml version="1.0" encoding="UTF-8"\?>/);
+    expect(xml.match(/<testsuite /g)).toHaveLength(1);
+    expect(xml.match(/<\/testsuite>/g)).toHaveLength(1);
+    expect(xml.match(/<testcase /g)?.length).toBe(report.checks.length);
+    for (const check of CHECKS) expect(xml).toContain(check.id);
+
+    // A warning check is a passing testcase (no <failure>) unless asked
+    // for otherwise, with its message preserved for a human reader.
+    expect(xml).toContain('name="safety.free_text_is_data');
+    const warningBlock = xml.slice(xml.indexOf("safety.free_text_is_data"));
+    expect(warningBlock.slice(0, warningBlock.indexOf("</testcase>"))).not.toContain("<failure");
+    expect(xml).toContain("<system-out>");
+
+    // failures="0" since nothing failed at the default failOnWarning=false.
+    expect(xml).toMatch(/failures="0"/);
+  });
+
+  it("reports a warning check as a JUnit failure only when failOnWarning is set", () => {
+    const xml = renderJUnitReport(report, { failOnWarning: true });
+    expect(xml).not.toMatch(/failures="0"/);
+    const warningBlock = xml.slice(xml.indexOf("safety.free_text_is_data"));
+    expect(warningBlock.slice(0, warningBlock.indexOf("</testcase>"))).toContain("<failure");
+  });
+
+  it("escapes XML-significant characters in check messages", () => {
+    const withSpecialChars: ConformanceReport = {
+      ...report,
+      checks: [
+        {
+          id: "fixture.escaping",
+          group: "fixture",
+          title: "title with <tag> & \"quotes\"",
+          status: "failed",
+          duration_ms: 1,
+          message: "<script>alert('x')</script> & more",
+        },
+      ],
+      summary: { total: 1, passed: 0, failed: 1, warnings: 0, skipped: 0, inconclusive: 0 },
+      status: "failed",
+    };
+    const xml = renderJUnitReport(withSpecialChars);
+    expect(xml).not.toContain("<script>");
+    expect(xml).toContain("&lt;script&gt;");
+    expect(xml).toContain("&amp;");
+    expect(xml).toContain("&quot;quotes&quot;");
   });
 
   it("treats warnings as failures only when asked", async () => {

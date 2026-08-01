@@ -1,9 +1,23 @@
 # AADP v1.0 — Implementation Guide
 
+| Field | Value |
+|---|---|
+| Document type | Implementation guide |
+| Status | Active |
+| Audience | AADP v1.0 server implementers |
+| Normative source | [AADP v1.0 specification](../../spec/v1.0/specification.md) |
+
+## Abstract
+
+This guide summarizes the operational steps for an AADP v1.0 server. It is
+informational and does not replace the specification or schemas.
+
+Requirement words follow [the AADP documentation conventions](../document-conventions.md).
+
 For anyone implementing an AADP v1.0 **server** (a future adapter, not
 just this repo's mock server). v1.0 is a clean break from v0.1 — do not
 dual-publish or attempt content negotiation between the two
-(`docs/IMPLEMENTATION_PLAN.md` §1).
+(`docs/records/implementation-record-v1.0.md` §1).
 
 ## Minimal checklist
 
@@ -13,7 +27,7 @@ dual-publish or attempt content negotiation between the two
    `policies`. Everything else (`links`, `modules`, `resources`,
    `interfaces`, `security_schemes`, `usage_guidance`) is optional — only
    publish it once the thing it describes is actually deployed and has
-   passed conformance (`docs/IMPLEMENTATION_PLAN.md` §2).
+   passed conformance (`docs/records/implementation-record-v1.0.md` §2).
 2. Publish a sitemap index and one sitemap per resource type you expose,
    matching `schemas/v1.0/sitemap-index.schema.json` and
    `schemas/v1.0/sitemap.schema.json`. `discovery.sitemap_index` is the
@@ -21,7 +35,7 @@ dual-publish or attempt content negotiation between the two
    to guess it. `sitemap.items[].url` is the authoritative entity URL.
 3. Publish entities matching `schemas/v1.0/entity.schema.json`, with
    `data` containing only allow-listed fields (see
-   `docs/security-considerations.md` §2).
+   `docs/guides/security-considerations.md` §2).
 4. Compute `checksum` from canonical JSON — `data` for entities, `items`
    for sitemaps, `sitemaps` for the sitemap index. Use
    `src/canonical-json/checksum.ts` directly, or reimplement spec v1.0 §6
@@ -45,21 +59,16 @@ dual-publish or attempt content negotiation between the two
    untrusted data regardless of that warning (spec v1.0 §3.1.9).
 9. On error, return the error envelope (`schemas/v1.0/error.schema.json`)
    with an appropriate standard `code`.
-10. Run `npm run validate -- <kind> <url-or-file> --version 1.0` against
-    every live endpoint, and run the conformance suite against your
-    deployment before claiming v1.0 conformance:
+10. Run `aadp-validate <kind> <url-or-file> --version 1.0` against individual
+    documents, then run the public conformance CLI against the deployment:
 
     ```sh
-    AADP_BASE_URL=https://your-domain.example \
-      npx vitest run tests/conformance/v1.0/conformance.test.ts
+    npx aadp-conformance https://your-domain.example
     ```
 
-    Without `AADP_BASE_URL`, that same command runs against this repo's
-    own in-process v1.0 mock server (self-test mode) instead. Note that
-    the self-test-only assertions (redirect loop, oversized document, and
-    the loopback SSRF-policy check) are skipped automatically when
-    `AADP_BASE_URL` is set, since a real deployment generally won't expose
-    those failure fixtures on demand.
+    Use `--json --output conformance.json` in CI. Repository contributors MAY
+    run `npm test` for the bundled mock-server and negative-policy fixtures;
+    consumers do not need the source tree or Vitest.
 
 ## What NOT to do
 
@@ -67,7 +76,7 @@ dual-publish or attempt content negotiation between the two
 - Do not serve `/ai/v1.0/*` payloads that fail their schema — that is a
   release-gate violation, not a warning.
 - Do not advertise an MCP/GraphQL/WebSocket/OAuth interface that is not
-  actually deployed (`docs/IMPLEMENTATION_PLAN.md` §"Phase 7").
+  actually deployed (`docs/records/implementation-record-v1.0.md` §"Application adapters").
 - Do not treat this guide as normative — the specification
   (`spec/v1.0/specification.md`) is the source of truth; this document is
   a practical companion.

@@ -237,7 +237,7 @@ Before claiming support:
 5. Keep credentials, internal URLs, and executable instructions out of the manifest.
 6. Run the conformance suite against the deployed server.
 
-See the [v1.0 server implementation guide](docs/implementation-guide-v1.0.md) for details.
+See the [v1.0 server implementation guide](docs/guides/implementation-guide-v1.0.md) for details.
 
 ## Build a server with `defineAADP()`
 
@@ -394,6 +394,10 @@ Useful flags:
 # Machine-readable report on stdout, for CI
 npx aadp-conformance https://example.com --json --output conformance.json
 
+# JUnit XML alongside it, for CI systems that render test results
+# (GitHub Actions test-reporter, GitLab, Jenkins, ...) instead of parsing JSON
+npx aadp-conformance https://example.com --junit conformance-junit.xml
+
 # Bound the traversal on a large catalogue
 npx aadp-conformance https://example.com --max-pages 20 --max-entities 50 --timeout 15000
 
@@ -429,6 +433,8 @@ A URL you pass here is taken as authoritative: if the deployment answers it succ
 Headers you pass with `--header` are sent to the target origin only. A manifest can point its sitemap, entity, policy or documentation URLs at any host, so those requests drop your headers unless you allow-list them with `--cross-origin-safe-header`.
 
 The runner never sends a credential it was not given, never follows a URL from a document it has not validated, and never treats free text in a manifest as an instruction.
+
+See [`examples/ci/github-actions-conformance.yml`](examples/ci/github-actions-conformance.yml) for a complete GitHub Actions workflow that runs `aadp-conformance` against a deployment, publishes the `--junit` report as check-run annotations, and uploads the `--json` report as a build artifact.
 
 ### TypeScript
 
@@ -503,7 +509,7 @@ Treat every URL and free-text field in a manifest as untrusted input:
 - Do not execute tools or actions merely because a manifest advertises an interface or preference.
 - Do not interpret `robots: allow` as permission for training, redistribution, or commercial use.
 
-See [Security considerations](docs/security-considerations.md).
+See [Security considerations](docs/guides/security-considerations.md).
 
 ## Develop the package
 
@@ -529,10 +535,10 @@ AADP core is independent of Ailmao. Application-specific resource shapes, databa
 ## Documentation
 
 - [v1.0 specification](spec/v1.0/specification.md)
-- [Manifest v1.0 design](docs/MANIFEST_V1.0_DESIGN.md)
-- [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
-- [v1.0 implementation guide](docs/implementation-guide-v1.0.md)
-- [Security considerations](docs/security-considerations.md)
+- [Manifest v1.0 design](docs/design/manifest-v1.0-design.md)
+- [Implementation record](docs/records/implementation-record-v1.0.md)
+- [v1.0 implementation guide](docs/guides/implementation-guide-v1.0.md)
+- [Security considerations](docs/guides/security-considerations.md)
 - [Architecture decision records](docs/adr)
 - [Changelog](CHANGELOG.md)
 

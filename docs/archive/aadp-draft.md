@@ -1,8 +1,18 @@
 # AI Application Discovery Protocol — Historical Draft
 
-> Status: Superseded by the versioned specifications.
->
-> Vietnamese edition: [`vi/AADP_Draft.md`](vi/AADP_Draft.md).
+| Field | Value |
+|---|---|
+| Document type | Historical design note |
+| Status | Superseded by the versioned specifications |
+| Audience | Maintainers researching protocol history |
+| Normative authority | None |
+| Vietnamese internal edition | [`../vi/archive/aadp-draft.md`](../vi/archive/aadp-draft.md) |
+
+## Abstract
+
+This document preserves the original direction of AADP. It MUST NOT be used as
+an implementation contract; implementers use the versioned specifications and
+schemas.
 
 This document records the original direction of AADP: a read-only, JSON-native protocol that allows an AI client to discover and retrieve structured application data without crawling HTML.
 
@@ -29,6 +39,6 @@ It also established the principles that remain part of the protocol:
 
 Use the normative documents for implementation:
 
-- [AADP v1.0 specification](../spec/v1.0/specification.md)
-- [AADP v1.0 implementation guide](implementation-guide-v1.0.md)
-- [Manifest v1.0 design](MANIFEST_V1.0_DESIGN.md)
+- [AADP v1.0 specification](../../spec/v1.0/specification.md)
+- [AADP v1.0 implementation guide](../guides/implementation-guide-v1.0.md)
+- [Manifest v1.0 design](../design/manifest-v1.0-design.md)

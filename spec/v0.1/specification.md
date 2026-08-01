@@ -1,7 +1,7 @@
 # AADP Specification v0.1
 
-Status: Draft, pending release gate (see `docs/IMPLEMENTATION_PLAN.md` §8,
-Phase A3).
+Status: Historical and frozen for compatibility. Release history and compatibility
+requirements are recorded in `docs/records/implementation-record-v1.0.md`.
 
 The key words "MUST", "MUST NOT", "SHOULD", "SHOULD NOT" and "MAY" in this
 document are to be interpreted as described in RFC 2119.
@@ -276,8 +276,8 @@ validation and conformance).
 A server is AADP v0.1 conformant if and only if it passes
 `tests/conformance/conformance.test.ts` unmodified, run against its live
 or staged deployment via `AADP_BASE_URL=<origin> npx vitest run
-tests/conformance/conformance.test.ts` (see `docs/implementation-guide.md`).
+tests/conformance/conformance.test.ts` (see `docs/guides/implementation-guide-v0.1.md`).
 That file asserts only invariants that hold for any conformant server —
 it does not assume this repo's own fixture dataset. See the Phase A3
-release gate in `docs/IMPLEMENTATION_PLAN.md` §8 for the full acceptance
+release gate in `docs/records/implementation-record-v1.0.md` for the full acceptance
 criteria.
