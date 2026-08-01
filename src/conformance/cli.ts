@@ -15,7 +15,7 @@
  * (`docs/vi/plans/implementation-plan.md` §11 "Ưu tiên 1").
  */
 import { writeFileSync } from "node:fs";
-import { Command, InvalidArgumentError } from "commander";
+import { Command, CommanderError, InvalidArgumentError } from "commander";
 import { runConformance } from "./runner.js";
 import { renderJsonReport, renderJUnitReport, renderCheckLines, renderSummary, exitCodeFor } from "./report.js";
 import {
@@ -204,7 +204,19 @@ program
         ...(opts.unknownTypeUrl ? { unknownTypeUrl: opts.unknownTypeUrl } : {}),
       };
     }
-    const headers = parseHeaders(opts.header);
+    // Not a Commander option-parser (it validates the whole repeated
+    // `--header` list at once, after `collect()` has assembled it), so a
+    // malformed entry throws here rather than through `exitOverride()` —
+    // it needs its own catch, same as every other CLI-level validation
+    // error in this action.
+    let headers: Record<string, string>;
+    try {
+      headers = parseHeaders(opts.header);
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      process.exitCode = 2;
+      return;
+    }
     if (Object.keys(headers).length > 0) options.headers = headers;
     if (opts.crossOriginSafeHeader.length > 0) options.crossOriginSafeHeaders = opts.crossOriginSafeHeader;
 
@@ -256,6 +268,13 @@ program
 
 // `exitOverride()` makes Commander throw its `CommanderError` instead of
 // calling `process.exit()` after our override callback above already set
-// `process.exitCode` — this swallows that rethrow so it doesn't surface as
-// an unhandled rejection with a confusing stack trace.
-program.parseAsync(process.argv).catch(() => {});
+// `process.exitCode` — this swallows only that expected rethrow, so it
+// doesn't surface as an unhandled rejection with a confusing stack trace.
+// Anything else here is a bug in the `.action()` callback itself (every
+// *expected* failure inside it already catches its own error and sets
+// `process.exitCode`) — it must not be swallowed into a silent exit 0.
+program.parseAsync(process.argv).catch((err: unknown) => {
+  if (err instanceof CommanderError) return;
+  process.stderr.write(`Unexpected error: ${(err as Error)?.stack ?? err}\n`);
+  process.exitCode = 2;
+});

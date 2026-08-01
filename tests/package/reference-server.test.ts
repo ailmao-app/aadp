@@ -130,4 +130,31 @@ describe("examples/reference-server, installed from the packed tarball", () => {
     },
     STARTUP_TIMEOUT_MS
   );
+
+  it(
+    "never publishes a URL derived from a request's Host header, even as the first request",
+    async () => {
+      exampleDir = installExample();
+      const { baseUrl } = await startExample(exampleDir);
+
+      // First request ever handled names an attacker-controlled Host.
+      // Regression: the server used to build its `defineAADP()` instance
+      // lazily from the first request's Host header and cache it for the
+      // process lifetime, so this alone would permanently repoint every
+      // published discovery URL at "attacker.example" — for this request
+      // and every one after it.
+      const poisoned = await fetch(`${baseUrl}/.well-known/ai-manifest.json`, {
+        headers: { Host: "attacker.example" },
+      });
+      const poisonedManifest = (await poisoned.json()) as { discovery: { sitemap_index: string } };
+      expect(poisonedManifest.discovery.sitemap_index).toBe(`${baseUrl}/ai/v1.0/sitemap-index.json`);
+      expect(poisonedManifest.discovery.sitemap_index).not.toContain("attacker.example");
+
+      // A normal request afterward must see the same, unpoisoned origin.
+      const normal = await fetch(`${baseUrl}/.well-known/ai-manifest.json`);
+      const normalManifest = (await normal.json()) as { discovery: { sitemap_index: string } };
+      expect(normalManifest.discovery.sitemap_index).toBe(`${baseUrl}/ai/v1.0/sitemap-index.json`);
+    },
+    STARTUP_TIMEOUT_MS
+  );
 });

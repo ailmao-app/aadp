@@ -42,6 +42,15 @@ Set `AADP_CUSTOM_ROUTES=1` to serve the same resource under the custom
 instead of the default `/ai/v1.0/...` convention) — same composition,
 different publish location.
 
+Set `AADP_BASE_URL` (e.g. `https://example.com`) when running behind a
+reverse proxy or under a real domain — every URL the manifest, sitemaps and
+entities publish is built from this origin, resolved once at startup. It is
+never taken from an inbound request's `Host` header, which a caller
+controls: trusting it would let any request permanently repoint every
+published discovery URL at whatever origin it named. Without it, the
+published origin defaults to the address `listen()` actually bound
+(`http://127.0.0.1:<port>`), correct for local/dev use only.
+
 ## Validate and check conformance
 
 With the server running:

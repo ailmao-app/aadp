@@ -33,17 +33,28 @@ function staticText(body) {
   return new Response(body, { status: 200, headers: { "content-type": "text/plain; charset=utf-8" } });
 }
 
-export function startReferenceServer({ host = "127.0.0.1", port = 0, useCustomRoutes = false } = {}) {
-  let aadp;
-
+/**
+ * `baseUrl` is the *publish* origin — every URL the manifest, sitemaps and
+ * entities advertise is built from it. It MUST come from trusted
+ * configuration (an explicit option/env var, or the address `listen()`
+ * actually bound), never from an inbound request's `Host` header: `Host`
+ * is attacker-controlled, and building `aadp` from it — worse, caching
+ * that instance for the process's lifetime — would let the first request
+ * permanently repoint every published discovery URL at whatever origin it
+ * named.
+ */
+export function startReferenceServer({
+  host = "127.0.0.1",
+  port = 0,
+  useCustomRoutes = false,
+  baseUrl,
+} = {}) {
   const server = createServer((req, res) => {
-    const baseUrl = `http://${req.headers.host ?? `${host}:${port}`}`;
-    toFetchRequest(req, baseUrl)
+    toFetchRequest(req, publishedBaseUrl)
       .then(async (request) => {
         const url = new URL(request.url);
         if (url.pathname === "/robots.txt") return staticText("User-agent: *\nAllow: /\n");
         if (url.pathname === "/terms") return staticText("Example terms of use.\n");
-        aadp ??= buildAadpServer(baseUrl, { useCustomRoutes });
         return aadp.handleRequest(request);
       })
       .then((response) => writeFetchResponse(response, res))
@@ -53,11 +64,20 @@ export function startReferenceServer({ host = "127.0.0.1", port = 0, useCustomRo
       });
   });
 
+  // Populated once `listen()` resolves, before any request is served.
+  let publishedBaseUrl;
+  let aadp;
+
   return new Promise((resolve) => {
     server.listen(port, host, () => {
       const address = server.address();
       const resolvedPort = typeof address === "object" && address ? address.port : port;
-      resolve({ server, baseUrl: `http://${host}:${resolvedPort}` });
+      // An explicit `baseUrl` (e.g. the public domain a reverse proxy
+      // fronts this server with) always wins; otherwise fall back to the
+      // address actually bound, for local/dev use.
+      publishedBaseUrl = baseUrl ?? `http://${host}:${resolvedPort}`;
+      aadp = buildAadpServer(publishedBaseUrl, { useCustomRoutes });
+      resolve({ server, baseUrl: publishedBaseUrl });
     });
   });
 }
@@ -65,7 +85,10 @@ export function startReferenceServer({ host = "127.0.0.1", port = 0, useCustomRo
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = process.env.PORT ? Number(process.env.PORT) : 0;
   const useCustomRoutes = process.env.AADP_CUSTOM_ROUTES === "1";
-  const { baseUrl } = await startReferenceServer({ port, useCustomRoutes });
-  console.log(`AADP reference server listening on ${baseUrl}`);
-  console.log(`Manifest: ${baseUrl}/.well-known/ai-manifest.json`);
+  // Set this when running behind a reverse proxy or under a real domain —
+  // otherwise the published origin defaults to the address bound above.
+  const baseUrl = process.env.AADP_BASE_URL;
+  const { baseUrl: resolvedBaseUrl } = await startReferenceServer({ port, useCustomRoutes, baseUrl });
+  console.log(`AADP reference server listening on ${resolvedBaseUrl}`);
+  console.log(`Manifest: ${resolvedBaseUrl}/.well-known/ai-manifest.json`);
 }

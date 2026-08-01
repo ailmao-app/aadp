@@ -131,6 +131,17 @@ describe("aadp-conformance, run from the packed tarball", () => {
     expect(result.stderr).toContain("Invalid conformance option");
   });
 
+  it("exits 2, never 0, for a malformed --header — an action error must never look like an untouched success", async () => {
+    // parseHeaders() throws from inside the action callback, not through
+    // Commander's own argv parser/exitOverride() — regression for a run
+    // that never happened being silently reported as exit 0 with no
+    // stdout/stderr.
+    const result = await runCli([server.baseUrl, "--allow-private-network", "--header", "malformed"]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('--header must be "Name: value"');
+    expect(result.stdout).toBe("");
+  });
+
   it("exits 2 when the run cannot be performed", async () => {
     // Default strict policy refuses the loopback origin: the run never
     // reaches a verdict, which must not look like a pass.
