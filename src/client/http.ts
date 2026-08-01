@@ -15,7 +15,7 @@
  * assume carries no secret, so the default is deny-all, not a
  * credential-shaped-name deny-list.
  */
-import { createStrictUrlPolicy, assertAllowed, type UrlPolicy } from "./url-policy.js";
+import { createStrictUrlPolicy, assertAllowed, BlockedUrlError, type UrlPolicy } from "./url-policy.js";
 import { dispatcherFor } from "./dns-pin.js";
 
 export interface FetchJsonOptions {
@@ -155,6 +155,21 @@ function isJsonContentType(contentType: string | null): boolean {
 
 function isAbortError(err: unknown): boolean {
   return (err as Error)?.name === "AbortError";
+}
+
+/**
+ * `pinnedLookup()` (`./dns-pin.js`) rejects a DNS-rebound connection by
+ * throwing `BlockedUrlError` from its `dns.lookup` callback, but `fetch()`
+ * wraps every connect-time failure into a generic `TypeError: "fetch
+ * failed"` with the real cause one level down. Without unwrapping it, a
+ * DNS-rebinding block is indistinguishable from any other network failure
+ * — a caller catching `BlockedUrlError` specifically (as the string-level
+ * `assertAllowed()` check throws it directly) would silently miss this
+ * path entirely.
+ */
+function unwrapBlockedUrlError(err: unknown): unknown {
+  const cause = (err as { cause?: unknown } | undefined)?.cause;
+  return cause instanceof BlockedUrlError ? cause : err;
 }
 
 function crossOriginSafeNameSet(extra?: string[]): Set<string> {
@@ -312,7 +327,7 @@ async function requestWithPolicy<T>(
         if (isAbortError(err)) {
           throw new TimeoutError(current.toString(), timeoutMs);
         }
-        throw err;
+        throw unwrapBlockedUrlError(err);
       }
 
       const isRedirect = res.status >= 300 && res.status < 400 && res.headers.has("location");

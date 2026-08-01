@@ -15,7 +15,7 @@
  * (`docs/vi/plans/implementation-plan.md` §11 "Ưu tiên 1").
  */
 import { writeFileSync } from "node:fs";
-import { Command, InvalidArgumentError } from "commander";
+import { Command, CommanderError, InvalidArgumentError } from "commander";
 import { runConformance } from "./runner.js";
 import { renderJsonReport, renderJUnitReport, renderCheckLines, renderSummary, exitCodeFor } from "./report.js";
 import {
@@ -79,6 +79,32 @@ function parseHeaders(raw: string[]): Record<string, string> {
 }
 
 const program = new Command();
+
+/**
+ * Without this, Commander's own argv-parsing failures (missing base-url,
+ * unknown flag, `--timeout abc`/NaN/non-integer) call `process.exit(1)`
+ * directly — colliding with this CLI's own documented exit code `1`
+ * ("one or more checks failed"). A CI job checking `$? === 1` to mean "the
+ * deployment is nonconformant" would misread a typo'd flag as a failed
+ * run. These never reach `runConformance`, so they belong in the same "the
+ * run could not be performed" class as `InvalidConformanceOptionsError`
+ * (exit `2`), not "a check failed".
+ *
+ * `--help`/`--version` still exit `0`: Commander reaches this same override
+ * for those too, but they are not argv errors.
+ */
+program.exitOverride((err) => {
+  // `Command._exit()` calls `process.exit(err.exitCode)` right after this
+  // callback returns *unless* the callback throws — so setting
+  // `process.exitCode` alone would be silently overwritten back to
+  // Commander's own exit code. Throwing is the only way to keep ours.
+  if (err.code === "commander.helpDisplayed" || err.code === "commander.version") {
+    process.exitCode = 0;
+  } else {
+    process.exitCode = 2;
+  }
+  throw err;
+});
 
 program
   .name("aadp-conformance")
@@ -178,7 +204,19 @@ program
         ...(opts.unknownTypeUrl ? { unknownTypeUrl: opts.unknownTypeUrl } : {}),
       };
     }
-    const headers = parseHeaders(opts.header);
+    // Not a Commander option-parser (it validates the whole repeated
+    // `--header` list at once, after `collect()` has assembled it), so a
+    // malformed entry throws here rather than through `exitOverride()` —
+    // it needs its own catch, same as every other CLI-level validation
+    // error in this action.
+    let headers: Record<string, string>;
+    try {
+      headers = parseHeaders(opts.header);
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      process.exitCode = 2;
+      return;
+    }
     if (Object.keys(headers).length > 0) options.headers = headers;
     if (opts.crossOriginSafeHeader.length > 0) options.crossOriginSafeHeaders = opts.crossOriginSafeHeader;
 
@@ -228,4 +266,15 @@ program
     process.exitCode = exitCodeFor(report);
   });
 
-program.parseAsync(process.argv);
+// `exitOverride()` makes Commander throw its `CommanderError` instead of
+// calling `process.exit()` after our override callback above already set
+// `process.exitCode` — this swallows only that expected rethrow, so it
+// doesn't surface as an unhandled rejection with a confusing stack trace.
+// Anything else here is a bug in the `.action()` callback itself (every
+// *expected* failure inside it already catches its own error and sets
+// `process.exitCode`) — it must not be swallowed into a silent exit 0.
+program.parseAsync(process.argv).catch((err: unknown) => {
+  if (err instanceof CommanderError) return;
+  process.stderr.write(`Unexpected error: ${(err as Error)?.stack ?? err}\n`);
+  process.exitCode = 2;
+});

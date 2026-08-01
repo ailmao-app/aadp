@@ -59,6 +59,27 @@ describe("compileAadpRoutes() defaults", () => {
     expect(caught).toBeInstanceOf(AadpServerError);
     expect(caught).toMatchObject({ code: "invalid_request" });
   });
+
+  it("decodes double percent-encoding only once, never re-interpreting the decoded result as another escape", () => {
+    const routes = compileAadpRoutes("1.0");
+    // "%2525" decodes once to "%25" (a literal percent sign followed by
+    // "25"), not twice to "%" — a second, implicit decode pass would let a
+    // client smuggle characters the matcher never sees encoded.
+    expect(routes.match("/ai/v1.0/sitemaps/%2525.json")).toEqual({ kind: "sitemap", type: "%25" });
+  });
+
+  it("decodes an encoded slash inside a captured segment to a literal slash, never a path separator", () => {
+    const routes = compileAadpRoutes("1.0");
+    // Splitting happens on raw "/" before any decoding, so "%2F" stays
+    // inside the one path segment it was sent in — it must never let a
+    // caller smuggle an extra path segment into type/id.
+    expect(routes.match("/ai/v1.0/sitemaps/po%2Fst.json")).toEqual({ kind: "sitemap", type: "po/st" });
+  });
+
+  it("decodes an encoded backslash inside a captured segment to a literal backslash", () => {
+    const routes = compileAadpRoutes("1.0");
+    expect(routes.match("/ai/v1.0/sitemaps/po%5Cst.json")).toEqual({ kind: "sitemap", type: "po\\st" });
+  });
 });
 
 describe("compileAadpRoutes() custom routes", () => {

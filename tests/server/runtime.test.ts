@@ -356,6 +356,52 @@ describe("defineAADP() sitemap index and sitemap", () => {
     });
   });
 
+  it("rejects a cursor minted under a different wire version", async () => {
+    const aadp = makeServer();
+    const page1 = await aadp.sitemap("post", null);
+    const wireCursor = page1.cursor!.next!;
+    // Same type, tampered version: decodeCursor()'s type/version envelope
+    // must reject a replay from a different protocol version, not just a
+    // different resource type.
+    const envelope = JSON.parse(Buffer.from(wireCursor, "base64url").toString("utf8")) as {
+      type: string;
+      version: string;
+      raw: string;
+    };
+    const forgedCursor = Buffer.from(
+      JSON.stringify({ ...envelope, version: "0.1" })
+    ).toString("base64url");
+    await expect(aadp.sitemap("post", forgedCursor)).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("rejects a cursor whose opaque envelope was tampered with", async () => {
+    const aadp = makeServer();
+    const page1 = await aadp.sitemap("post", null);
+    const wireCursor = page1.cursor!.next!;
+    const envelope = JSON.parse(Buffer.from(wireCursor, "base64url").toString("utf8")) as {
+      type: string;
+      version: string;
+      raw: string;
+    };
+    // Same type/version, mutated raw payload: the application's own cursor
+    // value is opaque to this package, but the envelope around it must
+    // still round-trip byte-for-byte, not silently accept anything shaped
+    // right.
+    const tamperedCursor = Buffer.from(
+      JSON.stringify({ ...envelope, raw: `${envelope.raw}-tampered` })
+    ).toString("base64url");
+    const list = vi.fn(() => ({ items: [], nextCursor: null }));
+    const tamperedAadp = makeServer({ resources: [makePostResource({ list })] });
+    await tamperedAadp.sitemap("post", tamperedCursor);
+    expect(list).toHaveBeenCalledWith(expect.objectContaining({ cursor: `${envelope.raw}-tampered` }));
+
+    // A cursor that isn't valid base64url/JSON at all must be rejected
+    // outright rather than reaching the application's list().
+    await expect(aadp.sitemap("post", "not-a-valid-cursor-envelope")).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+  });
+
   it("throws unsupported_type for an unknown resource type", async () => {
     const aadp = makeServer();
     await expect(aadp.sitemap("unknown")).rejects.toBeInstanceOf(AadpServerError);
