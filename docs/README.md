@@ -47,6 +47,7 @@ contract. Such a change requires a new protocol version and an ADR.
 | [Security considerations](guides/security-considerations.md) | Security guidance | Active |
 | [AADP v1.0 implementation record](records/implementation-record-v1.0.md) | Implementation record | Implemented |
 | [Manifest v1.0 design](design/manifest-v1.0-design.md) | Design memo | Accepted through ADR-0005 |
+| [Đề xuất tích hợp các cơ chế agent discovery liền kề AADP](design/agent-discovery-integrations-proposal.md) | Design memo | Proposed |
 | [Relations Module design](design/relations-module-design.md) | Design memo | Draft |
 | [AEO/GEO integration plan](design/aeo-geo-integration-plan.md) | Design plan | Draft |
 | [Historical AADP draft](archive/aadp-draft.md) | Archive | Superseded |
