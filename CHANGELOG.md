@@ -12,6 +12,8 @@ Robustness fix (docs/vi/plans/implementation-plan-v1.0.10.md). Does not change A
 
 - Fixed `renderJUnitReport` (`ail-aadp/conformance`): `xmlEscape()` only escaped `& < > " '`, so a server-supplied string that reaches a check message or detail (entity id, sitemap type, a response header value, ...) could carry a raw C0 control byte other than tab/LF/CR straight into the emitted `--junit` XML. `canonicalize()`/the JSON Schemas accept such a byte as an ordinary JSON string character, but XML 1.0 forbids it in content with no valid character reference, so the resulting report was not well-formed XML and could fail to parse in CI systems that render JUnit output (GitHub Actions test-reporter, GitLab, Jenkins). `xmlEscape()` now also replaces every XML 1.0-illegal code point with a visible `\uXXXX` text escape, in addition to the existing `& < > " '` entity escaping. See `ERROR_LOG.md` 2026-08-02.
 
+## 1.0.9 - 2026-08-01
+
 Compatibility and interoperability hardening (docs/vi/plans/implementation-plan-v1.0.9.md). Does not change AADP wire version `1.0`, the JSON Schemas, or any validation result.
 
 ### Added
