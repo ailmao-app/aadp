@@ -528,6 +528,7 @@ Issue bảo trì/production còn mở nên ưu tiên sau baseline v1.0:
 3. `AADP-RELEASE-001`: Clean CI matrix, provenance, audit và rollback/deprecation procedure.
 4. `AADP-ROBUSTNESS-001`: Abort/retry/concurrency/total-byte policy và fuzz/property tests.
 5. `AADP-PROD-001`: Scheduled conformance, observability và production certification.
+6. `AADP-ACCESS-001`: Patch candidate sau `1.0.9` để explicit `none` giữ public/shared-cache semantics; theo dõi chi tiết trong `implementation-plan-v1.0.10.md`.
 
 ## 10. Definition of Done
 
@@ -613,7 +614,35 @@ và adapter application phải là layer mỏng nằm bên ngoài core.
 Mục tiêu của phase này là chứng minh một bên thứ ba có thể triển khai AADP chỉ
 từ specification và package public.
 
-### Ưu tiên 4 — Module versioning và Relations Module
+### Ưu tiên 4 — Application profile và explicit public access discovery
+
+> **Chỉ áp dụng sau release `1.0.9`.** Không backfill feature hoặc thay đổi scope
+> của `implementation-plan-v1.0.9.md`.
+
+AADP v1.0 đã hỗ trợ security scheme `none`, `api_key` và `oauth2`, nhưng chưa có
+application-level profile/default access để client hoặc scanner phân biệt content
+site công khai với deployment thiếu OAuth/MCP discovery.
+
+Delivery boundary:
+
+1. `AADP-ACCESS-001` là patch candidate cho `1.0.10`: reproduction test và runtime
+   fix để explicit scheme `type: "none"` giữ public/shared-cache behavior. Đây là
+   bug fix của semantics đã phát hành, không đổi wire schema.
+2. `AADP-PROFILE-001..003` là vNext work: ADR, v2 preview, migration và scanner
+   interoperability cho application profile/default security/effective access.
+
+Không tạo OAuth/OIDC, OAuth Protected Resource Metadata, `auth.md` hoặc MCP Server
+Card giả cho capability không tồn tại. Scanner mapping phải phân biệt `pass`,
+`fail` và `not_applicable` từ effective security cùng interface thật.
+
+Tài liệu nguồn:
+
+- [Đề xuất khai báo Content Site và truy cập công khai](../design/content-site-access-discovery-proposal.md)
+- [Kế hoạch `ail-aadp` 1.0.10](implementation-plan-v1.0.10.md)
+- [Kế hoạch `ail-aadp` 2.0.0](implementation-plan-v2.0.0.md)
+- [Release roadmap](release-roadmap.md)
+
+### Ưu tiên 5 — Module versioning và Relations Module
 
 Trước khi triển khai module mới, phải có ADR chốt:
 
@@ -627,7 +656,7 @@ Provenance Module, vì các module đó cần một contract liên kết resourc
 Không dùng lại ví dụ version `0.2` trong design draft như một quyết định mặc định;
 version wire/module chính thức phải được chốt qua ADR.
 
-### Ưu tiên 5 — AI Usage Policy Extension
+### Ưu tiên 6 — AI Usage Policy Extension
 
 Chuẩn hóa metadata machine-readable để publisher công bố cách dữ liệu có thể được
 sử dụng trong các hệ thống AI, tối thiểu gồm discovery, indexing, inference/RAG,
@@ -663,10 +692,14 @@ conflict semantics; không được tuyên bố một license có hiệu lực p
 6. `AADP-SERVER-003`: Document generation, HTTP cache, checksum và validation helpers. **Đã triển khai.**
 7. `AADP-SERVER-004`: Fetch adapter và scaffolding CLI (`aadp init`/`aadp add-resource`). **Đã triển khai.**
 8. `AADP-INTEROP-001`: Neutral reference server và clean-install verification.
-9. `AADP-MODULE-001`: ADR cho module versioning.
-10. `AADP-RELATIONS-001`: Relations schema, validator, conformance và client traversal.
-11. `AADP-ANSWER-001`: Answer Module.
-12. `AADP-EVIDENCE-001`: Evidence & Provenance Module.
-13. `AADP-AI-POLICY-001`: ADR cho AI usage vocabulary, legal boundary và conflict semantics.
-14. `AADP-AI-POLICY-002`: Experimental `x_ai_usage` schema, validator và examples.
-15. `AADP-AI-POLICY-003`: Interoperability, legal review và đề xuất chuẩn hóa cho protocol version mới.
+9. `AADP-ACCESS-001`: `1.0.10` reproduction test và runtime fix cho explicit `none` cache semantics.
+10. `AADP-PROFILE-001`: ADR cho application profile, default security và inheritance.
+11. `AADP-PROFILE-002`: V2 schema/spec/validator/client/server/conformance implementation.
+12. `AADP-PROFILE-003`: Scanner interoperability và `not_applicable` mapping.
+13. `AADP-MODULE-001`: ADR cho module versioning.
+14. `AADP-RELATIONS-001`: Relations schema, validator, conformance và client traversal.
+15. `AADP-ANSWER-001`: Answer Module.
+16. `AADP-EVIDENCE-001`: Evidence & Provenance Module.
+17. `AADP-AI-POLICY-001`: ADR cho AI usage vocabulary, legal boundary và conflict semantics.
+18. `AADP-AI-POLICY-002`: Experimental `x_ai_usage` schema, validator và examples.
+19. `AADP-AI-POLICY-003`: Interoperability, legal review và đề xuất chuẩn hóa cho protocol version mới.

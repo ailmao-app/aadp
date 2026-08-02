@@ -21,6 +21,7 @@ thay đổi wire contract đã release.
 - [Thiết kế Manifest v1.0](design/manifest-v1.0-design.md)
 - [Thiết kế Relations Module](design/relations-module-design.md)
 - [Kế hoạch tích hợp AEO/GEO](design/aeo-geo-integration-plan.md)
+- [Đề xuất khai báo Content Site và truy cập công khai](design/content-site-access-discovery-proposal.md)
 - [Kế hoạch và hồ sơ triển khai v1.0](plans/implementation-plan.md)
 - [Kế hoạch triển khai package 1.0.9](plans/implementation-plan-v1.0.9.md)
 - [Roadmap phát hành package 1.0.8 → 2.0.0](plans/release-roadmap.md)

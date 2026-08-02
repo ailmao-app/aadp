@@ -99,6 +99,8 @@ phát hiện bug tương thích patch. Candidate scope:
 - URL/route canonicalization edge cases.
 - DNS pinning, redirect hoặc sensitive-header regression.
 - Cursor/budget accounting bug.
+- Public resource bị phân loại private/no-store chỉ vì `security` reference trỏ
+  tới scheme `type: "none"`.
 - JSON/JUnit escaping hoặc CLI file-output bug.
 - Package export/tarball portability bug trên Node version được support.
 - Documentation correction đi kèm behavior đã release.
@@ -488,6 +490,8 @@ Blocked bởi ADR v2 chốt ít nhất:
 Candidate scope:
 
 - `experimental/v2` schema/types/validator/client namespace.
+- Thử nghiệm `application.profile`, default security và effective-security
+  inheritance theo `AADP-PROFILE-001`; không sửa schema v1.0.
 - v1 → v2 compatibility analyzer; không silent migration.
 - CLI `--version 2.0-preview` yêu cầu opt-in rõ.
 - Dual-version neutral fixtures và conformance preview profile.
@@ -517,6 +521,8 @@ Trạng thái: breaking release; chỉ mở sau migration evidence từ 1.9.x.
 Candidate breaking scope đã biết:
 
 - Stable AADP wire v2 schema/spec/types/validator/client/conformance.
+- Application profile, default security và resource/interface override chỉ khi
+  `AADP-PROFILE-001` đã Accepted và preview có interoperability evidence.
 - Chuẩn hóa feature đã chứng minh từ module/extension khi ADR v2 yêu cầu; ví dụ
   `ai_usage` chỉ khi vocabulary/legal/interoperability đã ổn định.
 - Đổi unversioned/default client export khỏi legacy v0.1 theo migration policy.
@@ -553,6 +559,7 @@ Release gate:
 | JUnit/CI conformance | `1.0.8` | Đã triển khai |
 | Compatibility/neutral reference server | `1.0.9` | Đã có plan chi tiết |
 | Robustness/production operations | `1.0.10–1.0.11` | Conditional patch |
+| `AADP-ACCESS-001` explicit `none` cache semantics | `1.0.10` hoặc patch phù hợp gần nhất | Chờ reproduction test |
 | Abort/concurrency/retry/byte budget/profiles | `1.1.0` | Planned |
 | `AADP-MODULE-001`, `AADP-REL-001..006` | `1.2.0` | Chờ ADR |
 | `AADP-MODULE-002` Answer | `1.3.0` | Chờ Relations |
@@ -562,6 +569,7 @@ Release gate:
 | `AADP-AI-POLICY-001..003` | `1.6.0` | Chờ legal/ADR |
 | Auth-aware retrieval | `1.7.0` | Chờ security ADR |
 | Production certification/attestation | `1.8.0` | Chờ external implementations |
+| `AADP-PROFILE-001..003` Content Site/default access | `1.9.0` preview → `2.0.0` stable | Chờ ADR và scanner interoperability |
 | V2 preview/migration tooling | `1.9.0` | Chờ v2 ADR |
 | Stable wire v2/package breaking cleanup | `2.0.0` | Chờ migration evidence |
 | `AILMAO-*` adapter/content/HTML/IndexNow/metrics | Ngoài package core | Theo dõi ở project Ailmao |
