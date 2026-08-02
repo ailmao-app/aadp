@@ -308,9 +308,19 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
    * cache from serving one principal's authorized response to another.
    * `ETag`/`Last-Modified`/conditional-GET stay identical either way
    * (spec v1.0 §7 applies unconditionally to sitemap/entity 2xx responses).
+   *
+   * A `security` reference resolving to scheme `type: "none"` (explicit
+   * no-auth, spec v1.0 §3.1.7) MUST get the same public/shared-cache
+   * treatment as omitting `security` entirely — it is the same "no
+   * credential required" fact stated two different ways, not a protected
+   * resource. Only `api_key`/`oauth2` schemes need the private path.
+   * `checkManifestSemantics()` at `defineAADP()` time already guarantees
+   * every `security` reference resolves to an entry in `securitySchemes`.
    */
   function cacheControlFor(type: string): string {
-    return resourcesByType.get(type)?.security ? "private, no-store" : `public, max-age=${cacheMaxAgeSeconds}`;
+    const schemeId = resourcesByType.get(type)?.security;
+    const isProtected = schemeId !== undefined && config.securitySchemes?.[schemeId]?.type !== "none";
+    return isProtected ? "private, no-store" : `public, max-age=${cacheMaxAgeSeconds}`;
   }
 
   function entityUrl(type: string, routeId: string): string {

@@ -658,6 +658,42 @@ describe("defineAADP() handleRequest", () => {
     expect(privateSitemap.headers.get("ETag")).toBeTruthy();
   });
 
+  it("AADP-ACCESS-001: a resource that explicitly references a security scheme of type \"none\" is shared-cacheable, same as omitting security entirely", async () => {
+    // `security_schemes.<id>.type: "none"` (spec v1.0 §3.1.7) states "no
+    // credential required" explicitly instead of by omission. Cache
+    // eligibility must not depend on which of those two equivalent ways a
+    // publisher chose — only an actually protected scheme (api_key/oauth2)
+    // may force `private, no-store`.
+    const aadp = makeServer({
+      resources: [
+        makePostResource(),
+        makePostResource({
+          type: "explicit-public-post",
+          security: "public",
+          serialize: (post) => ({
+            id: `explicit-public-post:${post.slug}`,
+            updatedAt: post.updatedAt,
+            data: { title: post.title },
+          }),
+        }),
+      ],
+      securitySchemes: { public: { type: "none" } },
+    });
+
+    const omittedRes = await aadp.handleRequest(new Request("https://example.com/ai/v1.0/entities/post/first-post.json"));
+    const explicitRes = await aadp.handleRequest(
+      new Request("https://example.com/ai/v1.0/entities/explicit-public-post/first-post.json")
+    );
+    expect(explicitRes.headers.get("Cache-Control")).toBe(omittedRes.headers.get("Cache-Control"));
+    expect(explicitRes.headers.get("Cache-Control")).toContain("public");
+    expect(explicitRes.headers.get("Cache-Control")).not.toContain("private");
+
+    const explicitSitemap = await aadp.handleRequest(
+      new Request("https://example.com/ai/v1.0/sitemaps/explicit-public-post.json")
+    );
+    expect(explicitSitemap.headers.get("Cache-Control")).toContain("public");
+  });
+
   it("allow-lists a configured api_key header name in the CORS preflight response", async () => {
     const aadp = makeServer({
       resources: [makePostResource({ security: "apikey" })],
