@@ -218,6 +218,34 @@ describe("runConformance against a conformant v1.0 server", () => {
     expect(xml).toContain("&quot;quotes&quot;");
   });
 
+  it("neutralizes XML 1.0-illegal control characters instead of emitting them raw", () => {
+    // A server-supplied string (entity id, sitemap type, header value, ...)
+    // passes JSON/canonical-JSON validation even if it contains a raw C0
+    // control byte other than tab/LF/CR; XML 1.0 forbids those in content
+    // with no valid character reference, so a naive escaper that only
+    // handles `& < > " '` emits a testsuite that is not well-formed XML.
+    const withControlChars: ConformanceReport = {
+      ...report,
+      checks: [
+        {
+          id: "fixture.control-char",
+          group: "fixture",
+          title: "title",
+          status: "failed",
+          duration_ms: 1,
+          message: "entity id \x07\x0b contains raw control bytes",
+        },
+      ],
+      summary: { total: 1, passed: 0, failed: 1, warnings: 0, skipped: 0, inconclusive: 0 },
+      status: "failed",
+    };
+    const xml = renderJUnitReport(withControlChars);
+    // eslint-disable-next-line no-control-regex
+    expect(/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(xml)).toBe(false);
+    expect(xml).toContain("\\u0007");
+    expect(xml).toContain("\\u000b");
+  });
+
   it("treats warnings as failures only when asked", async () => {
     const strict = await runConformance(withNegativeTargets({ failOnWarning: true }));
     expect(strict.summary.warnings).toBeGreaterThan(0);
