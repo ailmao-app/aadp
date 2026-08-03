@@ -350,6 +350,55 @@ describe("traversal budgets", () => {
   });
 });
 
+describe("cancellation (options.signal)", () => {
+  it("marks every check skipped/inconclusive, never failed, when already aborted before the run starts", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const report = await runConformance(permissive({ signal: controller.signal }));
+    expect(report.summary.failed).toBe(0);
+    expect(report.status).toBe("inconclusive");
+    for (const check of report.checks) {
+      expect(check.status).toBe("skipped");
+      expect(check.inconclusive).toBe(true);
+      expect(check.message).toMatch(/aborted/i);
+    }
+    expect(exitCodeFor(report)).toBe(4);
+  });
+
+  it("stops starting new checks once aborted mid-run, without failing the deployment", async () => {
+    const controller = new AbortController();
+    let seenFirstCheck = false;
+
+    const report = await runConformance(
+      permissive({
+        signal: controller.signal,
+        onCheck: () => {
+          // Abort right after the very first check settles — every check
+          // after it must be recorded skipped/inconclusive, not run.
+          if (!seenFirstCheck) {
+            seenFirstCheck = true;
+            controller.abort();
+          }
+        },
+      })
+    );
+
+    expect(seenFirstCheck).toBe(true);
+    expect(report.summary.failed).toBe(0);
+    expect(report.status).toBe("inconclusive");
+    // First check ran for real (whatever its own verdict); every check
+    // after it was never started.
+    const [first, ...rest] = report.checks;
+    expect(first.message ?? "").not.toMatch(/aborted by caller/i);
+    for (const check of rest) {
+      expect(check.status).toBe("skipped");
+      expect(check.inconclusive).toBe(true);
+      expect(check.message).toMatch(/aborted by caller/i);
+    }
+  });
+});
+
 describe("a check whose prerequisite did not pass is skipped, not re-failed", () => {
   it("skips every dependent check when the manifest is not JSON", async () => {
     const tiny = await startTinyServer(() => ({ status: 200, body: "<h1>hi</h1>", contentType: "text/html" }));

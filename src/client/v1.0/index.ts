@@ -44,6 +44,7 @@ export {
 export {
   AadpClientError,
   TimeoutError,
+  AbortedError,
   TooManyRedirectsError,
   ResponseTooLargeError,
   InvalidContentTypeError,

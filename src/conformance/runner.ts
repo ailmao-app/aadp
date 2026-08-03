@@ -9,7 +9,7 @@
  */
 import { createRequire } from "node:module";
 import { createStrictUrlPolicy, createPermissiveUrlPolicy } from "../client/url-policy.js";
-import { scopeHeadersToOrigin } from "../client/http.js";
+import { scopeHeadersToOrigin, AbortedError } from "../client/http.js";
 import { createDiscoveryBudget, AadpDiscoveryBudgetExceededError } from "../client/discovery-budget.js";
 import type { ClientOptions } from "../client/v1.0/index.js";
 import { CHECKS, CheckSignal, type Check, type CheckContext, type CheckOutcome, type RunState } from "./checks.js";
@@ -170,6 +170,7 @@ export async function runConformance(options: ConformanceOptions): Promise<Confo
     ...(options.maxResponseBytes !== undefined ? { maxResponseBytes: options.maxResponseBytes } : {}),
     ...(options.headers ? { headers: options.headers } : {}),
     ...(options.crossOriginSafeHeaders ? { crossOriginSafeHeaders: options.crossOriginSafeHeaders } : {}),
+    ...(options.signal ? { signal: options.signal } : {}),
   };
 
   // Caller-configured headers may be a credential for the deployment
@@ -215,6 +216,22 @@ export async function runConformance(options: ConformanceOptions): Promise<Confo
   };
 
   for (const check of CHECKS) {
+    // A caller-aborted run stops starting new checks rather than racing
+    // each one against the signal individually: every not-yet-started
+    // check is recorded the same way a traversal-budget exhaustion is
+    // (skipped/inconclusive), never as a deployment failure.
+    if (options.signal?.aborted) {
+      record({
+        id: check.id,
+        group: check.group,
+        title: check.title,
+        status: "skipped",
+        duration_ms: 0,
+        message: "Run aborted by caller (options.signal)",
+        inconclusive: true,
+      });
+      continue;
+    }
     const blocking = unmetPrerequisite(check, statusById);
     if (blocking) {
       record({
@@ -333,6 +350,17 @@ async function runCheck(
         status: "skipped",
         duration_ms: Date.now() - startedMs,
         message: `Stopped by this run's traversal budget: ${err.message}`,
+        inconclusive: true,
+      };
+    }
+    // Same reasoning as the budget case above: a mid-check abort is the
+    // caller stopping the run, not the deployment misbehaving.
+    if (err instanceof AbortedError) {
+      return {
+        ...base,
+        status: "skipped",
+        duration_ms: Date.now() - startedMs,
+        message: `Run aborted by caller (options.signal): ${err.message}`,
         inconclusive: true,
       };
     }

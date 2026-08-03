@@ -39,6 +39,14 @@ export interface FetchJsonOptions {
    * this must be an explicit opt-in per header.
    */
   crossOriginSafeHeaders?: string[];
+  /**
+   * Caller-driven cancellation (ADR-0006). Combined with this module's own
+   * per-hop timeout via `AbortSignal.any()` — aborting stops the in-flight
+   * request (headers and body) and rejects with `AbortedError` instead of
+   * `TimeoutError`. Omitting this is a no-op: internal timeout handling is
+   * unchanged, so behavior matches every release before 1.1.0.
+   */
+  signal?: AbortSignal;
 }
 
 export interface FetchJsonResult {
@@ -92,6 +100,13 @@ export class AadpClientError extends Error {
 export class TimeoutError extends AadpClientError {
   constructor(url: string, timeoutMs: number) {
     super(`Request to ${url} timed out after ${timeoutMs}ms`, "timeout");
+  }
+}
+
+/** Thrown when `options.signal` aborts a request/body-read — distinct from an internal `TimeoutError`. */
+export class AbortedError extends AadpClientError {
+  constructor(url: string, reason?: unknown) {
+    super(`Request to ${url} was aborted${reason !== undefined && reason !== null ? `: ${String(reason)}` : ""}`, "aborted");
   }
 }
 
@@ -155,6 +170,10 @@ function isJsonContentType(contentType: string | null): boolean {
 
 function isAbortError(err: unknown): boolean {
   return (err as Error)?.name === "AbortError";
+}
+
+function callerAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted ?? false;
 }
 
 /**
@@ -277,6 +296,7 @@ interface FinalResponse {
   res: Response;
   finalUrl: string;
   signal: AbortSignal;
+  callerSignal: AbortSignal | undefined;
   maxResponseBytes: number;
   timeoutMs: number;
 }
@@ -304,26 +324,42 @@ async function requestWithPolicy<T>(
   assertValidNumberOption("maxResponseBytes", maxResponseBytes, 1);
   const safeNames = crossOriginSafeNameSet(options.crossOriginSafeHeaders);
   const dispatcher = dispatcherFor(policy);
+  const callerSignal = options.signal;
 
   let current = new URL(url);
   const originalUrl = url;
   let headers = options.headers;
 
   for (let hop = 0; ; hop++) {
+    if (callerAborted(callerSignal)) {
+      throw new AbortedError(current.toString(), callerSignal!.reason);
+    }
     assertAllowed(current, policy);
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    // Caller cancellation and this hop's own timeout share one signal:
+    // whichever fires first aborts `fetch()`/the body read, and the catch
+    // below tells them apart by re-checking `callerSignal.aborted`.
+    const combinedSignal = callerSignal ? AbortSignal.any([callerSignal, controller.signal]) : controller.signal;
     try {
       let res: Response;
       try {
         res = await fetch(current.toString(), {
           redirect: "manual",
           headers,
-          signal: controller.signal,
+          signal: combinedSignal,
           ...(dispatcher ? { dispatcher } : {}),
         } as RequestInit);
       } catch (err) {
+        // Checked before `isAbortError(err)`: when `AbortController.abort(reason)`
+        // is called with a non-undefined `reason`, a spec-compliant `fetch()`
+        // rejects with that `reason` value directly — which may not even be
+        // an `Error` (a caller can pass any value, e.g. a plain string) — not
+        // a generic named `AbortError`. Checking the signal's own `.aborted`
+        // flag first catches that case regardless of what shape the
+        // rejection took.
+        if (callerAborted(callerSignal)) throw new AbortedError(current.toString(), callerSignal!.reason);
         if (isAbortError(err)) {
           throw new TimeoutError(current.toString(), timeoutMs);
         }
@@ -351,7 +387,8 @@ async function requestWithPolicy<T>(
       return await handle({
         res,
         finalUrl: current.toString(),
-        signal: controller.signal,
+        signal: combinedSignal,
+        callerSignal,
         maxResponseBytes,
         timeoutMs,
       });
@@ -366,6 +403,7 @@ async function readBodyOrTimeout(final: FinalResponse): Promise<string> {
   try {
     return await readBodyCapped(final.res, final.finalUrl, final.maxResponseBytes, final.signal);
   } catch (err) {
+    if (callerAborted(final.callerSignal)) throw new AbortedError(final.finalUrl, final.callerSignal!.reason);
     if (isAbortError(err)) {
       throw new TimeoutError(final.finalUrl, final.timeoutMs);
     }

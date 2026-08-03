@@ -155,6 +155,15 @@ export interface ConformanceOptions {
   failOnWarning?: boolean;
   /** Called as each check settles, for progress output. Never throws into the run. */
   onCheck?: (result: CheckResult) => void;
+  /**
+   * Caller-driven cancellation (ADR-0006). Stops in-flight requests and
+   * every check not yet started — each remaining check is recorded
+   * `skipped`/`inconclusive` rather than run, so the report reflects a
+   * stopped run instead of either a false pass or a false failure caused
+   * by the caller's own cancellation. Omitting this is a no-op: behavior
+   * matches every release before 1.1.0.
+   */
+  signal?: AbortSignal;
 }
 
 /**

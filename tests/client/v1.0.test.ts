@@ -15,6 +15,7 @@ import {
   UnsupportedAadpVersionError,
   BlockedUrlError,
   TimeoutError,
+  AbortedError,
   TooManyRedirectsError,
   ResponseTooLargeError,
   InvalidContentTypeError,
@@ -340,6 +341,80 @@ describe("timeout", () => {
     await expect(discover(server.baseUrl, { ...PERMISSIVE, timeoutMs: 20 })).rejects.toThrow(
       TimeoutError
     );
+  });
+});
+
+describe("cancellation (options.signal)", () => {
+  it("rejects with AbortedError, not TimeoutError, when the caller's signal fires mid-request", async () => {
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        setTimeout(() => sendJson(res, 200, {}), 5_000);
+        return;
+      }
+      sendJson(res, 404, {});
+    });
+
+    const controller = new AbortController();
+    setTimeout(() => controller.abort("caller gave up"), 20);
+
+    await expect(discover(server.baseUrl, { ...PERMISSIVE, signal: controller.signal })).rejects.toThrow(
+      AbortedError
+    );
+  });
+
+  it("rejects immediately when the signal is already aborted before the first request", async () => {
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        return sendJson(res, 200, buildManifest(req.headers.host!));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(discover(server.baseUrl, { ...PERMISSIVE, signal: controller.signal })).rejects.toThrow(
+      AbortedError
+    );
+    expect(server.requestLog).toEqual([]);
+  });
+
+  it("stops discoverAllEntities from issuing further requests once aborted mid-traversal", async () => {
+    server = await startServer((req, res, url) => {
+      const host = req.headers.host!;
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(host));
+      if (url.pathname === "/ai/v1.0/sitemap-index.json") return sendJson(res, 200, buildSitemapIndex(host));
+      if (url.pathname === "/ai/v1.0/sitemaps/example.json") {
+        const items = ENTITIES.map((e) => buildSitemapItem(host, e));
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          type: "example",
+          generated_at: "2026-07-25T09:30:00Z",
+          checksum: checksumOf(items),
+          items,
+        });
+      }
+      if (url.pathname.startsWith("/ai/v1.0/entities/")) {
+        const item = ENTITIES.find((e) => url.pathname.endsWith(`${e.id.split(":")[1]}.json`));
+        if (item) return sendJson(res, 200, buildEntity(host, item));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const controller = new AbortController();
+    const seen: string[] = [];
+    // Aborts right after the first entity is yielded (not from inside the
+    // server handler, which would race the in-flight response for that
+    // same first entity) — the second entity must never be requested.
+    await expect(async () => {
+      for await (const entity of discoverAllEntities(server!.baseUrl, { ...PERMISSIVE, signal: controller.signal })) {
+        seen.push(entity.id);
+        controller.abort();
+      }
+    }).rejects.toThrow(AbortedError);
+
+    expect(seen).toEqual([ENTITIES[0].id]);
+    expect(server.requestLog.filter((p) => p.startsWith("/ai/v1.0/entities/"))).toHaveLength(1);
   });
 });
 

@@ -207,3 +207,13 @@ describe("validator: UnsupportedAadpVersionError.code is a stable string", () =>
     expect(error.code).toBe("unsupported_version");
   });
 });
+
+describe("client: AbortedError.code is a stable string, distinct from TimeoutError (ADR-0006)", () => {
+  it("is \"aborted\", not \"timeout\"", async () => {
+    const client = await importFromTarball("client");
+    const aborted = new client.v1.AbortedError("https://example.com", "caller reason");
+    expect(aborted.code).toBe("aborted");
+    const timeout = new client.v1.TimeoutError("https://example.com", 10_000);
+    expect(timeout.code).toBe("timeout");
+  });
+});
