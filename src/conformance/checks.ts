@@ -33,7 +33,6 @@ import { fetchJson, probeUrl } from "../client/http.js";
 import {
   AadpDiscoveryBudgetExceededError,
   chargeDiscoveryBudget,
-  chargeDiscoveryBudgetBytes,
   type DiscoveryBudgetState,
 } from "../client/discovery-budget.js";
 import { validateDocument, checkManifestSemantics, type SemanticIssue } from "../validator/index.js";
@@ -224,8 +223,7 @@ async function assertCacheValidators(
     if (budgetKind) chargeDiscoveryBudget(ctx.budget, budgetKind, context);
   };
   charge();
-  const first = await fetchJson(url, client);
-  chargeDiscoveryBudgetBytes(ctx.budget, first.bodyBytes, context);
+  const first = await fetchJson(url, client, ctx.budget);
   const etag = first.headers.get("etag");
   if (!etag) ctx.fail(`${url} returned no ETag; a document carrying a checksum must expose one`);
   const strongTag = etag!.startsWith("W/") ? etag!.slice(2) : etag!;
@@ -253,8 +251,11 @@ async function assertCacheValidators(
   // one, letting an exact-match-only implementation through.
   for (const tag of [strongTag, `W/${strongTag}`]) {
     charge();
-    const conditional = await fetchJson(url, { ...client, headers: { ...client.headers, "If-None-Match": tag } });
-    chargeDiscoveryBudgetBytes(ctx.budget, conditional.bodyBytes, context);
+    const conditional = await fetchJson(
+      url,
+      { ...client, headers: { ...client.headers, "If-None-Match": tag } },
+      ctx.budget
+    );
     if (conditional.status !== 304) {
       ctx.fail(
         `${url} answered If-None-Match: ${tag} with ${conditional.status}, expected 304 ` +
@@ -273,8 +274,7 @@ export const CHECKS: Check[] = [
     group: "manifest",
     title: "Manifest is served at /.well-known/ai-manifest.json as application/json 200",
     async run(ctx) {
-      const result = await fetchJson(ctx.state.manifestUrl, ctx.client);
-      chargeDiscoveryBudgetBytes(ctx.budget, result.bodyBytes, "manifest.http");
+      const result = await fetchJson(ctx.state.manifestUrl, ctx.client, ctx.budget);
       if (result.status !== 200) {
         ctx.fail(`${ctx.state.manifestUrl} returned HTTP ${result.status}, expected 200`);
       }

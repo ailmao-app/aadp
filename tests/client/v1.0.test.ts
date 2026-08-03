@@ -26,6 +26,7 @@ import {
   type ClientOptions,
 } from "../../src/client/v1.0/index.js";
 import { checksumOf } from "../../src/canonical-json/checksum.js";
+import { createDiscoveryBudget } from "../../src/client/discovery-budget.js";
 
 /**
  * Phase-4 reference-client tests: acceptance criteria from
@@ -617,6 +618,75 @@ describe("retry (options.retry)", () => {
     ).rejects.toThrow(AbortedError);
     expect(attempts).toBe(1);
   });
+
+  it("throws AadpDiscoveryBudgetExceededError instead of sleeping once a retry's backoff would exceed the shared deadline", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        return sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
+      }
+      sendJson(res, 404, {});
+    });
+
+    // deadlineMs (20ms) is far smaller than the backoff a real attempt 2
+    // would need to wait (baseDelayMs 5000) — the retry must never sleep
+    // for it, let alone send a second request.
+    const budget = createDiscoveryBudget({ deadlineMs: 20 });
+    await expect(
+      discover(
+        server.baseUrl,
+        { ...PERMISSIVE, retry: { maxAttempts: 10, baseDelayMs: 5000, maxDelayMs: 5000 } },
+        budget
+      )
+    ).rejects.toThrow(AadpDiscoveryBudgetExceededError);
+    expect(attempts).toBe(1);
+  });
+
+  it("throws AadpDiscoveryBudgetExceededError instead of retrying once the deadline has already passed", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        return sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const budget = createDiscoveryBudget({ deadlineMs: 5000 });
+    // Simulate the deadline already having elapsed (e.g. spent by earlier
+    // requests in the same traversal) without a slow real-time test.
+    (budget as { startedAt: number }).startedAt = Date.now() - 10_000;
+
+    await expect(
+      discover(server.baseUrl, { ...PERMISSIVE, retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 5 } }, budget)
+    ).rejects.toThrow(AadpDiscoveryBudgetExceededError);
+    expect(attempts).toBe(0);
+  });
+
+  it("honoring a Retry-After that alone would exceed the deadline also throws instead of sleeping", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        res.writeHead(503, { "Content-Type": "application/json", "Retry-After": "30" });
+        return res.end(JSON.stringify(errorEnvelope("upstream_unavailable", "busy")));
+      }
+      sendJson(res, 404, {});
+    });
+
+    // Retry-After asks for 30s, capped at maxDelayMs (20s) — still far more
+    // than the 20ms deadline below.
+    const budget = createDiscoveryBudget({ deadlineMs: 20 });
+    await expect(
+      discover(
+        server.baseUrl,
+        { ...PERMISSIVE, retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 20_000 } },
+        budget
+      )
+    ).rejects.toThrow(AadpDiscoveryBudgetExceededError);
+    expect(attempts).toBe(1);
+  });
 });
 
 describe("private-network URL policy", () => {
@@ -883,6 +953,55 @@ describe("cross-document integrity", () => {
         }
       })()
     ).rejects.toThrow(AadpIntegrityMismatchError);
+  });
+});
+
+describe("maxTotalBytes stops streaming mid-response, not after the full body is buffered", () => {
+  it("aborts the body read before the server finishes writing every chunk", async () => {
+    const CHUNK = "x".repeat(1024); // 1 KiB
+    const TOTAL_CHUNKS = 50; // 50 KiB total — comfortably under maxResponseBytes (2 MiB default)
+    let chunksWritten = 0;
+    let clientDisconnectedEarly = false;
+
+    server = await startServer((req, res, url) => {
+      if (url.pathname !== "/.well-known/ai-manifest.json") {
+        sendJson(res, 404, {});
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      // Leading bytes make it a syntactically-plausible (if oversized)
+      // JSON string value so a truncated read fails on the *budget*, not
+      // on JSON.parse first.
+      res.write('{"padding":"');
+      const timer = setInterval(() => {
+        if (res.writableEnded || res.destroyed) {
+          clearInterval(timer);
+          return;
+        }
+        if (chunksWritten >= TOTAL_CHUNKS) {
+          clearInterval(timer);
+          res.end('"}');
+          return;
+        }
+        res.write(CHUNK);
+        chunksWritten++;
+      }, 2);
+      res.on("close", () => {
+        clearInterval(timer);
+        if (chunksWritten < TOTAL_CHUNKS) clientDisconnectedEarly = true;
+      });
+    });
+
+    const budget = createDiscoveryBudget({ maxTotalBytes: 4 * 1024 }); // 4 KiB — far less than the 50 KiB body
+    await expect(
+      discover(server.baseUrl, { ...PERMISSIVE, maxResponseBytes: 10 * 1024 * 1024 }, budget)
+    ).rejects.toThrow(AadpDiscoveryBudgetExceededError);
+
+    // Give the server's 'close' listener a moment to fire after the client
+    // cancels the reader.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(clientDisconnectedEarly).toBe(true);
+    expect(chunksWritten).toBeLessThan(TOTAL_CHUNKS);
   });
 });
 

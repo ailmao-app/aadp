@@ -17,6 +17,11 @@
  */
 import { createStrictUrlPolicy, assertAllowed, BlockedUrlError, type UrlPolicy } from "./url-policy.js";
 import { dispatcherFor } from "./dns-pin.js";
+import {
+  chargeDiscoveryBudgetBytes,
+  AadpDiscoveryBudgetExceededError,
+  type DiscoveryBudgetState,
+} from "./discovery-budget.js";
 
 export interface FetchJsonOptions {
   /** Defaults to a shared strict policy singleton (see `dispatcherFor`). */
@@ -219,6 +224,14 @@ function isRetryableError(err: unknown): boolean {
   if (err instanceof TimeoutError) return true;
   if (err instanceof AbortedError) return false;
   if (err instanceof BlockedUrlError) return false;
+  // A deadline/budget-exceeded signal is not a transient condition to
+  // retry through — it's the run stopping itself. Without this exclusion,
+  // `assertRetryFitsDeadline`/`assertWithinDeadline` throwing from inside
+  // the status-retry branch would be caught by the outer (error-based)
+  // retry branch and misread as "retryable", which computes its own
+  // smaller backoff delay and can let one more real request through before
+  // the deadline check finally catches up — see ERROR_LOG.md 2026-08-03.
+  if (err instanceof AadpDiscoveryBudgetExceededError) return false;
   if (err instanceof AadpClientError) return false;
   return true;
 }
@@ -337,17 +350,43 @@ export function scopeHeadersToOrigin<T extends FetchJsonOptions>(
   };
 }
 
+/**
+ * Charges `bytes` to the shared whole-run budget, if one was given, as soon
+ * as they're read — never after the fact. This is what makes `maxTotalBytes`
+ * (ADR-0006) an actual streaming stop, not just a check performed once a
+ * response already read up to its own `maxResponseBytes` cap: a run with 1
+ * byte of remaining budget stops after 1 byte of this response, not after
+ * the full ~2 MiB default per-response cap.
+ *
+ * Charging happens per chunk rather than once for the whole body, and each
+ * charge is a single synchronous call — under Node's single-threaded event
+ * loop, two concurrent reads (`concurrency > 1`) can never charge the same
+ * shared counter "at the same instant"; every synchronous increment-then-
+ * compare fully completes before any other chunk's callback runs, so no
+ * separate locking/reservation scheme is needed for this to be race-free.
+ */
+function chargeBytesOrThrow(budget: DiscoveryBudgetState | undefined, bytes: number, context: string): void {
+  if (budget) chargeDiscoveryBudgetBytes(budget, bytes, context);
+}
+
 async function readBodyCapped(
   res: Response,
   url: string,
   maxBytes: number,
-  signal: AbortSignal
+  signal: AbortSignal,
+  budget?: DiscoveryBudgetState,
+  budgetContext?: string
 ): Promise<string> {
   if (!res.body) {
     const text = await res.text();
     if (Buffer.byteLength(text, "utf8") > maxBytes) {
       throw new ResponseTooLargeError(url, maxBytes);
     }
+    // No stream to charge incrementally against here — the whole (small)
+    // body is already in memory by the time `res.text()` resolves. Still
+    // charged so the shared budget accounts for it, just not able to stop
+    // mid-read the way the streamed path below can.
+    chargeBytesOrThrow(budget, Buffer.byteLength(text, "utf8"), budgetContext ?? url);
     return text;
   }
 
@@ -378,6 +417,12 @@ async function readBodyCapped(
           await reader.cancel().catch(() => {});
           throw new ResponseTooLargeError(url, maxBytes);
         }
+        try {
+          chargeBytesOrThrow(budget, value.byteLength, budgetContext ?? url);
+        } catch (err) {
+          await reader.cancel().catch(() => {});
+          throw err;
+        }
         chunks.push(value);
       }
     }
@@ -398,6 +443,7 @@ interface FinalResponse {
   callerSignal: AbortSignal | undefined;
   maxResponseBytes: number;
   timeoutMs: number;
+  budget: DiscoveryBudgetState | undefined;
 }
 
 /**
@@ -409,10 +455,48 @@ interface FinalResponse {
  * one place where the safety properties documented at the top of this
  * file are enforced.
  */
+/**
+ * Milliseconds left before `budget`'s deadline, or `undefined` if there is
+ * no budget. May be negative (deadline already passed).
+ */
+function remainingDeadlineMs(budget: DiscoveryBudgetState | undefined): number | undefined {
+  if (!budget) return undefined;
+  return budget.deadlineMs - (Date.now() - budget.startedAt);
+}
+
+/**
+ * Throws `AadpDiscoveryBudgetExceededError` if `budget`'s deadline has
+ * already passed. A no-op when there's no budget.
+ */
+function assertWithinDeadline(budget: DiscoveryBudgetState | undefined, context: string): void {
+  const remaining = remainingDeadlineMs(budget);
+  if (remaining !== undefined && remaining <= 0) {
+    throw new AadpDiscoveryBudgetExceededError(`${context} exceeded its deadline of ${budget!.deadlineMs}ms`);
+  }
+}
+
+/**
+ * A retry's backoff delay must not, by itself, push the run past its shared
+ * deadline (ADR-0006: "a retry that would exceed the remaining budget/
+ * deadline fails immediately ... instead of attempting the request"). This
+ * throws instead of sleeping when `delayMs` alone would exceed however much
+ * deadline is left — the retry never even starts a new attempt, let alone
+ * sends a request, once that's true.
+ */
+function assertRetryFitsDeadline(budget: DiscoveryBudgetState | undefined, delayMs: number, context: string): void {
+  const remaining = remainingDeadlineMs(budget);
+  if (remaining !== undefined && (remaining <= 0 || delayMs >= remaining)) {
+    throw new AadpDiscoveryBudgetExceededError(
+      `${context} would exceed its deadline of ${budget!.deadlineMs}ms if it retried again`
+    );
+  }
+}
+
 async function requestWithPolicy<T>(
   url: string,
   options: FetchJsonOptions,
-  handle: (final: FinalResponse) => Promise<T>
+  handle: (final: FinalResponse) => Promise<T>,
+  budget?: DiscoveryBudgetState
 ): Promise<T> {
   const policy = options.urlPolicy ?? DEFAULT_STRICT_POLICY;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -453,6 +537,12 @@ async function requestWithPolicy<T>(
         if (callerAborted(callerSignal)) {
           throw new AbortedError(current.toString(), callerSignal!.reason);
         }
+        // Checked on every hop, not just before a retry's backoff sleep: an
+        // attempt that itself runs long (close to `timeoutMs`) can still
+        // exhaust the shared deadline between hops, and a retry must never
+        // start a fresh attempt once the deadline is already gone even if
+        // no backoff delay is involved (attempt 1 of a fresh retry cycle).
+        assertWithinDeadline(budget, `request to ${current.toString()}`);
         assertAllowed(current, policy);
 
         const controller = new AbortController();
@@ -505,9 +595,13 @@ async function requestWithPolicy<T>(
 
           if (retry && attempt < maxAttempts && isRetryableStatus(res.status)) {
             const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"), maxDelayMs);
+            const delayMs = retryAfterMs ?? computeBackoffDelayMs(attempt, baseDelayMs, maxDelayMs);
+            // Checked BEFORE draining/sleeping: a retry whose delay alone
+            // would exceed the remaining deadline fails immediately instead
+            // of sleeping and then attempting anyway.
+            assertRetryFitsDeadline(budget, delayMs, `request to ${current.toString()}`);
             await res.body?.cancel().catch(() => {});
             clearTimeout(timer);
-            const delayMs = retryAfterMs ?? computeBackoffDelayMs(attempt, baseDelayMs, maxDelayMs);
             try {
               await sleepRespectingAbort(delayMs, callerSignal);
             } catch (err) {
@@ -524,6 +618,7 @@ async function requestWithPolicy<T>(
             callerSignal,
             maxResponseBytes,
             timeoutMs,
+            budget,
           });
         } finally {
           clearTimeout(timer);
@@ -532,6 +627,7 @@ async function requestWithPolicy<T>(
     } catch (err) {
       if (retry && attempt < maxAttempts && isRetryableError(err)) {
         const delayMs = computeBackoffDelayMs(attempt, baseDelayMs, maxDelayMs);
+        assertRetryFitsDeadline(budget, delayMs, `request to ${current.toString()}`);
         try {
           await sleepRespectingAbort(delayMs, callerSignal);
         } catch (sleepErr) {
@@ -548,7 +644,14 @@ async function requestWithPolicy<T>(
 /** Reads the body with the size cap, mapping an abort to `TimeoutError`. */
 async function readBodyOrTimeout(final: FinalResponse): Promise<string> {
   try {
-    return await readBodyCapped(final.res, final.finalUrl, final.maxResponseBytes, final.signal);
+    return await readBodyCapped(
+      final.res,
+      final.finalUrl,
+      final.maxResponseBytes,
+      final.signal,
+      final.budget,
+      `request to ${final.finalUrl}`
+    );
   } catch (err) {
     if (callerAborted(final.callerSignal)) throw new AbortedError(final.finalUrl, final.callerSignal!.reason);
     if (isAbortError(err)) {
@@ -570,36 +673,52 @@ async function readBodyOrTimeout(final: FinalResponse): Promise<string> {
  * under the size cap so `bodyBytes` can prove the response really was
  * empty, as RFC 9110 §15.4.5 requires.
  */
-export async function fetchJson(url: string, options: FetchJsonOptions = {}): Promise<FetchJsonResult> {
-  return requestWithPolicy(url, options, async (final) => {
-    const contentType = final.res.headers.get("content-type");
-    const raw = await readBodyOrTimeout(final);
-    const bodyBytes = Buffer.byteLength(raw, "utf8");
+export async function fetchJson(
+  url: string,
+  options: FetchJsonOptions = {},
+  budget?: DiscoveryBudgetState
+): Promise<FetchJsonResult> {
+  return requestWithPolicy(
+    url,
+    options,
+    async (final) => {
+      const contentType = final.res.headers.get("content-type");
+      const raw = await readBodyOrTimeout(final);
+      const bodyBytes = Buffer.byteLength(raw, "utf8");
 
-    if (final.res.status === 304) {
+      if (final.res.status === 304) {
+        return {
+          status: 304,
+          contentType,
+          data: undefined,
+          headers: final.res.headers,
+          bodyBytes,
+          url: final.finalUrl,
+        };
+      }
+
+      if (!isJsonContentType(contentType)) {
+        throw new InvalidContentTypeError(final.finalUrl, contentType);
+      }
+
+      let data: unknown;
+      try {
+        data = JSON.parse(raw);
+      } catch (err) {
+        throw new MalformedJsonError(final.finalUrl, err);
+      }
+
       return {
-        status: 304,
+        status: final.res.status,
         contentType,
-        data: undefined,
+        data,
         headers: final.res.headers,
         bodyBytes,
         url: final.finalUrl,
       };
-    }
-
-    if (!isJsonContentType(contentType)) {
-      throw new InvalidContentTypeError(final.finalUrl, contentType);
-    }
-
-    let data: unknown;
-    try {
-      data = JSON.parse(raw);
-    } catch (err) {
-      throw new MalformedJsonError(final.finalUrl, err);
-    }
-
-    return { status: final.res.status, contentType, data, headers: final.res.headers, bodyBytes, url: final.finalUrl };
-  });
+    },
+    budget
+  );
 }
 
 /**
@@ -611,19 +730,28 @@ export async function fetchJson(url: string, options: FetchJsonOptions = {}): Pr
  * AADP documents — a dead-link check must not report `text/html` as a
  * failure.
  */
-export async function probeUrl(url: string, options: FetchJsonOptions = {}): Promise<ProbeResult> {
-  return requestWithPolicy(url, options, async (final) => {
-    // Read (and discard) under the cap rather than leaving the socket
-    // holding an unbounded body: same resource bound as fetchJson.
-    await readBodyOrTimeout(final).catch((err) => {
-      if (err instanceof ResponseTooLargeError) return "";
-      throw err;
-    });
-    return {
-      status: final.res.status,
-      contentType: final.res.headers.get("content-type"),
-      headers: final.res.headers,
-      url: final.finalUrl,
-    };
-  });
+export async function probeUrl(
+  url: string,
+  options: FetchJsonOptions = {},
+  budget?: DiscoveryBudgetState
+): Promise<ProbeResult> {
+  return requestWithPolicy(
+    url,
+    options,
+    async (final) => {
+      // Read (and discard) under the cap rather than leaving the socket
+      // holding an unbounded body: same resource bound as fetchJson.
+      await readBodyOrTimeout(final).catch((err) => {
+        if (err instanceof ResponseTooLargeError) return "";
+        throw err;
+      });
+      return {
+        status: final.res.status,
+        contentType: final.res.headers.get("content-type"),
+        headers: final.res.headers,
+        url: final.finalUrl,
+      };
+    },
+    budget
+  );
 }
