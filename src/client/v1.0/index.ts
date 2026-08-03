@@ -51,6 +51,7 @@ export {
   InvalidContentTypeError,
   MalformedJsonError,
   InvalidOptionError,
+  type RetryOptions,
 } from "../http.js";
 export { AadpRequestError, type AadpErrorEnvelope } from "../errors.js";
 export { UnsupportedAadpVersionError } from "../../validator/index.js";

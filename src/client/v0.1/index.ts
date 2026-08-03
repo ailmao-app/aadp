@@ -50,6 +50,7 @@ export {
   InvalidContentTypeError,
   MalformedJsonError,
   InvalidOptionError,
+  type RetryOptions,
 } from "../http.js";
 export {
   AadpSchemaValidationError,

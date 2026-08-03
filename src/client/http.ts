@@ -47,6 +47,29 @@ export interface FetchJsonOptions {
    * unchanged, so behavior matches every release before 1.1.0.
    */
   signal?: AbortSignal;
+  /**
+   * Opt-in retry/backoff (ADR-0006). Omitting `retry` entirely disables it
+   * — identical to every release before 1.1.0, which never retries
+   * anything. Retries only a fixed, defined set of transient outcomes: a
+   * network/connect-level error, this module's own per-hop `timeoutMs`, and
+   * HTTP `429`/`503`. Never retries any other 4xx, a `BlockedUrlError`, an
+   * `AbortedError`, or a request that would exceed a shared traversal
+   * budget/deadline. See `RetryOptions`.
+   */
+  retry?: RetryOptions;
+}
+
+export interface RetryOptions {
+  /** Maximum attempts, including the first. Default 3 when `retry` is present but this is omitted. Must be >= 1. */
+  maxAttempts?: number;
+  /** Base delay for exponential-backoff-with-full-jitter, in ms. Default 500. */
+  baseDelayMs?: number;
+  /**
+   * Upper bound on any single backoff delay, in ms — including one derived
+   * from a `Retry-After` response header, so a publisher-supplied value
+   * cannot stall a run indefinitely. Default 10000.
+   */
+  maxDelayMs?: number;
 }
 
 export interface FetchJsonResult {
@@ -77,6 +100,10 @@ export interface ProbeResult {
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_REDIRECTS = 5;
 const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const DEFAULT_RETRY_MAX_ATTEMPTS = 3;
+const DEFAULT_RETRY_BASE_DELAY_MS = 500;
+const DEFAULT_RETRY_MAX_DELAY_MS = 10_000;
+const RETRYABLE_STATUS_CODES = new Set([429, 503]);
 
 /**
  * Shared default strict policy: `fetchJson` uses this whenever a caller
@@ -174,6 +201,78 @@ function isAbortError(err: unknown): boolean {
 
 function callerAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted ?? false;
+}
+
+/**
+ * Whitelist, not a blacklist (ADR-0006): retry only fires for a fixed,
+ * defined set of transient outcomes. `TimeoutError` is this module's own
+ * per-hop timeout; anything that is not one of this module's named
+ * `AadpClientError` subclasses and not a `BlockedUrlError` is presumed a
+ * raw, unclassified network/connect-level failure (e.g. `ECONNREFUSED`/
+ * `ECONNRESET` surfacing from `fetch()`) — also transient. Every other
+ * named error (a real client error like `MalformedJsonError`, or a
+ * security-relevant block like `BlockedUrlError`/`AbortedError`) is never
+ * retried: retrying would not fix a malformed response, and retrying a
+ * security block or a caller's own cancellation is never correct.
+ */
+function isRetryableError(err: unknown): boolean {
+  if (err instanceof TimeoutError) return true;
+  if (err instanceof AbortedError) return false;
+  if (err instanceof BlockedUrlError) return false;
+  if (err instanceof AadpClientError) return false;
+  return true;
+}
+
+function isRetryableStatus(status: number): boolean {
+  return RETRYABLE_STATUS_CODES.has(status);
+}
+
+/** Exponential backoff with full jitter: a uniform random delay in `[0, cappedDelay]`. */
+function computeBackoffDelayMs(attempt: number, baseDelayMs: number, maxDelayMs: number): number {
+  const capped = Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs);
+  return Math.random() * capped;
+}
+
+/**
+ * A `Retry-After` value (seconds, or an HTTP-date per RFC 9110 §10.2.3),
+ * capped at `maxDelayMs` so a publisher-supplied value cannot stall a run
+ * indefinitely. Returns `undefined` for a missing or unparseable header —
+ * the caller falls back to the computed exponential backoff instead.
+ */
+function parseRetryAfterMs(value: string | null, maxDelayMs: number): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, maxDelayMs);
+  const dateMs = Date.parse(value);
+  if (!Number.isNaN(dateMs)) return Math.min(Math.max(dateMs - Date.now(), 0), maxDelayMs);
+  return undefined;
+}
+
+/**
+ * Waits `ms`, rejecting early (with a plain `AbortError`-named `Error`, left
+ * for the caller to map to `AbortedError`) if `signal` aborts first — a
+ * pending retry backoff timer is itself cancellable, per ADR-0006.
+ */
+function sleepRespectingAbort(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const onAbort = () => {
+      clearTimeout(timer);
+      const abortErr = new Error("Retry backoff aborted");
+      abortErr.name = "AbortError";
+      reject(abortErr);
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort);
+  });
 }
 
 /**
@@ -326,74 +425,122 @@ async function requestWithPolicy<T>(
   const dispatcher = dispatcherFor(policy);
   const callerSignal = options.signal;
 
-  let current = new URL(url);
-  const originalUrl = url;
-  let headers = options.headers;
+  // Retry disabled (the default) is exactly `maxAttempts: 1` — one attempt,
+  // no backoff — so the loop below has no special-cased "no retry" branch.
+  // The raw caller-supplied value (not a `Math.max`-clamped one) is what
+  // gets validated, so an invalid `maxAttempts: 0` throws instead of being
+  // silently clamped up to a valid `1`.
+  const retry = options.retry;
+  const maxAttempts = retry ? (retry.maxAttempts ?? DEFAULT_RETRY_MAX_ATTEMPTS) : 1;
+  const baseDelayMs = retry?.baseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+  const maxDelayMs = retry?.maxDelayMs ?? DEFAULT_RETRY_MAX_DELAY_MS;
+  if (retry) {
+    assertValidNumberOption("retry.maxAttempts", maxAttempts, 1);
+    assertValidNumberOption("retry.baseDelayMs", baseDelayMs, 0);
+    assertValidNumberOption("retry.maxDelayMs", maxDelayMs, 0);
+  }
 
-  for (let hop = 0; ; hop++) {
-    if (callerAborted(callerSignal)) {
-      throw new AbortedError(current.toString(), callerSignal!.reason);
-    }
-    assertAllowed(current, policy);
+  attempts: for (let attempt = 1; ; attempt++) {
+    // Every attempt restarts from the original URL/headers — a retry is a
+    // brand new request, not a resumed one; a redirect chain from a
+    // previous attempt has no bearing on this one.
+    let current = new URL(url);
+    const originalUrl = url;
+    let headers = options.headers;
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    // Caller cancellation and this hop's own timeout share one signal:
-    // whichever fires first aborts `fetch()`/the body read, and the catch
-    // below tells them apart by re-checking `callerSignal.aborted`.
-    const combinedSignal = callerSignal ? AbortSignal.any([callerSignal, controller.signal]) : controller.signal;
     try {
-      let res: Response;
-      try {
-        res = await fetch(current.toString(), {
-          redirect: "manual",
-          headers,
-          signal: combinedSignal,
-          ...(dispatcher ? { dispatcher } : {}),
-        } as RequestInit);
-      } catch (err) {
-        // Checked before `isAbortError(err)`: when `AbortController.abort(reason)`
-        // is called with a non-undefined `reason`, a spec-compliant `fetch()`
-        // rejects with that `reason` value directly — which may not even be
-        // an `Error` (a caller can pass any value, e.g. a plain string) — not
-        // a generic named `AbortError`. Checking the signal's own `.aborted`
-        // flag first catches that case regardless of what shape the
-        // rejection took.
-        if (callerAborted(callerSignal)) throw new AbortedError(current.toString(), callerSignal!.reason);
-        if (isAbortError(err)) {
-          throw new TimeoutError(current.toString(), timeoutMs);
+      for (let hop = 0; ; hop++) {
+        if (callerAborted(callerSignal)) {
+          throw new AbortedError(current.toString(), callerSignal!.reason);
         }
-        throw unwrapBlockedUrlError(err);
-      }
+        assertAllowed(current, policy);
 
-      const isRedirect = res.status >= 300 && res.status < 400 && res.headers.has("location");
-      if (isRedirect) {
-        // Drain the (typically empty) redirect body to release the socket.
-        await res.body?.cancel().catch(() => {});
-        // `hop` counts redirects already followed, so this one is number
-        // `hop + 1`: `maxRedirects: 1` follows exactly one redirect and
-        // rejects the second, and only `0` refuses the first.
-        if (hop + 1 > maxRedirects) {
-          throw new TooManyRedirectsError(originalUrl, maxRedirects);
-        }
-        const next = new URL(res.headers.get("location")!, current);
-        if (next.origin !== current.origin) {
-          headers = restrictToCrossOriginSafe(headers, safeNames);
-        }
-        current = next;
-        continue;
-      }
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        // Caller cancellation and this hop's own timeout share one signal:
+        // whichever fires first aborts `fetch()`/the body read, and the
+        // catch below tells them apart by re-checking `callerSignal.aborted`.
+        const combinedSignal = callerSignal ? AbortSignal.any([callerSignal, controller.signal]) : controller.signal;
+        try {
+          let res: Response;
+          try {
+            res = await fetch(current.toString(), {
+              redirect: "manual",
+              headers,
+              signal: combinedSignal,
+              ...(dispatcher ? { dispatcher } : {}),
+            } as RequestInit);
+          } catch (err) {
+            // Checked before `isAbortError(err)`: when `AbortController.abort(reason)`
+            // is called with a non-undefined `reason`, a spec-compliant `fetch()`
+            // rejects with that `reason` value directly — which may not even be
+            // an `Error` (a caller can pass any value, e.g. a plain string) — not
+            // a generic named `AbortError`. Checking the signal's own `.aborted`
+            // flag first catches that case regardless of what shape the
+            // rejection took.
+            if (callerAborted(callerSignal)) throw new AbortedError(current.toString(), callerSignal!.reason);
+            if (isAbortError(err)) {
+              throw new TimeoutError(current.toString(), timeoutMs);
+            }
+            throw unwrapBlockedUrlError(err);
+          }
 
-      return await handle({
-        res,
-        finalUrl: current.toString(),
-        signal: combinedSignal,
-        callerSignal,
-        maxResponseBytes,
-        timeoutMs,
-      });
-    } finally {
-      clearTimeout(timer);
+          const isRedirect = res.status >= 300 && res.status < 400 && res.headers.has("location");
+          if (isRedirect) {
+            // Drain the (typically empty) redirect body to release the socket.
+            await res.body?.cancel().catch(() => {});
+            // `hop` counts redirects already followed, so this one is number
+            // `hop + 1`: `maxRedirects: 1` follows exactly one redirect and
+            // rejects the second, and only `0` refuses the first.
+            if (hop + 1 > maxRedirects) {
+              throw new TooManyRedirectsError(originalUrl, maxRedirects);
+            }
+            const next = new URL(res.headers.get("location")!, current);
+            if (next.origin !== current.origin) {
+              headers = restrictToCrossOriginSafe(headers, safeNames);
+            }
+            current = next;
+            continue;
+          }
+
+          if (retry && attempt < maxAttempts && isRetryableStatus(res.status)) {
+            const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"), maxDelayMs);
+            await res.body?.cancel().catch(() => {});
+            clearTimeout(timer);
+            const delayMs = retryAfterMs ?? computeBackoffDelayMs(attempt, baseDelayMs, maxDelayMs);
+            try {
+              await sleepRespectingAbort(delayMs, callerSignal);
+            } catch (err) {
+              if (callerAborted(callerSignal)) throw new AbortedError(current.toString(), callerSignal!.reason);
+              throw err;
+            }
+            continue attempts;
+          }
+
+          return await handle({
+            res,
+            finalUrl: current.toString(),
+            signal: combinedSignal,
+            callerSignal,
+            maxResponseBytes,
+            timeoutMs,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+    } catch (err) {
+      if (retry && attempt < maxAttempts && isRetryableError(err)) {
+        const delayMs = computeBackoffDelayMs(attempt, baseDelayMs, maxDelayMs);
+        try {
+          await sleepRespectingAbort(delayMs, callerSignal);
+        } catch (sleepErr) {
+          if (callerAborted(callerSignal)) throw new AbortedError(current.toString(), callerSignal!.reason);
+          throw sleepErr;
+        }
+        continue attempts;
+      }
+      throw err;
     }
   }
 }

@@ -7,6 +7,7 @@
  * `aadp-conformance` CLI in someone else's CI.
  */
 import type { UrlPolicy } from "../client/url-policy.js";
+import type { RetryOptions } from "../client/http.js";
 
 /** Protocol versions this runner knows how to exercise over HTTP. */
 export const SUPPORTED_CONFORMANCE_VERSIONS = ["1.0"] as const;
@@ -164,6 +165,12 @@ export interface ConformanceOptions {
    * matches every release before 1.1.0.
    */
   signal?: AbortSignal;
+  /**
+   * Opt-in retry/backoff for every request this run makes (ADR-0006). See
+   * `RetryOptions` (`ail-aadp/client`). Omitting `retry` disables it
+   * entirely — identical to every release before 1.1.0.
+   */
+  retry?: RetryOptions;
 }
 
 /**

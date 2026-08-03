@@ -22,6 +22,7 @@ import {
   MalformedJsonError,
   InvalidOptionError,
   createPermissiveUrlPolicy,
+  AadpRequestError,
   type ClientOptions,
 } from "../../src/client/v1.0/index.js";
 import { checksumOf } from "../../src/canonical-json/checksum.js";
@@ -365,6 +366,24 @@ describe("invalid numeric options", () => {
       discover("https://example.com", { ...PERMISSIVE, maxResponseBytes: 10.5 })
     ).rejects.toThrow(InvalidOptionError);
   });
+
+  it("throws InvalidOptionError for an invalid retry.maxAttempts before making any request", async () => {
+    await expect(
+      discover("https://example.com", { ...PERMISSIVE, retry: { maxAttempts: 0 } })
+    ).rejects.toThrow(InvalidOptionError);
+  });
+
+  it("throws InvalidOptionError for a non-integer retry.baseDelayMs", async () => {
+    await expect(
+      discover("https://example.com", { ...PERMISSIVE, retry: { baseDelayMs: 1.5 } })
+    ).rejects.toThrow(InvalidOptionError);
+  });
+
+  it("throws InvalidOptionError for a negative retry.maxDelayMs", async () => {
+    await expect(
+      discover("https://example.com", { ...PERMISSIVE, retry: { maxDelayMs: -1 } })
+    ).rejects.toThrow(InvalidOptionError);
+  });
 });
 
 describe("timeout", () => {
@@ -454,6 +473,149 @@ describe("cancellation (options.signal)", () => {
 
     expect(seen).toEqual([ENTITIES[0].id]);
     expect(server.requestLog.filter((p) => p.startsWith("/ai/v1.0/entities/"))).toHaveLength(1);
+  });
+});
+
+function errorEnvelope(code: string, message: string) {
+  return { error: { code, message, request_id: "req_retry_test" } };
+}
+
+describe("retry (options.retry)", () => {
+  it("does not retry anything when retry is omitted (default, matches every release before 1.1.0)", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        return sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const err = await discover(server.baseUrl, PERMISSIVE).catch((e) => e);
+    expect(err).toBeInstanceOf(AadpRequestError);
+    expect((err as AadpRequestError).status).toBe(503);
+    expect(attempts).toBe(1);
+  });
+
+  it("retries a 503 up to maxAttempts and succeeds once the server recovers", async () => {
+    let attempts = 0;
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        if (attempts < 3) {
+          return sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
+        }
+        return sendJson(res, 200, buildManifest(req.headers.host!));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const manifest = await discover(server.baseUrl, {
+      ...PERMISSIVE,
+      retry: { maxAttempts: 5, baseDelayMs: 1, maxDelayMs: 5 },
+    });
+    expect(manifest.aadp_version).toBe("1.0");
+    expect(attempts).toBe(3);
+  });
+
+  it("gives up after maxAttempts and surfaces the last response", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        return sendJson(res, 429, errorEnvelope("rate_limited", "too many requests"));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const err = await discover(server.baseUrl, {
+      ...PERMISSIVE,
+      retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 5 },
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(AadpRequestError);
+    expect((err as AadpRequestError).status).toBe(429);
+    expect(attempts).toBe(3);
+  });
+
+  it("never retries a non-retryable 4xx", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        return sendJson(res, 400, errorEnvelope("invalid_request", "bad request"));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const err = await discover(server.baseUrl, {
+      ...PERMISSIVE,
+      retry: { maxAttempts: 5, baseDelayMs: 1, maxDelayMs: 5 },
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(AadpRequestError);
+    expect((err as AadpRequestError).status).toBe(400);
+    expect(attempts).toBe(1);
+  });
+
+  it("never retries a blocked private-network URL", async () => {
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(req.headers.host!));
+      sendJson(res, 404, {});
+    });
+
+    // No urlPolicy override: strict default blocks this loopback origin.
+    await expect(
+      discover(server.baseUrl, { retry: { maxAttempts: 5, baseDelayMs: 1, maxDelayMs: 5 } })
+    ).rejects.toThrow(BlockedUrlError);
+    expect(server.requestLog).toEqual([]);
+  });
+
+  it("honors a numeric Retry-After header, capped at maxDelayMs", async () => {
+    let attempts = 0;
+    const timestamps: number[] = [];
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        timestamps.push(Date.now());
+        if (attempts === 1) {
+          res.writeHead(503, { "Content-Type": "application/json", "Retry-After": "10" });
+          return res.end(JSON.stringify(errorEnvelope("upstream_unavailable", "busy")));
+        }
+        return sendJson(res, 200, buildManifest(req.headers.host!));
+      }
+      sendJson(res, 404, {});
+    });
+
+    await discover(server.baseUrl, {
+      ...PERMISSIVE,
+      // maxDelayMs (50ms) caps the 10-second Retry-After down to something
+      // this test can actually wait out.
+      retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 50 },
+    });
+    expect(attempts).toBe(2);
+    expect(timestamps[1] - timestamps[0]).toBeGreaterThanOrEqual(45);
+  });
+
+  it("stops retrying immediately when the caller's signal aborts during backoff", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        return sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const controller = new AbortController();
+    setTimeout(() => controller.abort("giving up"), 10);
+
+    await expect(
+      discover(server.baseUrl, {
+        ...PERMISSIVE,
+        signal: controller.signal,
+        retry: { maxAttempts: 10, baseDelayMs: 1000, maxDelayMs: 1000 },
+      })
+    ).rejects.toThrow(AbortedError);
+    expect(attempts).toBe(1);
   });
 });
 

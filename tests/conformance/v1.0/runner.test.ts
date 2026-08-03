@@ -590,6 +590,37 @@ describe("conditional GET is checked in both validator forms", () => {
   });
 });
 
+describe("retry (options.retry)", () => {
+  it("is forwarded to every request the runner makes: a transient 503 is retried and manifest.http passes", async () => {
+    let attempts = 0;
+    const tiny = await startTinyServer((path) => {
+      if (path === "/.well-known/ai-manifest.json") {
+        attempts++;
+        if (attempts === 1) {
+          return {
+            status: 503,
+            body: JSON.stringify({ error: { code: "upstream_unavailable", message: "busy", request_id: "r" } }),
+          };
+        }
+        return { status: 200, body: JSON.stringify({ aadp_version: "1.0" }) };
+      }
+      return { status: 404, body: "{}" };
+    });
+
+    try {
+      const report = await runConformance({
+        baseUrl: tiny.baseUrl,
+        urlPolicy: createPermissiveUrlPolicy(),
+        retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 5 },
+      });
+      expect(byId(report, "manifest.http").status).toBe("passed");
+      expect(attempts).toBe(2);
+    } finally {
+      await tiny.close();
+    }
+  });
+});
+
 describe("URL policy", () => {
   it("blocks a loopback deployment by default, so an SSRF-unsafe run cannot silently pass", async () => {
     const report = await runConformance({ baseUrl: server.baseUrl });

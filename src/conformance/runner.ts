@@ -171,6 +171,7 @@ export async function runConformance(options: ConformanceOptions): Promise<Confo
     ...(options.headers ? { headers: options.headers } : {}),
     ...(options.crossOriginSafeHeaders ? { crossOriginSafeHeaders: options.crossOriginSafeHeaders } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.retry ? { retry: options.retry } : {}),
   };
 
   // Caller-configured headers may be a credential for the deployment
