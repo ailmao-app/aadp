@@ -1,8 +1,9 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync, symlinkSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { inject } from "vitest";
 
 /**
  * Shared clean-install fixture for every "does the published tarball
@@ -30,13 +31,25 @@ function run(command: string, args: string[], cwd: string): string {
   return execFileSync(command, args, { cwd, encoding: "utf8", shell: true, stdio: ["ignore", "pipe", "pipe"] });
 }
 
-/** Builds `dist/`, packs the tarball, and extracts it. Call once per suite in `beforeAll`. */
+/**
+ * Extracts a copy of the tarball built once for the whole run (see
+ * `global-setup.ts`) into its own throwaway directory. Call once per suite
+ * in `beforeAll`.
+ *
+ * The build+pack itself does NOT happen here anymore: it used to, and since
+ * Vitest runs test files in parallel workers, one file's `npm run build`
+ * could rewrite `dist/**` mid-read of another file's concurrent `npm pack`
+ * against the same shared `repoRoot`, an intermittent `npm error code EOF`
+ * (CI, 2026-08-03). `global-setup.ts` now builds/packs exactly once, before
+ * any worker starts, and hands every worker the resulting `.tgz` path
+ * through `provide()`/`inject()` — this function only ever copies and
+ * extracts that already-built artifact, so no two workers can race on it.
+ */
 export function packAndExtractTarball(): PackedTarball {
-  run("npm", ["run", "build"], repoRoot);
+  const sharedTarballPath = inject("sharedTarballPath");
   const workDir = mkdtempSync(path.join(tmpdir(), "aadp-pkg-"));
-  run("npm", ["pack", "--pack-destination", JSON.stringify(workDir)], repoRoot);
-  const tarball = readdirSync(workDir).find((entry) => entry.endsWith(".tgz"));
-  if (!tarball) throw new Error(`npm pack produced no tarball in ${workDir}`);
+  const tarball = path.basename(sharedTarballPath);
+  copyFileSync(sharedTarballPath, path.join(workDir, tarball));
   // Relative name, extracted from `workDir`: a Windows absolute path
   // (`C:\...`) makes GNU tar read the drive letter as a remote host.
   run("tar", ["-xzf", tarball], workDir);
