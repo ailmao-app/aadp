@@ -113,13 +113,29 @@ export interface JUnitReportOptions {
   failOnWarning?: boolean;
 }
 
+// XML 1.0 §2.2 forbids these code points in content even as a character
+// reference (there is no valid escape for them); a server-supplied string
+// (entity id/type, header value, ...) can legally contain one after
+// passing JSON/canonical-JSON validation, so it must be neutralized here
+// rather than passed through, or the emitted report is not well-formed XML.
+const XML_INVALID_CHAR = new RegExp(
+  "[" +
+    String.fromCharCode(0x00) + "-" + String.fromCharCode(0x08) +
+    String.fromCharCode(0x0b) + "-" + String.fromCharCode(0x0c) +
+    String.fromCharCode(0x0e) + "-" + String.fromCharCode(0x1f) +
+    String.fromCharCode(0xfffe) + "-" + String.fromCharCode(0xffff) +
+    "]",
+  "g"
+);
+
 function xmlEscape(value: string): string {
   return value
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
+    .replace(/'/g, "&apos;")
+    .replace(XML_INVALID_CHAR, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`);
 }
 
 /**
