@@ -26,6 +26,7 @@ import {
   type DiscoveryBudget,
   type DiscoveryBudgetState,
 } from "../discovery-budget.js";
+import { mapConcurrent } from "../scheduler.js";
 import { checkManifestSemantics, hasSemanticErrors, type SemanticIssue } from "../../validator/index.js";
 import type {
   ManifestV1,
@@ -186,6 +187,15 @@ export async function fetchEntity<T = unknown>(
 export interface DiscoveryLimits extends DiscoveryBudget {
   /** Maximum sitemaps traversed across the whole walk. Default 1000. */
   maxSitemaps?: number;
+  /**
+   * Maximum entity fetches in flight at once within a single sitemap
+   * (ADR-0006). Default `1` — fully serial, identical request ordering
+   * and timing to every release before 1.1.0. Opt in to a value `> 1` to
+   * fetch entities in parallel; entities are still yielded in the same
+   * order the sitemap listed them, regardless of which fetch finishes
+   * first. See `../scheduler.js`.
+   */
+  concurrency?: number;
 }
 
 export type DiscoverAllEntitiesOptions = ClientOptions & DiscoveryLimits;
@@ -229,13 +239,16 @@ export async function* discoverAllEntities(
     );
   }
 
+  const concurrency = options.concurrency ?? 1;
+
   for (const sitemapRef of index.sitemaps) {
     const sitemapOptions: IterateSitemapOptions = {
       ...scoped(sitemapRef.url),
       expectedType: sitemapRef.type,
       budget,
     };
-    for await (const item of iterateSitemap(sitemapRef.url, sitemapOptions)) {
+    const items = iterateSitemap(sitemapRef.url, sitemapOptions);
+    const fetchAndVerify = async (item: SitemapItemV1): Promise<EntityV1> => {
       chargeDiscoveryBudget(budget, "entity", "discoverAllEntities");
       const entity = await fetchEntity(item.url, scoped(item.url));
       if (entity.id !== item.id) {
@@ -253,6 +266,9 @@ export async function* discoverAllEntities(
           `Sitemap item checksum "${item.checksum}" for ${item.url} does not match fetched entity checksum "${entity.checksum}"`
         );
       }
+      return entity;
+    };
+    for await (const entity of mapConcurrent(items, fetchAndVerify, { concurrency })) {
       yield entity;
     }
   }

@@ -50,10 +50,18 @@ no new options.
 ### Concurrency
 
 - New optional `concurrency?: number` on `DiscoverAllEntitiesOptions`
-  (`src/client/v1.0/index.ts`) and `ConformanceOptions`, bounding how many
-  entity fetches (traversal's only currently-parallelizable step; sitemap
-  index → sitemap page fetching stays sequential since later pages are only
-  discovered from earlier ones) may be in flight at once.
+  (`src/client/v1.0/index.ts`) **only** — not on `ConformanceOptions`. The
+  conformance runner's `CHECKS` (`src/conformance/checks.ts`) never crawl
+  more than one entity: `traversal.entity` samples exactly the first entity
+  of the first sitemap, and `pagination.contract` walks sitemap *pages*
+  sequentially by necessity (each page's cursor is only known once the
+  previous page is fetched). There is no parallelizable step in the
+  conformance suite today, so a `concurrency` field on `ConformanceOptions`
+  would be dead API surface with no code path — it is intentionally left
+  off. Only the reference client's bulk `discoverAllEntities` walk has
+  independent per-entity fetches to bound.
+- `concurrency` bounds how many entity fetches (the only currently
+  parallelizable step in `discoverAllEntities`) may be in flight at once.
 - **Default is `1`** — fully serial, byte-for-byte the same request ordering
   and timing `1.0.x` produces. A caller who does not set `concurrency` sees
   zero behavior change; a publisher server sees no new traffic pattern from
@@ -111,22 +119,23 @@ no new options.
 ### Conformance profiles
 
 - A `ConformanceProfile` union type — `"core" | "public-web" |
-  "full-traversal" | "authenticated"` — is a **named preset of budget,
-  concurrency and retry defaults only**. It does not change which check IDs
-  run or add new checks; the existing `CHECKS` array and every currently
-  stable check `id` stay exactly as they are for every profile. This keeps
-  the feature additive without inventing new authenticated-resource check
-  semantics that no design doc has specified.
-- `core`: today's implicit defaults, unchanged (`concurrency: 1`, no retry,
-  today's `maxPages`/`maxEntities`/`maxSitemaps`/`deadlineMs` values) — an
-  explicit name for "what `1.0.x` already does."
+  "full-traversal" | "authenticated"` — is a **named preset of budget and
+  retry defaults only** (no `concurrency`: see "Concurrency" above — the
+  conformance runner has no parallelizable step for it to bound). It does
+  not change which check IDs run or add new checks; the existing `CHECKS`
+  array and every currently stable check `id` stay exactly as they are for
+  every profile. This keeps the feature additive without inventing new
+  authenticated-resource check semantics that no design doc has specified.
+- `core`: today's implicit defaults, unchanged (no retry, today's
+  `maxPages`/`maxEntities`/`maxSitemaps`/`deadlineMs` values) — an explicit
+  name for "what `1.0.x` already does."
   `public-web`: same as `core`; an explicit name for the common case of
   crawling a public, non-authenticated deployment (may diverge from `core`'s
   numbers in a later release without either name changing meaning
   retroactively; identical at introduction).
-  `full-traversal`: higher `maxPages`/`maxEntities`/`deadlineMs` and
-  `concurrency > 1`, for deliberately exhaustive/slow crawls where a
-  publisher has agreed to the traffic.
+  `full-traversal`: higher `maxPages`/`maxEntities`/`deadlineMs`, for
+  deliberately exhaustive/slow crawls where a publisher has agreed to the
+  traffic.
   `authenticated`: same numeric preset as `public-web`, plus documents the
   expectation that the caller supplies credentials via `headers`; carried in
   the JSON report's `profile` field so a CI job can tell which preset a run

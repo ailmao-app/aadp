@@ -176,6 +176,45 @@ describe("discoverAllEntities — happy path", () => {
     }
     expect(entities.map((e) => e.id)).toEqual(["example:sample-1", "example:sample-2"]);
   });
+
+  it("with concurrency > 1, still yields entities in sitemap order even when a later one answers first", async () => {
+    const items = [
+      { id: "example:c1", data: { n: 1 }, updatedAt: "2026-07-25T08:00:00Z", delayMs: 40 },
+      { id: "example:c2", data: { n: 2 }, updatedAt: "2026-07-25T08:00:01Z", delayMs: 5 },
+      { id: "example:c3", data: { n: 3 }, updatedAt: "2026-07-25T08:00:02Z", delayMs: 5 },
+    ];
+    server = await startServer((req, res, url) => {
+      const host = req.headers.host!;
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(host));
+      if (url.pathname === "/ai/v1.0/sitemap-index.json") return sendJson(res, 200, buildSitemapIndex(host));
+      if (url.pathname === "/ai/v1.0/sitemaps/example.json") {
+        const sitemapItems = items.map((item) => buildSitemapItem(host, item));
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          type: "example",
+          generated_at: "2026-07-25T09:30:00Z",
+          checksum: checksumOf(sitemapItems),
+          items: sitemapItems,
+          cursor: { next: null },
+        });
+      }
+      const entityMatch = url.pathname.match(/^\/ai\/v1\.0\/entities\/example\/(.+)\.json$/);
+      if (entityMatch) {
+        const item = items.find((e) => e.id === `example:${entityMatch[1]}`)!;
+        // Slower first item, faster later items: proves output order
+        // comes from the sitemap, not completion order.
+        setTimeout(() => sendJson(res, 200, buildEntity(host, item)), item.delayMs);
+        return;
+      }
+      sendJson(res, 404, { error: { code: "not_found", message: "no route", request_id: "req_1" } });
+    });
+
+    const entities = [];
+    for await (const entity of discoverAllEntities(server.baseUrl, { ...PERMISSIVE, concurrency: 3 })) {
+      entities.push(entity);
+    }
+    expect(entities.map((e) => e.id)).toEqual(["example:c1", "example:c2", "example:c3"]);
+  });
 });
 
 describe("unsupported version", () => {
