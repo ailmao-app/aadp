@@ -276,7 +276,28 @@ Tài liệu npm tham khảo:
 - [Trusted Publishing](https://docs.npmjs.com/trusted-publishers/)
 - [Provenance statements](https://docs.npmjs.com/generating-provenance-statements/)
 
-## 9. Checklist release
+## 9. Artifact retention
+
+Áp dụng cho hai loại artifact vận hành khác với artifact publish lên npm:
+
+- **Conformance report** do `.github/workflows/scheduled-conformance.yml` sinh
+  ra mỗi lần chạy theo lịch (JSON + JUnit, tên chứa package version, protocol
+  version và timestamp UTC — xem workflow để biết format chính xác). Lưu bằng
+  `actions/upload-artifact` với `retention-days: 90`. 90 ngày đủ để so sánh
+  giữa các release liên tiếp mà không giữ vô hạn; không cần production
+  credential để tái tạo vì server nguồn là `examples/reference-server` chạy
+  loopback ngay trong job.
+- **Release tarball** (`ail-aadp-<version>.tgz`) dùng để smoke test trước khi
+  `npm publish`. Không phải artifact CI; giữ cục bộ hoặc trong hệ thống lưu
+  trữ release nội bộ theo policy của dự án cho tới khi checksum đã được đối
+  chiếu với bản đã publish trên registry, sau đó có thể xóa — bản trên
+  registry mới là nguồn sự thật lâu dài.
+
+Không rút ngắn retention của conformance report xuống dưới khoảng cách giữa
+hai lần chạy theo lịch, nếu không một lần chạy fail có thể không còn artifact
+liền trước để so sánh regression.
+
+## 10. Checklist release
 
 - [ ] Version npm đúng và chưa tồn tại trên registry.
 - [ ] `CHANGELOG.md` đã cập nhật.

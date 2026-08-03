@@ -1,0 +1,98 @@
+name: Scheduled conformance
+
+# Production certification operations (docs/vi/plans/implementation-plan-v1.0.11.md
+# work package 1-2): runs `aadp-conformance` against a neutral reference
+# deployment on a schedule, independent of `ci.yml`'s per-push gate, so drift
+# between releases (a dependency update, a platform change) is caught even
+# when nothing in this repository changed. The deployment is
+# `examples/reference-server`, built from a tarball packed in this same run
+# and started as an ephemeral loopback-only process — never a shared or
+# production environment, so this workflow needs no credential/secret.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  reference-server-conformance:
+    runs-on: ubuntu-latest
+    # Release gate acceptance (implementation-plan-v1.0.11.md "Acceptance"):
+    # a scheduled run MUST have a timeout and MUST NOT use a production
+    # credential. There is nothing here to hang on other than the reference
+    # server itself, so a short bound is enough.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Pack tarball
+        run: |
+          set -eu
+          mkdir -p /tmp/scheduled-conformance-pack
+          npm pack --pack-destination /tmp/scheduled-conformance-pack
+
+      - name: Install reference server from the packed tarball
+        working-directory: examples/reference-server
+        run: npm install /tmp/scheduled-conformance-pack/ail-aadp-*.tgz
+
+      - name: Start reference server and run conformance
+        working-directory: examples/reference-server
+        run: |
+          set -eu
+          base_url="http://127.0.0.1:4173"
+
+          PORT=4173 AADP_BASE_URL="$base_url" node src/server.js &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          deadline=$((SECONDS + 30))
+          until curl -sf "$base_url/.well-known/ai-manifest.json" -o /dev/null; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "Reference server did not become ready within 30s" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          # Artifact naming carries package/protocol version and a UTC
+          # timestamp (work package 2) so a run can be told apart from any
+          # other without opening it first; the report body itself already
+          # repeats both (`report.runner.version`, `report.aadp_version`,
+          # `report.started_at`/`finished_at` — src/conformance/types.ts).
+          package_version="$(node -p "require('../../package.json').version")"
+          protocol_version="1.0"
+          timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          report_name="conformance-${package_version}-v${protocol_version}-${timestamp}"
+
+          mkdir -p ../../conformance-artifacts
+          echo "REPORT_NAME=${report_name}" >> "$GITHUB_ENV"
+
+          node ../../dist/conformance/cli.js "$base_url" \
+            --protocol-version "$protocol_version" \
+            --allow-private-network \
+            --unknown-entity-url "$base_url/ai/v1.0/entities/note/aadp-conformance-does-not-exist.json" \
+            --unknown-type-url "$base_url/ai/v1.0/sitemaps/aadp-conformance-unknown-type.json" \
+            --output "../../conformance-artifacts/${report_name}.json" \
+            --junit "../../conformance-artifacts/${report_name}.junit.xml"
+          # `aadp-conformance` exits non-zero for a failed run (1), a run
+          # that could not be performed (2), an unsupported protocol version
+          # (3), and an inconclusive run that left checks unfinished (4) —
+          # `set -eu` above turns every one of those into a failed job step,
+          # so an inconclusive/skipped outcome is never reported as green.
+
+      - name: Upload conformance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.REPORT_NAME || 'scheduled-conformance-report' }}
+          path: conformance-artifacts/
+          # Artifact-retention policy: docs/vi/operations/npm-release-guide.md §9.
+          retention-days: 90
+          if-no-files-found: warn
