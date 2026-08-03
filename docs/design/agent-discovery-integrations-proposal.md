@@ -17,10 +17,13 @@ agent-readiness scanner, project phải xử lý nhiều cơ chế chưa thuộc
 RFC 8288 Link header, `Accept: text/markdown`, RFC 9727 API Catalog, DNS-AID SVCB,
 WebMCP, MCP Server Card, OAuth/OIDC discovery và `auth.md`.
 
-Một số phần lặp lại giữa mọi AADP publisher và nên được đưa vào `ail-aadp`; các
-phần khác giải quyết vấn đề khác và phải tiếp tục nằm ngoài core. Memo này ghi rõ
-ranh giới đó, đồng thời dẫn tới các proposal chuyên sâu khi một mục cần thiết kế
-wire contract hoặc semantics mới.
+Một số phần lặp lại giữa mọi AADP publisher và có thể được đưa vào `ail-aadp`; các
+phần khác giải quyết vấn đề khác và phải tiếp tục nằm ngoài core. Đặc biệt,
+DNS-AID là lớp discovery/trust liền kề: DNS operator công bố record, authoritative
+DNS ký RRset bằng DNSSEC, còn client hoặc validating resolver xác minh trước khi
+chuyển endpoint hay descriptor đã khám phá cho AADP client. Memo này ghi rõ ranh
+giới đó, đồng thời dẫn tới các proposal chuyên sâu khi một mục cần thiết kế wire
+contract hoặc semantics mới.
 
 ## 1. Trạng thái của memo
 
@@ -43,6 +46,7 @@ Memo này:
 Memo này không:
 
 - biến AADP thành OpenAPI, OAuth/OIDC server hoặc MCP runtime;
+- biến AADP core/client thành DNS resolver, DNSSEC validator hoặc DNS-AID client;
 - yêu cầu publisher hỗ trợ mọi chuẩn mà scanner biết;
 - thay đổi schema v1.0 đã phát hành;
 - coi scanner score là protocol conformance.
@@ -96,36 +100,41 @@ Hướng callback cho publisher kiểm soát nội dung nhưng mở rộng publi
 hướng generic giảm code nhưng khó đảm bảo semantic và presentation ổn định. Cần
 design memo riêng trước khi chọn một trong hai.
 
-### 3.4 Manifest checksum được DNSSEC xác thực qua DNS-AID
-
-ADR-0001 dùng checksum `sha256:<hex>` trên canonical JSON như tín hiệu phát hiện
-tampering. Tuy nhiên checksum tự công bố cùng payload không xác thực được nguồn:
-một bên sửa payload cũng có thể tính và công bố checksum mới.
-
-AADP không có signing/key/JWS contract riêng và SHOULD ưu tiên một cơ chế đã được
-công bố thay vì tự phát minh PKI. DNS-AID draft có SvcParamKey `cap-sha256` cho
-base64url-encoded SHA-256 digest. Khi digest của manifest được đặt trong SVCB record
-dưới DNSSEC, resolver có DNSSEC validation có thể nhận assertion từ domain owner về
-checksum kỳ vọng.
-
-Package có thể khảo sát helper như `aadp.dnsAidCapChecksum()` để chuyển checksum
-manifest sang đúng base64url representation. Việc phát hành SVCB record vẫn thuộc
-DNS/infrastructure, không thuộc JS runtime.
-
-Do `cap-sha256` chưa được IANA đăng ký, Cloudflare có thể chỉ chấp nhận private-use
-numeric key như `key65281`. Giá trị này chỉ là ví dụ vận hành tạm thời, không phải
-allocation của AADP.
-
 ## 4. Các phần phải tiếp tục nằm ngoài AADP core
 
-### 4.1 DNS-AID SVCB record
+### 4.1 DNS-AID discovery, DNSSEC validation và descriptor digest
 
-Record `_index._agents.<domain>` thuộc registrar/DNS provider. Package có thể tạo
-giá trị/digest hỗ trợ, nhưng không nên tự mutate DNS hoặc sở hữu DNS lifecycle.
+DNS-AID và AADP giải quyết hai bài toán khác nhau. DNS-AID khám phá agent/service
+endpoint cùng metadata kết nối qua DNS; AADP khám phá, liệt kê và truy xuất dữ liệu
+ứng dụng read-only qua HTTP. Record `_index._agents.<domain>` thuộc registrar/DNS
+provider. Authoritative DNS tạo DNSSEC signature; client hoặc validating resolver
+xác minh signature và áp dụng trust policy. Không bên nào trong chuỗi này là trách
+nhiệm của AADP core/runtime.
+
+ADR-0001 chỉ định checksum `sha256:<hex>` cho `entity.data` và `sitemap.items` để
+cache, dedupe và phát hiện thay đổi. Checksum tự công bố cùng payload không phải chữ
+ký, không chứng minh nguồn và không định nghĩa checksum cho toàn bộ AADP manifest.
+Vì vậy `cap-sha256` của DNS-AID MUST NOT được gọi là "AADP manifest checksum" hoặc
+được suy ra từ checksum AADP hiện có mà không có integration profile riêng.
+
+Nếu một deployment muốn dùng AADP manifest làm DNS-AID capability descriptor, một
+profile/adapter độc lập phải chốt ít nhất:
+
+- locator, media type và AADP version được chấp nhận;
+- tập field được hash và canonicalization chính xác;
+- DNSSEC validation, redirect/origin và URL/SSRF policy phía client;
+- hành vi khi digest mismatch, record unsigned hoặc draft key không được hỗ trợ;
+- conformance vectors giữa DNS publisher, resolver và AADP consumer.
+
+Profile có thể phụ thuộc DNS-AID và AADP, nhưng `ail-aadp` MUST NOT phụ thuộc ngược
+lại. Không thêm `aadp.dnsAidCapChecksum()` vào public API. Nếu use case production
+và interoperability được chứng minh, implementation SHOULD nằm trong package như
+`aadp-dnsaid-profile` hoặc application adapter, với lifecycle/version riêng.
 
 Với `ailmao.com`, Cloudflare dashboard không chấp nhận unregistered SvcParamKey name
 và cần numeric `keyNNNNN` theo private-use range cho đến khi draft ổn định. Đây là
-runbook infrastructure, không phải AADP wire behavior.
+runbook infrastructure, không phải AADP wire behavior. `cap-sha256` và private-use
+numeric key vẫn là cơ chế draft/experimental, không phải allocation của AADP.
 
 ### 4.2 WebMCP
 
@@ -185,8 +194,9 @@ Agent-discovery integrations proposal (memo này)
 ├── helper/library candidates
 │   ├── Link header
 │   ├── RFC 9727 API Catalog
-│   ├── Markdown rendering
-│   └── DNS-AID checksum representation
+│   └── Markdown rendering
+├── external integration profile candidates
+│   └── DNS-AID resolver → descriptor verification → AADP client
 └── focused design proposals
     └── Content Site + public access discovery
 ```
@@ -197,11 +207,15 @@ MUST nằm ở proposal chuyên sâu, không được nhân đôi tại đây.
 
 ## 6. Hướng triển khai đề xuất
 
-1. Tách từng package helper candidate thành issue/design item có acceptance criteria.
+1. Tách từng AADP helper candidate thành issue/design item có acceptance criteria.
 2. Ưu tiên sửa semantics `security_schemes.type: "none"` trước khi thêm field mới.
 3. Mở ADR riêng cho application profile/default access.
-4. Không gộp DNS mutation, WebMCP runtime hoặc MCP server implementation vào core.
-5. Chỉ công bố adjacent discovery metadata khi capability thật đã deploy.
+4. Loại DNS-AID checksum helper khỏi roadmap/public API của `ail-aadp`.
+5. Chỉ mở DNS-AID integration profile khi có deployment thật, client-side DNSSEC
+   validation, canonical descriptor contract và cross-implementation vectors.
+6. Không gộp DNS mutation, DNSSEC resolver, WebMCP runtime hoặc MCP server
+   implementation vào core.
+7. Chỉ công bố adjacent discovery metadata khi capability thật đã deploy.
 
 ## 7. Housekeeping
 
@@ -212,7 +226,11 @@ maintenance task riêng, không nên gộp vào protocol proposal.
 ## 8. Security considerations
 
 - Helper MUST NOT tạo placeholder endpoint hoặc live credential.
-- DNS digest chỉ có giá trị xác thực nguồn khi resolver thực hiện DNSSEC validation.
+- DNSSEC xác thực RRset do domain owner công bố; nó không tự chứng minh nội dung
+  capability descriptor đúng sự thật hoặc agent sẽ hành xử đúng metadata.
+- Client phải fail closed hoặc báo trạng thái không xác minh được theo profile khi
+  DNSSEC validation/digest verification không hoàn tất; không âm thầm nâng self-hash
+  AADP thành authenticity signal.
 - Client vẫn phải áp dụng URL/redirect/SSRF policy cho mọi discovered URL.
 - Scanner score không phải security proof hoặc protocol conformance result.
 - Publisher không được biến protected resource thành public chỉ bằng metadata sai;
@@ -223,6 +241,7 @@ maintenance task riêng, không nên gộp vào protocol proposal.
 - Helper chỉ sinh representation từ contract hiện có có thể là package-level feature.
 - Field mới trong manifest cần protocol/schema version mới theo ADR-0004.
 - Schema v1.0 MUST NOT bị sửa để nhận application profile/default access mới.
+- DNS-AID integration profile phải version độc lập và không thay đổi AADP conformance.
 - Draft DNS-AID key hoặc MCP proposal MUST NOT được trình bày như chuẩn đã final.
 
 ## 10. IANA Considerations
@@ -243,6 +262,9 @@ Memo này không yêu cầu hành động IANA.
 ### Chuẩn ngoài
 
 - RFC 8288, “Web Linking”.
+- RFC 4033, “DNS Security Introduction and Requirements”.
+- [`draft-mozleywilliams-dnsop-dnsaid`](https://datatracker.ietf.org/doc/draft-mozleywilliams-dnsop-dnsaid/),
+  “DNS for AI Discovery” (work in progress).
 - RFC 8414, “OAuth 2.0 Authorization Server Metadata”.
 - RFC 9460, “Service Binding and Parameter Specification via the DNS”.
 - RFC 9727, “api-catalog: A Well-Known URI and Link Relation”.
