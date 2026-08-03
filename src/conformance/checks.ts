@@ -33,6 +33,7 @@ import { fetchJson, probeUrl } from "../client/http.js";
 import {
   AadpDiscoveryBudgetExceededError,
   chargeDiscoveryBudget,
+  chargeDiscoveryBudgetBytes,
   type DiscoveryBudgetState,
 } from "../client/discovery-budget.js";
 import { validateDocument, checkManifestSemantics, type SemanticIssue } from "../validator/index.js";
@@ -189,12 +190,12 @@ async function budgetedFetchSitemap(
   context: string
 ): Promise<SitemapV1> {
   chargeDiscoveryBudget(ctx.budget, "page", context);
-  return fetchSitemap(url, cursor, ctx.scoped(url));
+  return fetchSitemap(url, cursor, ctx.scoped(url), ctx.budget);
 }
 
 async function budgetedFetchEntity(ctx: CheckContext, url: string, context: string): Promise<EntityV1> {
   chargeDiscoveryBudget(ctx.budget, "entity", context);
-  return fetchEntity(url, ctx.scoped(url));
+  return fetchEntity(url, ctx.scoped(url), ctx.budget);
 }
 
 /**
@@ -224,6 +225,7 @@ async function assertCacheValidators(
   };
   charge();
   const first = await fetchJson(url, client);
+  chargeDiscoveryBudgetBytes(ctx.budget, first.bodyBytes, context);
   const etag = first.headers.get("etag");
   if (!etag) ctx.fail(`${url} returned no ETag; a document carrying a checksum must expose one`);
   const strongTag = etag!.startsWith("W/") ? etag!.slice(2) : etag!;
@@ -252,6 +254,7 @@ async function assertCacheValidators(
   for (const tag of [strongTag, `W/${strongTag}`]) {
     charge();
     const conditional = await fetchJson(url, { ...client, headers: { ...client.headers, "If-None-Match": tag } });
+    chargeDiscoveryBudgetBytes(ctx.budget, conditional.bodyBytes, context);
     if (conditional.status !== 304) {
       ctx.fail(
         `${url} answered If-None-Match: ${tag} with ${conditional.status}, expected 304 ` +
@@ -271,6 +274,7 @@ export const CHECKS: Check[] = [
     title: "Manifest is served at /.well-known/ai-manifest.json as application/json 200",
     async run(ctx) {
       const result = await fetchJson(ctx.state.manifestUrl, ctx.client);
+      chargeDiscoveryBudgetBytes(ctx.budget, result.bodyBytes, "manifest.http");
       if (result.status !== 200) {
         ctx.fail(`${ctx.state.manifestUrl} returned HTTP ${result.status}, expected 200`);
       }
@@ -352,7 +356,7 @@ export const CHECKS: Check[] = [
       // semantic gate) through the public client entry point, so the run
       // proves the documented consumer API works — not just that the
       // pieces do individually.
-      await discover(ctx.baseUrl, ctx.client);
+      await discover(ctx.baseUrl, ctx.client, ctx.budget);
     },
   },
   {
@@ -367,7 +371,8 @@ export const CHECKS: Check[] = [
       // runner records as a failure.
       const index = await fetchSitemapIndex(
         manifest.discovery.sitemap_index,
-        ctx.scoped(manifest.discovery.sitemap_index)
+        ctx.scoped(manifest.discovery.sitemap_index),
+        ctx.budget
       );
       ctx.state.index = index;
       if (index.sitemaps.length > ctx.maxSitemaps) {

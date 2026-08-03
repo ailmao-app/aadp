@@ -127,27 +127,30 @@ export type { AadpErrorEnvelope };
 
 export async function discover(
   originBaseUrl: string,
-  options: ClientOptions = {}
+  options: ClientOptions = {},
+  budget?: DiscoveryBudgetState
 ): Promise<Manifest> {
   const url = new URL("/.well-known/ai-manifest.json", originBaseUrl).toString();
-  return fetchAndValidateDocument<Manifest>(url, "0.1", "manifest", options);
+  return fetchAndValidateDocument<Manifest>(url, "0.1", "manifest", options, budget);
 }
 
 export async function fetchSitemapIndex(
   url: string,
-  options: ClientOptions = {}
+  options: ClientOptions = {},
+  budget?: DiscoveryBudgetState
 ): Promise<SitemapIndex> {
-  return fetchAndValidateDocument<SitemapIndex>(url, "0.1", "sitemap-index", options);
+  return fetchAndValidateDocument<SitemapIndex>(url, "0.1", "sitemap-index", options, budget);
 }
 
 export async function fetchSitemap(
   url: string,
   cursor?: string | null,
-  options: ClientOptions = {}
+  options: ClientOptions = {},
+  budget?: DiscoveryBudgetState
 ): Promise<Sitemap> {
   const target = new URL(url);
   if (cursor) target.searchParams.set("cursor", cursor);
-  return fetchAndValidateDocument<Sitemap>(target.toString(), "0.1", "sitemap", options);
+  return fetchAndValidateDocument<Sitemap>(target.toString(), "0.1", "sitemap", options, budget);
 }
 
 export interface IterateSitemapOptions extends ClientOptions, DiscoveryBudget {
@@ -179,7 +182,7 @@ export async function* iterateSitemap(
   const seenCursors = new Set<string>();
   do {
     chargeDiscoveryBudget(budget, "page", `iterateSitemap(${sitemapUrl})`);
-    const page = await fetchSitemap(sitemapUrl, cursor, options);
+    const page = await fetchSitemap(sitemapUrl, cursor, options, budget);
     if (options.expectedType !== undefined && page.type !== options.expectedType) {
       throw new AadpIntegrityMismatchError(
         `Sitemap at ${sitemapUrl} declares type "${page.type}" but was referenced as "${options.expectedType}"`
@@ -198,9 +201,10 @@ export async function* iterateSitemap(
 
 export async function fetchEntity<T = unknown>(
   url: string,
-  options: ClientOptions = {}
+  options: ClientOptions = {},
+  budget?: DiscoveryBudgetState
 ): Promise<Entity<T>> {
-  return fetchAndValidateDocument<Entity<T>>(url, "0.1", "entity", options);
+  return fetchAndValidateDocument<Entity<T>>(url, "0.1", "entity", options, budget);
 }
 
 export type DiscoverAllEntitiesOptions = ClientOptions & DiscoveryBudget;
@@ -232,8 +236,8 @@ export async function* discoverAllEntities(
     scopeHeadersToOrigin(options, targetUrl, homeOrigin);
   const budget = createDiscoveryBudget(options);
 
-  const manifest = await discover(originBaseUrl, options);
-  const index = await fetchSitemapIndex(manifest.sitemap_index, scoped(manifest.sitemap_index));
+  const manifest = await discover(originBaseUrl, options, budget);
+  const index = await fetchSitemapIndex(manifest.sitemap_index, scoped(manifest.sitemap_index), budget);
 
   for (const sitemapRef of index.sitemaps) {
     const sitemapOptions: IterateSitemapOptions = {
@@ -243,7 +247,7 @@ export async function* discoverAllEntities(
     };
     for await (const item of iterateSitemap(sitemapRef.url, sitemapOptions)) {
       chargeDiscoveryBudget(budget, "entity", "discoverAllEntities");
-      const entity = await fetchEntity(item.url, scoped(item.url));
+      const entity = await fetchEntity(item.url, scoped(item.url), budget);
       if (entity.id !== item.id) {
         throw new AadpIntegrityMismatchError(
           `Sitemap item id "${item.id}" at ${item.url} does not match fetched entity id "${entity.id}"`

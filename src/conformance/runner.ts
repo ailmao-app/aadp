@@ -72,6 +72,7 @@ export const NUMERIC_OPTION_MINIMUMS = {
   maxEntities: 1,
   maxSitemaps: 1,
   deadlineMs: 1,
+  maxTotalBytes: 1,
 } as const satisfies Record<string, number>;
 
 /**
@@ -193,6 +194,7 @@ export async function runConformance(options: ConformanceOptions): Promise<Confo
       maxPages: options.maxPages ?? DEFAULT_MAX_PAGES,
       maxEntities: options.maxEntities ?? DEFAULT_MAX_ENTITIES,
       deadlineMs: options.deadlineMs ?? DEFAULT_DEADLINE_MS,
+      ...(options.maxTotalBytes !== undefined ? { maxTotalBytes: options.maxTotalBytes } : {}),
     }),
     maxSitemaps: options.maxSitemaps ?? DEFAULT_MAX_SITEMAPS,
     state,

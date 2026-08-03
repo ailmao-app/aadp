@@ -919,6 +919,72 @@ describe("discovery traversal budgets", () => {
       })()
     ).rejects.toThrow(AadpDiscoveryBudgetExceededError);
   });
+
+  it("throws AadpDiscoveryBudgetExceededError once the whole walk's response bytes exceed maxTotalBytes", async () => {
+    server = await startServer((req, res, url) => {
+      const host = req.headers.host!;
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(host));
+      if (url.pathname === "/ai/v1.0/sitemap-index.json") return sendJson(res, 200, buildSitemapIndex(host));
+      if (url.pathname === "/ai/v1.0/sitemaps/example.json") {
+        const items = ENTITIES.map((item) => buildSitemapItem(host, item));
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          type: "example",
+          generated_at: "2026-07-25T09:30:00Z",
+          checksum: checksumOf(items),
+          items,
+          cursor: { next: null },
+        });
+      }
+      const entityMatch = url.pathname.match(/^\/ai\/v1\.0\/entities\/example\/(.+)\.json$/);
+      if (entityMatch) {
+        const item = ENTITIES.find((e) => e.id === `example:${entityMatch[1]}`)!;
+        return sendJson(res, 200, buildEntity(host, item));
+      }
+      sendJson(res, 404, {});
+    });
+
+    // Small enough that the manifest + sitemap-index + sitemap responses
+    // alone exceed it, well before any entity is fetched.
+    await expect(
+      (async () => {
+        for await (const _e of discoverAllEntities(server.baseUrl, { ...PERMISSIVE, maxTotalBytes: 10 })) {
+          // consume
+        }
+      })()
+    ).rejects.toThrow(AadpDiscoveryBudgetExceededError);
+  });
+
+  it("does not enforce any total-byte cap when maxTotalBytes is omitted (default, matches every release before 1.1.0)", async () => {
+    server = await startServer((req, res, url) => {
+      const host = req.headers.host!;
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(host));
+      if (url.pathname === "/ai/v1.0/sitemap-index.json") return sendJson(res, 200, buildSitemapIndex(host));
+      if (url.pathname === "/ai/v1.0/sitemaps/example.json") {
+        const items = ENTITIES.map((item) => buildSitemapItem(host, item));
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          type: "example",
+          generated_at: "2026-07-25T09:30:00Z",
+          checksum: checksumOf(items),
+          items,
+          cursor: { next: null },
+        });
+      }
+      const entityMatch = url.pathname.match(/^\/ai\/v1\.0\/entities\/example\/(.+)\.json$/);
+      if (entityMatch) {
+        const item = ENTITIES.find((e) => e.id === `example:${entityMatch[1]}`)!;
+        return sendJson(res, 200, buildEntity(host, item));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const entities = [];
+    for await (const entity of discoverAllEntities(server.baseUrl, PERMISSIVE)) {
+      entities.push(entity);
+    }
+    expect(entities.map((e) => e.id)).toEqual(["example:sample-1", "example:sample-2"]);
+  });
 });
 
 describe("header origin scoping", () => {

@@ -120,6 +120,12 @@ export interface ConformanceOptions {
   /** Traversal budget: wall-clock deadline for the traversal walk, in ms. Default 120000. */
   deadlineMs?: number;
   /**
+   * Traversal budget: maximum total response bytes across every request
+   * the whole run makes (ADR-0006) — distinct from `maxResponseBytes`,
+   * which caps a single response. Default unbounded.
+   */
+  maxTotalBytes?: number;
+  /**
    * Allow the target (and its redirects) to resolve to a private,
    * loopback or link-local address. Off by default: the runner is
    * routinely pointed at an externally-supplied URL, so it inherits the

@@ -348,6 +348,22 @@ describe("traversal budgets", () => {
     expect(byId(report, "traversal.sitemap_index").message).toMatch(/maxSitemaps/);
     expect(exitCodeFor(report)).toBe(1);
   });
+
+  it("stops the run once the whole run's response bytes exceed maxTotalBytes (ADR-0006)", async () => {
+    // Small enough that manifest.http's own response already exceeds it.
+    const report = await runConformance(permissive({ maxTotalBytes: 10 }));
+    expect(report.summary.failed).toBe(0);
+    expect(report.status).toBe("inconclusive");
+    const manifestHttp = byId(report, "manifest.http");
+    expect(manifestHttp.status).toBe("skipped");
+    expect(manifestHttp.inconclusive).toBe(true);
+    expect(manifestHttp.message).toMatch(/maxTotalBytes/i);
+  });
+
+  it("does not enforce a total-byte cap when maxTotalBytes is omitted (default, matches every release before 1.1.0)", async () => {
+    const report = await runConformance(withNegativeTargets());
+    expect(report.status).toBe("passed");
+  });
 });
 
 describe("cancellation (options.signal)", () => {

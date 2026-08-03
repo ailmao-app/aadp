@@ -13,6 +13,7 @@
 import { fetchJson, type FetchJsonOptions } from "./http.js";
 import { AadpRequestError, type AadpErrorEnvelope } from "./errors.js";
 import { checksumOf } from "../canonical-json/checksum.js";
+import { chargeDiscoveryBudgetBytes, type DiscoveryBudgetState } from "./discovery-budget.js";
 import {
   validateDocument,
   UnsupportedAadpVersionError,
@@ -98,14 +99,21 @@ function assertOwnChecksum(url: string, kind: ResourceKind, data: unknown): void
  * `kind` under `version`, and recomputes its own checksum — in every
  * failure case, no URL the document contains is ever trusted for further
  * traversal.
+ *
+ * `budget`, when given, is charged the response's actual byte count
+ * (ADR-0006 total-byte budget) before any other check — even a
+ * schema-invalid or non-2xx response still counts against it, since bytes
+ * were read from the wire regardless of what they turned out to contain.
  */
 export async function fetchAndValidateDocument<T>(
   url: string,
   version: AadpVersion,
   kind: ResourceKind,
-  options: FetchJsonOptions
+  options: FetchJsonOptions,
+  budget?: DiscoveryBudgetState
 ): Promise<T> {
-  const { status, data } = await fetchJson(url, options);
+  const { status, data, bodyBytes } = await fetchJson(url, options);
+  if (budget) chargeDiscoveryBudgetBytes(budget, bodyBytes, `fetchAndValidateDocument(${kind} ${url})`);
   if (status === 304) {
     throw new AadpRequestError("Not modified", 304);
   }
