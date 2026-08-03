@@ -43,6 +43,7 @@ thay đổi wire contract đã release.
 - [Bản nháp AADP lịch sử](archive/aadp-draft.md)
 - [Review Socket.dev cho 1.0.5](archive/socket-dev-review-1.0.5.md)
 - [ADR-0005 bằng tiếng Việt](adr/0005-manifest-v1-discovery.md)
+- [ADR-0006: Bounded traversal controls (tiếng Anh)](../adr/0006-bounded-traversal-controls.md)
 
 ## 3. Tài liệu làm việc và lưu trữ
 
