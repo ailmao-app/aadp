@@ -4,6 +4,19 @@ All notable changes to `ail-aadp` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Protocol compatibility follows [ADR-0004](docs/adr/0004-backward-compatibility.md); released schemas are immutable and wire-breaking changes require a new protocol version.
 
+## 1.0.11 - 2026-08-03
+
+Production certification operations (docs/vi/plans/implementation-plan-v1.0.11.md). Does not change AADP wire version `1.0`, the JSON Schemas, package public API, or any validation result — CI/test tooling only.
+
+### Added
+
+- Added `.github/workflows/scheduled-conformance.yml`: runs `aadp-conformance` on a schedule (plus manual `workflow_dispatch`) against `examples/reference-server`, built and started fresh in the job from a packed tarball on an ephemeral loopback address — never a shared or production environment, so the run needs no credential. A failed, erroring, or inconclusive run fails the job; JSON and JUnit reports are uploaded as a build artifact named with the package version, protocol version and a UTC timestamp, retained 90 days.
+- Documented artifact retention (`docs/vi/operations/npm-release-guide.md` §9) and cross-referenced the new scheduled workflow from `docs/vi/operations/git-workflow.md` §3.
+
+### Fixed
+
+- Fixed a flaky `npm error code EOF` in `tests/package/*.test.ts` (`exports.test.ts`, `compatibility-contract.test.ts`, `validate-cli.test.ts`, `scaffold-cli.test.ts`, `conformance-cli.test.ts`, `reference-server.test.ts`): each file's `beforeAll` independently ran `npm run build && npm pack` against the same shared `dist/`, and Vitest runs test files in parallel workers by default, so one file's `tsc` rebuild could rewrite `dist/**` mid-read of another file's concurrent `npm pack`. Build/pack now happens exactly once, serially, in a new Vitest `globalSetup` (`tests/package/global-setup.ts`) before any worker starts, and every test file's `packAndExtractTarball()` (`tests/package/tarball-helpers.ts`) only copies/extracts that already-built tarball. Test-only; does not affect the published package. See `ERROR_LOG.md` 2026-08-03.
+
 ## 1.0.10 - 2026-08-02
 
 Robustness fix (docs/vi/plans/implementation-plan-v1.0.10.md). Does not change AADP wire version `1.0`, the JSON Schemas, or any validation result.
