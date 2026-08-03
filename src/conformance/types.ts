@@ -14,6 +14,19 @@ export const SUPPORTED_CONFORMANCE_VERSIONS = ["1.0"] as const;
 export type ConformanceVersion = (typeof SUPPORTED_CONFORMANCE_VERSIONS)[number];
 
 /**
+ * Named presets of budget/retry defaults (ADR-0006) — NOT a filter over
+ * which check IDs run; every profile exercises the exact same `CHECKS`.
+ * `core`/`public-web` are numerically identical at introduction (both
+ * "what `1.0.x` already does"); `full-traversal` raises the traversal
+ * budgets for a deliberately exhaustive crawl; `authenticated` is
+ * numerically identical to `public-web` and exists to document intent and
+ * be recorded in `report.profile` — this package defines no
+ * authenticated-only check behavior.
+ */
+export const CONFORMANCE_PROFILES = ["core", "public-web", "full-traversal", "authenticated"] as const;
+export type ConformanceProfile = (typeof CONFORMANCE_PROFILES)[number];
+
+/**
  * `passed` and `failed` are the only two statuses that move the overall
  * verdict (unless `failOnWarning` is set). `warning` means the server is
  * conformant but published something a consumer should look at;
@@ -89,6 +102,8 @@ export interface ConformanceReport {
   status: "passed" | "failed" | "inconclusive";
   summary: ConformanceSummary;
   fatal?: ConformanceFatal;
+  /** Which named preset (ADR-0006) this run used, if the caller passed one. Absent when `profile` was omitted. */
+  profile?: ConformanceProfile;
   checks: CheckResult[];
 }
 
@@ -97,6 +112,13 @@ export interface ConformanceOptions {
   baseUrl: string;
   /** Protocol version to target. Default `1.0`. */
   version?: string;
+  /**
+   * Named preset (ADR-0006) of `maxPages`/`maxEntities`/`maxSitemaps`/
+   * `deadlineMs`/`retry` defaults — applied first, so any of those fields
+   * set explicitly here still overrides the preset's value for that one
+   * field. Omitting `profile` is exactly `"core"`. See `CONFORMANCE_PROFILES`.
+   */
+  profile?: ConformanceProfile;
   /** Per-request timeout in ms. Default 10000 (client default). */
   timeoutMs?: number;
   /** Maximum redirect hops per request. Default 5 (client default). */

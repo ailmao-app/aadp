@@ -15,11 +15,13 @@ import type { ClientOptions } from "../client/v1.0/index.js";
 import { CHECKS, CheckSignal, type Check, type CheckContext, type CheckOutcome, type RunState } from "./checks.js";
 import {
   SUPPORTED_CONFORMANCE_VERSIONS,
+  CONFORMANCE_PROFILES,
   InvalidConformanceOptionsError,
   UnsupportedConformanceVersionError,
   type CheckResult,
   type CheckStatus,
   type ConformanceOptions,
+  type ConformanceProfile,
   type ConformanceReport,
   type ConformanceVersion,
   type ConformanceSummary,
@@ -38,6 +40,37 @@ const DEFAULT_MAX_PAGES = 100;
 const DEFAULT_MAX_ENTITIES = 200;
 const DEFAULT_MAX_SITEMAPS = 100;
 const DEFAULT_DEADLINE_MS = 120_000;
+
+/**
+ * Named presets (ADR-0006), each a bundle of defaults an explicit option
+ * field still overrides — never a lock. Only budget/retry fields; every
+ * profile runs the exact same `CHECKS` (see `ConformanceProfile`'s doc in
+ * `./types.ts` for why `core`/`public-web`/`authenticated` are numerically
+ * identical at introduction).
+ */
+const PROFILE_PRESETS: Record<
+  ConformanceProfile,
+  Pick<ConformanceOptions, "maxPages" | "maxEntities" | "maxSitemaps" | "deadlineMs" | "retry">
+> = {
+  core: {},
+  "public-web": {},
+  "full-traversal": {
+    maxPages: 10_000,
+    maxEntities: 100_000,
+    maxSitemaps: 1_000,
+    deadlineMs: 30 * 60_000,
+  },
+  authenticated: {},
+};
+
+function assertSupportedProfile(profile: string): asserts profile is ConformanceProfile {
+  if (!(CONFORMANCE_PROFILES as readonly string[]).includes(profile)) {
+    throw new InvalidConformanceOptionsError(
+      "profile",
+      `expected one of ${CONFORMANCE_PROFILES.join(", ")}, got ${JSON.stringify(profile)}`
+    );
+  }
+}
 
 const require = createRequire(import.meta.url);
 
@@ -154,7 +187,13 @@ function describeThrown(err: unknown): { message: string; details?: string[] } {
 export async function runConformance(options: ConformanceOptions): Promise<ConformanceReport> {
   const version = options.version ?? "1.0";
   assertSupportedVersion(version);
+  if (options.profile !== undefined) assertSupportedProfile(options.profile);
   assertUsableOptions(options);
+
+  // Applied first, so any of these fields set explicitly in `options`
+  // still overrides the preset's value for that one field — a profile is
+  // a bundle of defaults, never a lock.
+  const preset = options.profile ? PROFILE_PRESETS[options.profile] : undefined;
 
   let origin: string;
   try {
@@ -172,7 +211,7 @@ export async function runConformance(options: ConformanceOptions): Promise<Confo
     ...(options.headers ? { headers: options.headers } : {}),
     ...(options.crossOriginSafeHeaders ? { crossOriginSafeHeaders: options.crossOriginSafeHeaders } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
-    ...(options.retry ? { retry: options.retry } : {}),
+    ...(options.retry ?? preset?.retry ? { retry: options.retry ?? preset?.retry } : {}),
   };
 
   // Caller-configured headers may be a credential for the deployment
@@ -191,12 +230,12 @@ export async function runConformance(options: ConformanceOptions): Promise<Confo
     scoped,
     negativeTargets: options.negativeTargets ?? {},
     budget: createDiscoveryBudget({
-      maxPages: options.maxPages ?? DEFAULT_MAX_PAGES,
-      maxEntities: options.maxEntities ?? DEFAULT_MAX_ENTITIES,
-      deadlineMs: options.deadlineMs ?? DEFAULT_DEADLINE_MS,
+      maxPages: options.maxPages ?? preset?.maxPages ?? DEFAULT_MAX_PAGES,
+      maxEntities: options.maxEntities ?? preset?.maxEntities ?? DEFAULT_MAX_ENTITIES,
+      deadlineMs: options.deadlineMs ?? preset?.deadlineMs ?? DEFAULT_DEADLINE_MS,
       ...(options.maxTotalBytes !== undefined ? { maxTotalBytes: options.maxTotalBytes } : {}),
     }),
-    maxSitemaps: options.maxSitemaps ?? DEFAULT_MAX_SITEMAPS,
+    maxSitemaps: options.maxSitemaps ?? preset?.maxSitemaps ?? DEFAULT_MAX_SITEMAPS,
     state,
   };
 
@@ -280,6 +319,7 @@ export async function runConformance(options: ConformanceOptions): Promise<Confo
     status,
     summary,
     ...(fatal ? { fatal } : {}),
+    ...(options.profile ? { profile: options.profile } : {}),
     checks: results,
   };
 }

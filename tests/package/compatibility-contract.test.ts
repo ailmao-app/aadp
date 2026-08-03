@@ -57,6 +57,13 @@ describe("conformance: check IDs are a stable, published contract", () => {
   });
 });
 
+describe("conformance: CONFORMANCE_PROFILES is a stable, published contract (ADR-0006)", () => {
+  it("is exactly core, public-web, full-traversal, authenticated, in order", async () => {
+    const { CONFORMANCE_PROFILES } = await importFromTarball("conformance");
+    expect(CONFORMANCE_PROFILES).toEqual(["core", "public-web", "full-traversal", "authenticated"]);
+  });
+});
+
 describe("conformance: exitCodeFor status/fatal -> exit code mapping", () => {
   it.each([
     [{ status: "passed", fatal: undefined }, 0],

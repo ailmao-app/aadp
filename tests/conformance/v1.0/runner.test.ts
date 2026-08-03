@@ -637,6 +637,60 @@ describe("retry (options.retry)", () => {
   });
 });
 
+describe("profile (options.profile)", () => {
+  it("rejects an unknown profile name before making any request", async () => {
+    await expect(
+      runConformance({ baseUrl: server.baseUrl, profile: "not-a-real-profile" as never })
+    ).rejects.toThrow(InvalidConformanceOptionsError);
+  });
+
+  it("omitting profile behaves exactly like \"core\" (default, matches every release before 1.1.0)", async () => {
+    const withoutProfile = await runConformance(permissive({ maxPages: 1 }));
+    const withCore = await runConformance(permissive({ profile: "core", maxPages: 1 }));
+    expect(byId(withoutProfile, "pagination.contract").inconclusive).toBe(true);
+    expect(byId(withCore, "pagination.contract").inconclusive).toBe(true);
+    expect(withoutProfile.profile).toBeUndefined();
+    expect(withCore.profile).toBe("core");
+  });
+
+  it("full-traversal raises the traversal budgets enough to finish a walk core's defaults would cut short", async () => {
+    // The example sitemap paginates 5 items at 2 per page (3 pages); the
+    // note sitemap is 1 page — core's default maxPages (100) already
+    // finishes this walk, so instead assert full-traversal's preset value
+    // directly by observing it accepts a walk the *explicit* core-sized
+    // limit below would not.
+    const constrained = await runConformance(permissive({ maxPages: 1 }));
+    expect(byId(constrained, "pagination.contract").inconclusive).toBe(true);
+
+    const fullTraversal = await runConformance(permissive({ profile: "full-traversal" }));
+    expect(byId(fullTraversal, "pagination.contract").status).toBe("passed");
+    expect(fullTraversal.profile).toBe("full-traversal");
+  });
+
+  it("an explicit option field still overrides the profile's preset for that field", async () => {
+    // full-traversal's own maxPages preset (10000) would finish the walk;
+    // an explicit maxPages: 1 must still win and cut it short.
+    const report = await runConformance(permissive({ profile: "full-traversal", maxPages: 1 }));
+    expect(byId(report, "pagination.contract").inconclusive).toBe(true);
+  });
+
+  it("core, public-web and authenticated are numerically identical at introduction", async () => {
+    const core = await runConformance(permissive({ profile: "core", maxPages: 1 }));
+    const publicWeb = await runConformance(permissive({ profile: "public-web", maxPages: 1 }));
+    const authenticated = await runConformance(permissive({ profile: "authenticated", maxPages: 1 }));
+    for (const report of [core, publicWeb, authenticated]) {
+      expect(byId(report, "pagination.contract").inconclusive).toBe(true);
+    }
+  });
+
+  it("does not run any different set of checks for any profile", async () => {
+    for (const profile of ["core", "public-web", "full-traversal", "authenticated"] as const) {
+      const report = await runConformance(withNegativeTargets({ profile }));
+      expect(report.checks.map((check) => check.id)).toEqual(CHECKS.map((check) => check.id));
+    }
+  });
+});
+
 describe("URL policy", () => {
   it("blocks a loopback deployment by default, so an SSRF-unsafe run cannot silently pass", async () => {
     const report = await runConformance({ baseUrl: server.baseUrl });

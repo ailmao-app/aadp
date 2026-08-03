@@ -24,12 +24,14 @@ export {
 export { CHECKS, collectAdvertisedUrls, type Check } from "./checks.js";
 export {
   SUPPORTED_CONFORMANCE_VERSIONS,
+  CONFORMANCE_PROFILES,
   InvalidConformanceOptionsError,
   UnsupportedConformanceVersionError,
   type CheckResult,
   type CheckStatus,
   type ConformanceFatal,
   type ConformanceOptions,
+  type ConformanceProfile,
   type ConformanceReport,
   type ConformanceSummary,
   type ConformanceVersion,
