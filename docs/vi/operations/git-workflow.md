@@ -114,6 +114,15 @@ on:
   xác nhận `package.json`, `package-lock.json`, `CHANGELOG.md` và chính tag
   Git đó đều khớp version.
 
+File riêng: [`.github/workflows/scheduled-conformance.yml`](../../../.github/workflows/scheduled-conformance.yml)
+chạy theo lịch (`schedule` cron, có thể trigger tay bằng `workflow_dispatch`),
+không gắn với push/tag/PR nào. Job tự build tarball, dựng
+`examples/reference-server` làm deployment loopback trong chính job (không
+credential production), chạy `aadp-conformance` và upload JSON+JUnit report
+làm artifact (retention 90 ngày — `operations/npm-release-guide.md` §9). Một
+run inconclusive/failed làm job đỏ, không bao giờ báo pass — xem comment
+trong file workflow.
+
 Nói cách khác: `feat/*` → `develop` → `release/*` → `main` chỉ đi qua
 `build-test-audit` (review bình thường qua PR). `release-gate` là bước gác
 cuối cùng, cố ý tách riêng vì kiểm tra "version khớp changelog" không có ý
