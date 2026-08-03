@@ -93,6 +93,30 @@ function byId(report: ConformanceReport, id: string) {
   return result;
 }
 
+/**
+ * Asserts every code point in `xml` is legal in XML 1.0 content (§2.2:
+ * tab/LF/CR, or `[U+0020-U+D7FF] | [U+E000-U+FFFD] | [U+10000-U+10FFFF]`)
+ * — a targeted well-formedness check on character validity, the exact
+ * property `xmlEscape()` is responsible for, without pulling in a full XML
+ * parser dependency for one test file.
+ */
+function assertWellFormedXmlContent(xml: string): void {
+  for (let i = 0; i < xml.length; i++) {
+    const code = xml.codePointAt(i)!;
+    if (code > 0xffff) i++; // consumed a surrogate pair
+    const allowed =
+      code === 0x9 ||
+      code === 0xa ||
+      code === 0xd ||
+      (code >= 0x20 && code <= 0xd7ff) ||
+      (code >= 0xe000 && code <= 0xfffd) ||
+      (code >= 0x10000 && code <= 0x10ffff);
+    if (!allowed) {
+      throw new Error(`U+${code.toString(16).padStart(4, "0")} at index ${i} is not valid XML 1.0 content: ${xml}`);
+    }
+  }
+}
+
 beforeAll(async () => {
   server = await startMockServer();
 });
@@ -212,10 +236,41 @@ describe("runConformance against a conformant v1.0 server", () => {
       status: "failed",
     };
     const xml = renderJUnitReport(withSpecialChars);
+    assertWellFormedXmlContent(xml);
     expect(xml).not.toContain("<script>");
     expect(xml).toContain("&lt;script&gt;");
     expect(xml).toContain("&amp;");
     expect(xml).toContain("&quot;quotes&quot;");
+  });
+
+  it("neutralizes XML 1.0-illegal control characters instead of emitting them raw", () => {
+    // A server-supplied string (entity id, sitemap type, header value, ...)
+    // passes JSON/canonical-JSON validation even if it contains a raw C0
+    // control byte other than tab/LF/CR, or one of the two BMP
+    // noncharacters; XML 1.0 forbids those in content with no valid
+    // character reference, so a naive escaper that only handles
+    // `& < > " '` emits a testsuite that is not well-formed XML.
+    const withControlChars: ConformanceReport = {
+      ...report,
+      checks: [
+        {
+          id: "fixture.control-char",
+          group: "fixture",
+          title: "title",
+          status: "failed",
+          duration_ms: 1,
+          message: "entity id \x07\x0b￾￿ contains raw control bytes and noncharacters",
+        },
+      ],
+      summary: { total: 1, passed: 0, failed: 1, warnings: 0, skipped: 0, inconclusive: 0 },
+      status: "failed",
+    };
+    const xml = renderJUnitReport(withControlChars);
+    assertWellFormedXmlContent(xml);
+    expect(xml).toContain("\\u0007");
+    expect(xml).toContain("\\u000b");
+    expect(xml).toContain("\\ufffe");
+    expect(xml).toContain("\\uffff");
   });
 
   it("treats warnings as failures only when asked", async () => {
