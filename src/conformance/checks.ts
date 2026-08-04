@@ -29,7 +29,7 @@ import {
   type EntityV1,
 } from "../client/v1.0/index.js";
 import { AadpRequestError } from "../client/errors.js";
-import { fetchJson, probeUrl } from "../client/http.js";
+import { fetchJson, probeUrl, AbortedError } from "../client/http.js";
 import {
   AadpDiscoveryBudgetExceededError,
   chargeDiscoveryBudget,
@@ -550,9 +550,19 @@ export const CHECKS: Check[] = [
           // Body discarded and content type unchecked: these are ordinary
           // web pages, not AADP documents. A policy or documentation URL
           // very often lives on another host, so headers are scoped.
-          const probe = await probeUrl(url, ctx.scoped(url));
+          // `ctx.budget` is passed through so these probes are bound by the
+          // same whole-run deadline/maxTotalBytes as every other request
+          // (ADR-0006) — without it, a run with little budget left could
+          // still read/retry every advertised URL unbounded.
+          const probe = await probeUrl(url, ctx.scoped(url), ctx.budget);
           if (probe.status === 404 || probe.status === 410) dead.push(`${url} -> HTTP ${probe.status}`);
         } catch (err) {
+          // A budget/deadline stop or a caller abort is the run stopping
+          // itself, not evidence this URL is dead or merely unreachable —
+          // `runCheck()` (runner.ts) already has dedicated handling for
+          // both (inconclusive skip / aborted skip) that must see the real
+          // error type, not have it flattened into a warning here first.
+          if (err instanceof AadpDiscoveryBudgetExceededError || err instanceof AbortedError) throw err;
           unreachable.push(`${url} -> ${(err as Error).message}`);
         }
       }

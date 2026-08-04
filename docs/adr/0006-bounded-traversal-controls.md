@@ -150,17 +150,33 @@ no new options.
 
 ### Testability (not part of the public contract)
 
-- The scheduler, retry policy, and budget modules take their clock
-  (`now?: () => number`) and, where relevant, their request function as plain
-  constructor/call parameters with real defaults (`Date.now`, the module's
-  own `fetchJson`), so unit tests can inject a fake clock/fetch for
-  deterministic timing assertions (backoff delay, deadline expiry) without
-  real `setTimeout`/network calls. These parameters are internal-only: they
-  are not exposed on `FetchJsonOptions`/`ConformanceOptions`/`RetryOptions`,
-  are not part of `ail-aadp`'s public exports, and are not covered by the
-  tarball compatibility tests — adding or changing them is not a SemVer
-  event. Only regular unit tests under `tests/client/`, `tests/conformance/`
-  (which import from `src/`, not the tarball) use them.
+- **Revised from the original draft of this ADR**, which proposed an
+  internal `now?: () => number` clock-injection parameter threaded through
+  the scheduler/retry/budget modules. That was never built. Every existing
+  timing-sensitive test in this repo (`tests/client/v1.0.test.ts`'s
+  `timeout`/`cancellation` blocks, predating this ADR) already used real
+  short `setTimeout`s against a real local `node:http` mock server rather
+  than a fake clock, so the retry/deadline tests written for this ADR's
+  implementation follow that same established convention instead —
+  `baseDelayMs`/`deadlineMs` set to single-digit milliseconds, asserting on
+  real elapsed time and real request counts. This keeps the test style
+  uniform across the file rather than introducing a second, DI-based
+  pattern used nowhere else. `Date.now()`, `Math.random()`, `setTimeout`,
+  and the global `fetch` are called directly with no injection point, in
+  both `http.ts` and `discovery-budget.ts`.
+- Consequence: a test that needs to assert an exact boundary (e.g. "a retry
+  whose delay alone would exceed the remaining deadline throws instead of
+  sleeping") uses a tiny real `deadlineMs` and a tiny real backoff, not a
+  fake clock tick — see `tests/client/v1.0.test.ts`'s "retry
+  (options.retry)" describe block. This is slower per-test (single-digit
+  milliseconds, not zero) and was the proximate cause of one flaky-looking
+  failure during implementation (a real request's round-trip time occasionally
+  landed on the wrong side of a boundary that should have been decided by
+  logic, not timing) — root-caused to a classification bug
+  (`isRetryableError()` not excluding `AadpDiscoveryBudgetExceededError`),
+  not the timing approach itself; see `ERROR_LOG.md` 2026-08-03. Revisit
+  fake-clock injection only if a specific boundary proves impossible to pin
+  reliably with real short timers — none has yet.
 
 ## Consequences
 
