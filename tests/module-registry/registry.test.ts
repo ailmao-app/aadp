@@ -157,6 +157,73 @@ describe("registerModule / getModuleEntry", () => {
     ).toBe(true);
   });
 
+  it("rejects two dependencies in the SAME registerModule call sharing an $id with different content, before mutating any shared state", () => {
+    const moduleId = freshModuleId();
+    const sharedId = `https://example.com/schemas/${moduleId.replace(":", "-")}/self-conflict.schema.json`;
+    const depA = { $id: sharedId, type: "string" };
+    const depB = { $id: sharedId, type: "number" };
+    const documentSchema = { type: "object", properties: { a: { $ref: sharedId } }, additionalProperties: false };
+
+    expect(() =>
+      registerModule(
+        { moduleId, moduleVersion: "1.0", kind: "widget" },
+        { schema: documentSchema, schemaDependencies: [depA, depB] }
+      )
+    ).toThrow(/dependency conflict/i);
+
+    expect(isModuleRegistered(moduleId)).toBe(false);
+
+    // The rejected attempt must not have left `sharedId` claimed: a
+    // corrected registration (both dependency entries now identical) has
+    // to succeed rather than fail with a leftover conflict.
+    expect(() =>
+      registerModule(
+        { moduleId, moduleVersion: "1.0", kind: "widget" },
+        { schema: documentSchema, schemaDependencies: [depA, depA] }
+      )
+    ).not.toThrow();
+  });
+
+  it("rolls back a newly-added dependency when the document schema itself fails to compile, so a later correct registration is not blocked", () => {
+    const moduleId = freshModuleId();
+    const sharedId = `https://example.com/schemas/${moduleId.replace(":", "-")}/rollback.schema.json`;
+    const dependency = { $id: sharedId, type: "string" };
+    // References a schema $id that doesn't exist anywhere — ajv.compile()
+    // throws (MissingRefError) for the *document* schema itself, after the
+    // (valid, unrelated) dependency above has already been added to AJV.
+    const brokenDocumentSchema = {
+      type: "object",
+      properties: { a: { $ref: "https://example.com/schemas/does-not-exist.schema.json" } },
+      additionalProperties: false,
+    };
+
+    expect(() =>
+      registerModule(
+        { moduleId, moduleVersion: "1.0", kind: "widget" },
+        { schema: brokenDocumentSchema, schemaDependencies: [dependency] }
+      )
+    ).toThrow();
+
+    expect(isModuleRegistered(moduleId)).toBe(false);
+
+    // If the dependency added during the failed attempt were left behind
+    // in the shared AJV instance, this second, unrelated registration
+    // reusing the same $id would blow up with AJV's own "schema already
+    // exists" error instead of succeeding normally.
+    const workingDocumentSchema = {
+      type: "object",
+      properties: { a: { $ref: sharedId } },
+      additionalProperties: false,
+    };
+    expect(() =>
+      registerModule(
+        { moduleId, moduleVersion: "1.0", kind: "gadget" },
+        { schema: workingDocumentSchema, schemaDependencies: [dependency] }
+      )
+    ).not.toThrow();
+    expect(validateModuleDocument({ moduleId, moduleVersion: "1.0", kind: "gadget" }, { a: "ok" }).valid).toBe(true);
+  });
+
   it("snapshots the schema at registration: mutating the caller's original object afterwards does not affect validation", () => {
     const moduleId = freshModuleId();
     const mutableSchema: { type: string; properties: Record<string, unknown>; required: string[] } = {

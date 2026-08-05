@@ -330,12 +330,18 @@ export function checkRelationRegistrySemantics(doc: unknown): ModuleSemanticIssu
       });
     }
     // specification.md §8: "symmetric: true yêu cầu inverse bằng chính token."
-    if (entry.symmetric === true && isString(entry.inverse) && isString(entry.token) && entry.inverse !== entry.token) {
+    // A missing `inverse` fails this exactly like a mismatched one — schema
+    // makes `inverse` optional, but `symmetric: true` normatively requires
+    // it to be present and equal to `token`, so `undefined !== token` must
+    // flag it too, not just an explicit-but-wrong string.
+    if (entry.symmetric === true && isString(entry.token) && entry.inverse !== entry.token) {
       issues.push({
         level: "error",
         code: "symmetric_inverse_mismatch",
         path: `/relations/${i}/inverse`,
-        message: `Entry "${entry.token}" declares symmetric: true, which requires inverse to equal the token itself; got inverse "${entry.inverse}".`,
+        message: isString(entry.inverse)
+          ? `Entry "${entry.token}" declares symmetric: true, which requires inverse to equal the token itself; got inverse "${entry.inverse}".`
+          : `Entry "${entry.token}" declares symmetric: true, which requires inverse to be present and equal to the token itself; inverse is missing.`,
       });
     }
 

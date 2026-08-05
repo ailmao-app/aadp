@@ -108,6 +108,7 @@ Invalid fixtures:
 | `relations-invalid-registry-checksum` | `relations.registry.checksum` | `registry_checksum_mismatch` |
 | `relations-invalid-registry-token` | `relations.semantic.tokens` | `invalid_relation_token` |
 | `relations-invalid-registry-symmetric-mismatch` | `relations.registry.symmetric` | `symmetric_inverse_mismatch` |
+| `relations-invalid-registry-symmetric-missing-inverse` | `relations.registry.symmetric` | `symmetric_inverse_mismatch` |
 
 Traversal/security fixtures:
 

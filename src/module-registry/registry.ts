@@ -67,32 +67,40 @@ const registry = new Map<string, Map<string, Map<string, CompiledEntry>>>();
 // existence check let whichever caller registered first silently win).
 const dependencyCanonicalById = new Map<string, string>();
 
+interface PendingDependency {
+  id: string;
+  canonical: string;
+  frozen: object;
+}
+
 /**
- * Adds `dependency` to the shared AJV instance so a document schema's
- * internal `$ref` to it resolves. Reuses an already-registered schema only
- * when it is canonically identical to the one being added; a same-`$id`,
- * different-content dependency throws instead of silently keeping
- * whichever version was registered first.
+ * Preflight for one dependency: pure conflict-checking against both the
+ * global registry and `pending` (other dependencies already checked in
+ * this same `registerModule` call), with no mutation of any shared state.
+ * Throws on a same-`$id`, different-content conflict; returns `undefined`
+ * for a dependency that's already registered and canonically identical
+ * (nothing new to add), or the info needed to actually add it otherwise.
  */
-function addSchemaDependency(dependency: object): void {
+function preflightDependency(dependency: object, pending: Map<string, string>): PendingDependency | undefined {
   const id = (dependency as { $id?: string }).$id;
   if (!id) {
-    // No `$id` to dedupe or conflict-check against — add it standalone.
-    ajv.addSchema(deepFreeze(structuredClone(dependency)));
-    return;
+    throw new Error(
+      `Schema dependency is missing "$id": a dependency can only be $ref'd (and safely conflict-checked/rolled back) by $id.`
+    );
   }
   const canonical = canonicalize(dependency);
-  const existingCanonical = dependencyCanonicalById.get(id);
+  const existingCanonical = pending.get(id) ?? dependencyCanonicalById.get(id);
   if (existingCanonical !== undefined) {
     if (existingCanonical !== canonical) {
       throw new Error(
         `Schema dependency conflict: "${id}" was already registered with different content. A schema dependency's $id MUST always resolve to the same schema — this looks like two modules (or two registrations) shipping conflicting schemas under the same $id.`
       );
     }
-    return; // Canonically identical to what's already registered — safe to reuse.
+    pending.set(id, canonical);
+    return undefined; // Canonically identical to what's already registered/pending — nothing new to add.
   }
-  dependencyCanonicalById.set(id, canonical);
-  ajv.addSchema(deepFreeze(structuredClone(dependency)));
+  pending.set(id, canonical);
+  return { id, canonical, frozen: deepFreeze(structuredClone(dependency)) };
 }
 
 /**
@@ -101,6 +109,15 @@ function addSchemaDependency(dependency: object): void {
  * re-registering an already-registered key throws, matching the "released
  * artifacts are immutable" rule in ADR-0007 rather than silently replacing
  * a shipped schema.
+ *
+ * All-or-nothing: a conflicting/invalid dependency or a document schema
+ * that fails to compile leaves no trace — no dependency `$id` is left
+ * occupying the shared AJV instance or `dependencyCanonicalById`, and the
+ * module key itself is never registered. Without this, a failed attempt
+ * partway through could permanently claim a dependency `$id` (or leave the
+ * AJV instance and the canonical map out of sync with each other), making
+ * a later, correct registration attempt fail for a reason that has nothing
+ * to do with its own content.
  */
 export function registerModule(key: ModuleRegistryKey, entry: ModuleRegistryEntry): void {
   if (!isValidModuleId(key.moduleId)) {
@@ -115,16 +132,48 @@ export function registerModule(key: ModuleRegistryKey, entry: ModuleRegistryEntr
       `Module "${key.moduleId}@${key.moduleVersion}" kind "${key.kind}" is already registered; registered module entries are immutable.`
     );
   }
+
+  // Phase 1 (pure): resolve which dependencies are actually new and check
+  // every conflict — global vs. global, global vs. this call, and within
+  // this call's own dependency list — before touching AJV or any shared
+  // map. Throwing here leaves no state to roll back.
+  const pending = new Map<string, string>();
+  const toAdd: PendingDependency[] = [];
   for (const dependency of entry.schemaDependencies ?? []) {
-    addSchemaDependency(dependency);
+    const resolved = preflightDependency(dependency, pending);
+    if (resolved) toAdd.push(resolved);
   }
-  // Snapshot the schema before compiling: a deep clone, frozen, so neither
-  // the caller's original object nor the entry `getModuleEntry` later
-  // returns can drift from what `ajv.compile` actually validates against.
-  const schema = deepFreeze(structuredClone(entry.schema));
-  byKind.set(key.kind, { ...entry, schema, compiled: ajv.compile(schema) });
-  byVersion.set(key.moduleVersion, byKind);
-  registry.set(key.moduleId, byVersion);
+
+  // Phase 2 (mutating, rolled back on any failure below): add only the
+  // genuinely new dependencies to the shared AJV instance.
+  const added: string[] = [];
+  try {
+    for (const dep of toAdd) {
+      ajv.addSchema(dep.frozen, dep.id);
+      added.push(dep.id);
+    }
+    // Snapshot the schema before compiling: a deep clone, frozen, so
+    // neither the caller's original object nor the entry `getModuleEntry`
+    // later returns can drift from what `ajv.compile` actually validates
+    // against.
+    const schema = deepFreeze(structuredClone(entry.schema));
+    const compiled = ajv.compile(schema);
+
+    // Phase 3 (commit): only now record the new dependencies as
+    // permanent and publish the module key — every fallible step above
+    // already succeeded.
+    for (const dep of toAdd) {
+      dependencyCanonicalById.set(dep.id, dep.canonical);
+    }
+    byKind.set(key.kind, { ...entry, schema, compiled });
+    byVersion.set(key.moduleVersion, byKind);
+    registry.set(key.moduleId, byVersion);
+  } catch (err) {
+    for (const id of added) {
+      ajv.removeSchema(id);
+    }
+    throw err;
+  }
 }
 
 function lookup(key: ModuleRegistryKey): CompiledEntry {
