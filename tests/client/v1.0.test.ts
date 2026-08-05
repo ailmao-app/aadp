@@ -618,15 +618,25 @@ describe("retry (options.retry)", () => {
     // in-flight fetch/body-drain instead, and the two assertions below
     // would pass either way, hiding a regression in `sleepRespectingAbort`.
     let resolveBackoffArmed: () => void;
+    let backoffArmedAt = 0;
     const backoffArmed = new Promise<void>((resolve) => {
       resolveBackoffArmed = resolve;
     });
-    setOnRetryBackoffTimerArmedForTests(() => resolveBackoffArmed());
+    setOnRetryBackoffTimerArmedForTests(() => {
+      // Recorded here, not before `discover()` starts: attempt 1's own
+      // DNS/socket/fetch/server/body-drain time is unrelated to the
+      // pending-backoff-timer cancellation this test targets, and on a
+      // loaded CI worker can by itself exceed any fixed elapsed-time
+      // budget — asserting from "before the whole request" would make
+      // this test flake on an unrelated, correct code path exactly like
+      // the wall-clock race this instrumentation was added to fix.
+      backoffArmedAt = Date.now();
+      resolveBackoffArmed();
+    });
 
     const controller = new AbortController();
     backoffArmed.then(() => controller.abort("giving up"));
 
-    const startedAt = Date.now();
     try {
       await expect(
         discover(server.baseUrl, {
@@ -642,10 +652,12 @@ describe("retry (options.retry)", () => {
       // top of the hop loop, and get caught there by the loop's own
       // `callerAborted()` check instead — same final error type and
       // `attempts` count as above, but only after the full 1000ms backoff
-      // elapsed. Bounding elapsed time well under that proves the abort
-      // actually cut the pending timer short rather than being caught
-      // late by that fallback path.
-      expect(Date.now() - startedAt).toBeLessThan(500);
+      // elapsed. Bounding elapsed time *since the backoff timer armed*
+      // (not since the test started) proves the abort actually cut the
+      // pending timer short rather than being caught late by that
+      // fallback path, without coupling the assertion to attempt 1's own
+      // unrelated request latency.
+      expect(Date.now() - backoffArmedAt).toBeLessThan(500);
     } finally {
       setOnRetryBackoffTimerArmedForTests(undefined);
     }
