@@ -4,7 +4,8 @@
 
 | Thuộc tính | Giá trị |
 |---|---|
-| Trạng thái | Implementation Draft |
+| Trạng thái | Released / Implementation Record |
+| Release | `1.0.9` — 2026-08-01 |
 | Loại release | Patch — interoperability và compatibility hardening |
 | Base dự kiến | `develop` sau khi release `1.0.8` hoàn tất |
 | Owner quyết định | AADP maintainers |

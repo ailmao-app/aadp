@@ -308,10 +308,13 @@ Deliverable:
 - Cursor deduplication/cycle guard và canonical-target deduplication.
 - Shared depth/node/request/response-byte/deadline budget, cancellation và
   cross-origin request limit.
+- Bổ sung request counter tổng quát trên shared traversal budget; không giả định
+  `1.1.0` đã có `maxRequests` và không đổi default behavior của core-only client.
 - Partial result kèm issue provenance khi traversal bị cắt bởi budget, policy
   hoặc unsupported module version.
 
-Dependency: `AADP-REL-004` và core traversal controls `1.1.x` ổn định.
+Dependency: `AADP-REL-004`, core traversal controls `1.1.x` ổn định và ADR chốt
+cách mở rộng budget state tương thích với public API `1.1.0`.
 
 ### `AADP-REL-006` — Conformance và security review
 
