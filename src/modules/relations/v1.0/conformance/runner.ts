@@ -143,8 +143,6 @@ async function runCheck(
   }
 }
 
-const DEFAULT_DEADLINE_MS = 120_000;
-
 /**
  * Runs every Relations v1.0 conformance check and returns a structured
  * report. Never throws for a nonconformant deployment — only for an
@@ -176,23 +174,40 @@ export async function runRelationsConformance(options: RelationsConformanceOptio
   const homeOrigin = origin ? new URL(origin).origin : undefined;
   const scoped = (targetUrl: string): ClientOptions => (homeOrigin ? scopeHeadersToOrigin(client, targetUrl, homeOrigin) : client);
 
-  const effectiveLimits: Record<string, number> = {
-    deadlineMs: options.deadlineMs ?? DEFAULT_DEADLINE_MS,
-    ...(options.maxDepth !== undefined ? { maxDepth: options.maxDepth } : {}),
-    ...(options.maxNodes !== undefined ? { maxNodes: options.maxNodes } : {}),
-    ...(options.maxRequests !== undefined ? { maxRequests: options.maxRequests } : {}),
-    ...(options.maxTotalBytes !== undefined ? { maxTotalBytes: options.maxTotalBytes } : {}),
-    ...(options.maxCrossOriginRequests !== undefined ? { maxCrossOriginRequests: options.maxCrossOriginRequests } : {}),
-  };
-
+  // Built first so `effectiveLimits` (below) reflects what this run
+  // ACTUALLY used — including the ADR-0008 reference defaults
+  // `createRelationsTraversalBudget` applies to any dimension `options`
+  // didn't set — rather than only echoing back caller-supplied overrides
+  // and silently leaving the applied defaults unreported.
+  //
+  // `maxPages` is not one of ADR-0008's six dimensions (it's inherited
+  // from the core `DiscoveryBudgetState`, whose own default is 10000 —
+  // sized for the reference *client*, not for sampling one collection
+  // during a conformance check). Left at that default, a single
+  // `relations.traversal.*` check against a real, large collection could
+  // send thousands of requests to a live deployment just to prove a
+  // budget/cycle property. This mirrors the core conformance runner's own
+  // "deliberately far below the reference client's" page/entity defaults.
+  const CONFORMANCE_MAX_PAGES = 20;
   const budget = createRelationsTraversalBudget({
-    deadlineMs: effectiveLimits.deadlineMs,
+    maxPages: options.maxPages ?? CONFORMANCE_MAX_PAGES,
+    deadlineMs: options.deadlineMs,
     maxDepth: options.maxDepth,
     maxNodes: options.maxNodes,
     maxRequests: options.maxRequests,
     maxTotalBytes: options.maxTotalBytes,
     maxCrossOriginRequests: options.maxCrossOriginRequests,
   });
+
+  const effectiveLimits: Record<string, number> = {
+    maxDepth: budget.maxDepth,
+    maxNodes: budget.maxNodes,
+    maxRequests: budget.maxRequests,
+    maxTotalBytes: budget.maxTotalBytes,
+    deadlineMs: budget.deadlineMs,
+    maxCrossOriginRequests: budget.maxCrossOriginRequests,
+    maxPages: budget.maxPages,
+  };
 
   const state: RelationsRunState = {};
   const ctxBase: Omit<RelationsCheckContext, "skip" | "inconclusive" | "warn" | "fail"> = {

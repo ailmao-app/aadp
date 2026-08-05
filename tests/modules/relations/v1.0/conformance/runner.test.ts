@@ -8,7 +8,7 @@ import {
   InvalidRelationsConformanceOptionsError,
 } from "../../../../../src/modules/relations/v1.0/conformance/index.js";
 import { createPermissiveUrlPolicy } from "../../../../../src/client/v1.0/index.js";
-import { startServer, sendJson, buildEntity, buildRelationSet, type TestServer } from "../client/server-helpers.js";
+import { startServer, sendJson, buildEntity, buildRelationSet, buildCollectionPage, type TestServer } from "../client/server-helpers.js";
 
 let server: TestServer | undefined;
 afterEach(async () => {
@@ -189,6 +189,130 @@ describe("relationsExitCodeFor", () => {
     expect(relationsExitCodeFor({ status: "passed" } as never)).toBe(0);
     expect(relationsExitCodeFor({ status: "failed" } as never)).toBe(1);
     expect(relationsExitCodeFor({ status: "inconclusive" } as never)).toBe(4);
+  });
+});
+
+describe("runRelationsConformance — effective_limits reflects the actually-applied ADR-0008 defaults", () => {
+  it("with no limit options at all, reports every one of the six reference defaults, not just deadlineMs", async () => {
+    const report = await runRelationsConformance({});
+    expect(report.effective_limits).toEqual({
+      maxDepth: 3,
+      maxNodes: 1_000,
+      maxRequests: 2_000,
+      maxTotalBytes: 64 * 1024 * 1024,
+      deadlineMs: 5 * 60_000,
+      maxCrossOriginRequests: 100,
+      maxPages: 20,
+    });
+  });
+});
+
+describe("runRelationsConformance — collection.pagination does not certify an unproven termination", () => {
+  it("is inconclusive (never a default-passing warning) when the collection keeps handing out fresh cursors", async () => {
+    server = await startServer((_req, res, url) => {
+      const host = _req.headers.host;
+      if (url.pathname === "/entities/character/alice.json") {
+        return sendJson(
+          res,
+          200,
+          buildEntity("character:alice", "character", {}, {
+            x_relations: buildRelationSet([
+              { rel: "posts", target_type: "post", cardinality: "many", collection: { url: `http://${host}/relations/alice/posts.json`, pagination: "cursor" } },
+            ]),
+          })
+        );
+      }
+      if (url.pathname === "/relations/alice/posts.json") {
+        // Every page hands out a brand-new cursor — never repeats (so
+        // cursor-cycle detection never fires) and never terminates.
+        return sendJson(res, 200, buildCollectionPage({ id: "character:alice", type: "character" }, "posts", "post", [], `page-${Math.random()}`));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const report = await runRelationsConformance({
+      sampleEntityUrl: `${server.baseUrl}/entities/character/alice.json`,
+      urlPolicy: createPermissiveUrlPolicy(),
+    });
+    const byId = Object.fromEntries(report.checks.map((c) => [c.id, c]));
+    expect(byId["relations.collection.pagination"].status).toBe("skipped");
+    expect(byId["relations.collection.pagination"].inconclusive).toBe(true);
+    // A run with only an inconclusive skip (no failure) must not be
+    // certified "passed" — this is the whole point of the fix.
+    expect(report.status).toBe("inconclusive");
+    expect(relationsExitCodeFor(report)).toBe(4);
+  });
+});
+
+describe("runRelationsConformance — security.credentials actually observes cross-origin behavior", () => {
+  async function startProbe(): Promise<TestServer> {
+    return startServer((req, res, url) => {
+      if (url.pathname === "/probe") {
+        return sendJson(res, 200, { received_headers: { ...req.headers } });
+      }
+      sendJson(res, 404, {});
+    });
+  }
+
+  it("is inconclusive without crossOriginProbeUrl, even though headers were configured", async () => {
+    const report = await runRelationsConformance({ baseUrl: "https://example.com", headers: { Authorization: "Bearer secret" } });
+    const byId = Object.fromEntries(report.checks.map((c) => [c.id, c]));
+    expect(byId["relations.security.credentials"].status).toBe("skipped");
+    expect(byId["relations.security.credentials"].inconclusive).toBe(true);
+  });
+
+  it("fails when the probe reports having received a header that was never allow-listed", async () => {
+    // A probe that (mis)reports receiving every header regardless of what
+    // was actually sent — stands in for "the header leaked cross-origin"
+    // from the check's point of view, so the check's own leak-detection
+    // logic (not this repo's already-correct `scopeHeadersToOrigin`) is
+    // what's under test here.
+    const dishonestProbe = await startServer((_req, res, url) => {
+      if (url.pathname === "/probe") return sendJson(res, 200, { received_headers: { authorization: "Bearer secret" } });
+      sendJson(res, 404, {});
+    });
+    server = await startServer((_req, res) => sendJson(res, 404, {}));
+    try {
+      const report = await runRelationsConformance({
+        baseUrl: server.baseUrl,
+        crossOriginProbeUrl: `${dishonestProbe.baseUrl}/probe`,
+        headers: { Authorization: "Bearer secret" },
+        urlPolicy: createPermissiveUrlPolicy(),
+      });
+      const byId = Object.fromEntries(report.checks.map((c) => [c.id, c]));
+      expect(byId["relations.security.credentials"].status).toBe("failed");
+    } finally {
+      await dishonestProbe.close();
+    }
+  });
+
+  it("passes when the header is correctly stripped, and also when explicitly allow-listed", async () => {
+    const probe = await startProbe();
+    server = await startServer((_req, res) => sendJson(res, 404, {}));
+    try {
+      // Default (no allow-list): must be stripped -> pass.
+      const strippedReport = await runRelationsConformance({
+        baseUrl: server.baseUrl,
+        crossOriginProbeUrl: `${probe.baseUrl}/probe`,
+        headers: { "X-Api-Key": "secret" },
+        urlPolicy: createPermissiveUrlPolicy(),
+      });
+      const strippedById = Object.fromEntries(strippedReport.checks.map((c) => [c.id, c]));
+      expect(strippedById["relations.security.credentials"].status).toBe("passed");
+
+      // Explicitly allow-listed: must be forwarded -> also pass.
+      const allowListedReport = await runRelationsConformance({
+        baseUrl: server.baseUrl,
+        crossOriginProbeUrl: `${probe.baseUrl}/probe`,
+        headers: { "X-Api-Key": "secret" },
+        crossOriginSafeHeaders: ["X-Api-Key"],
+        urlPolicy: createPermissiveUrlPolicy(),
+      });
+      const allowListedById = Object.fromEntries(allowListedReport.checks.map((c) => [c.id, c]));
+      expect(allowListedById["relations.security.credentials"].status).toBe("passed");
+    } finally {
+      await probe.close();
+    }
   });
 });
 

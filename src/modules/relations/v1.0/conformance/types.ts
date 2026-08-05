@@ -41,6 +41,16 @@ export interface RelationsConformanceOptions {
   sampleRegistryUrl?: string;
   /** A URL expected to answer AADP `not_found`/`forbidden`/`unauthorized` — for `http.errors`. */
   negativeTargetUrl?: string;
+  /**
+   * A URL on a DIFFERENT origin than `baseUrl`/`sampleEntityUrl` that
+   * echoes back the request headers it received, as JSON
+   * `{ received_headers: Record<string, string> }` (lowercase header
+   * names) — for `relations.security.credentials`. Without this, that
+   * check has no way to observe whether `headers` actually reached (or
+   * was correctly stripped from) a cross-origin request, so it is
+   * `inconclusive` rather than a self-asserted pass.
+   */
+  crossOriginProbeUrl?: string;
   timeoutMs?: number;
   maxRedirects?: number;
   maxResponseBytes?: number;
@@ -50,6 +60,8 @@ export interface RelationsConformanceOptions {
   headers?: Record<string, string>;
   crossOriginSafeHeaders?: string[];
   /** Relations traversal budget, threaded into `relations-full`/`relations-authenticated` resolution — see `RelationsTraversalLimits`. */
+  /** Maximum collection pages fetched per paginated relation sampled by a check. Default 20 — deliberately small, this samples a live deployment, it does not mirror its catalogue. */
+  maxPages?: number;
   maxDepth?: number;
   maxNodes?: number;
   maxRequests?: number;

@@ -315,15 +315,24 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
       const expected = ctx.state.sampleCollectionExpectation;
       if (!url || !expected) return ctx.inconclusive("No sample collection was available to paginate.");
       let pages = 0;
-      const pageBudget = createRelationsTraversalBudget({ maxPages: 20, deadlineMs: ctx.budget.deadlineMs });
+      // A fresh budget sharing only the run's page/deadline limits — not
+      // `ctx.budget` itself, so this walk's page count doesn't consume the
+      // same counter other checks (e.g. `relations.traversal.*`) charge
+      // against.
+      const pageBudget = createRelationsTraversalBudget({ maxPages: ctx.budget.maxPages, deadlineMs: ctx.budget.deadlineMs });
       try {
         for await (const _item of iterateRelationCollection(url, expected, ctx.scoped(url), pageBudget)) {
           pages++;
         }
       } catch (err) {
         if (err instanceof AadpDiscoveryBudgetExceededError) {
-          return ctx.warn(`Collection did not terminate within 20 pages; treated as bounded, not a cycle.`);
-          return;
+          // Not evidence of a cycle (cycle detection would have thrown
+          // RelationsCursorCycleError instead) — but also not evidence
+          // pagination terminates: bounded-but-unproven MUST NOT be
+          // reported as a pass (specification.md §12), so this is
+          // inconclusive rather than a warning that a default report
+          // treats as a clean pass.
+          return ctx.inconclusive(`Collection did not terminate within ${pageBudget.maxPages} pages; cannot confirm pagination terminates.`);
         }
         return ctx.fail(`Collection pagination failed: ${(err as Error).message}`);
       }
@@ -412,6 +421,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
       const result = await traverseRelations(ctx.options.sampleEntityUrl, {
         ...ctx.client,
         rootOrigin: new URL(ctx.options.sampleEntityUrl).origin,
+        maxPages: ctx.budget.maxPages,
         maxDepth: ctx.options.maxDepth,
         maxNodes: ctx.options.maxNodes,
         maxRequests: ctx.options.maxRequests,
@@ -440,12 +450,19 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
         ...ctx.client,
         rootOrigin: new URL(ctx.options.sampleEntityUrl).origin,
         followEdges: true,
+        maxPages: ctx.budget.maxPages,
         maxDepth: ctx.options.maxDepth ?? 5,
         maxNodes: ctx.options.maxNodes ?? 200,
         deadlineMs: ctx.options.deadlineMs ?? 30_000,
       });
       if (result.partial && result.issues.some((i) => i.code === "traversal_budget_exceeded")) {
-        return ctx.warn("Traversal was cut short by a budget rather than terminating on its own — cannot confirm cycle containment alone proved termination.");
+        // Same reasoning as `relations.collection.pagination`: cut short
+        // by budget is not evidence the walk terminates on its own, so
+        // this MUST NOT be reportable as a default-passing warning —
+        // inconclusive, not warn (specification.md §12).
+        return ctx.inconclusive(
+          "Traversal was cut short by a budget rather than terminating on its own — cannot confirm cycle containment alone proved termination."
+        );
       }
     },
   },
@@ -459,6 +476,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
       const result = await traverseRelations(ctx.options.sampleEntityUrl, {
         ...ctx.client,
         rootOrigin: new URL(ctx.options.sampleEntityUrl).origin,
+        maxPages: ctx.budget.maxPages,
         maxNodes: 1, // deliberately tiny — forces a partial result to inspect provenance
       });
       if (result.partial && result.issues.length === 0) {
@@ -479,13 +497,55 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
   {
     id: "relations.security.credentials",
     group: "security",
-    title: "Credential headers are scoped to the root origin by construction",
+    title: "Credential headers are stripped cross-origin unless explicitly allow-listed",
     async run(ctx) {
       if (!ctx.options.headers) return ctx.skip("No options.headers were configured for this run — nothing to scope.");
-      // Enforced structurally by every resolution entry point in
-      // `../client/resolve.ts` calling `scopeHeadersToOrigin` whenever
-      // `rootOrigin` is set, which this runner always sets — see
-      // `relations.traversal.*` checks above.
+      const probeUrl = ctx.options.crossOriginProbeUrl;
+      if (!probeUrl) {
+        return ctx.inconclusive(
+          "options.crossOriginProbeUrl was not supplied; cannot observe whether a cross-origin request actually received (or was stripped of) options.headers."
+        );
+      }
+      const homeUrl = ctx.options.baseUrl ?? ctx.options.sampleEntityUrl;
+      if (!homeUrl) {
+        return ctx.inconclusive("Neither options.baseUrl nor options.sampleEntityUrl is set; there is no root origin to scope headers against.");
+      }
+      const homeOrigin = new URL(homeUrl).origin;
+      if (new URL(probeUrl).origin === homeOrigin) {
+        return ctx.fail("options.crossOriginProbeUrl must be on a different origin than baseUrl/sampleEntityUrl to prove cross-origin scoping.");
+      }
+
+      const { status, data } = await fetchJson(probeUrl, scopeHeadersToOrigin(ctx.client, probeUrl, homeOrigin), ctx.budget);
+      if (status < 200 || status >= 300) return ctx.fail(`Cross-origin probe at ${probeUrl} answered with status ${status}.`);
+      const received = (data as { received_headers?: Record<string, string> } | undefined)?.received_headers;
+      if (!received || typeof received !== "object") {
+        return ctx.fail(`Cross-origin probe at ${probeUrl} did not answer { received_headers: {...} } as documented.`);
+      }
+      const receivedLower = new Set(Object.keys(received).map((h) => h.toLowerCase()));
+      const safeList = new Set((ctx.options.crossOriginSafeHeaders ?? []).map((h) => h.toLowerCase()));
+
+      const leaked: string[] = [];
+      const wrongfullyStripped: string[] = [];
+      for (const name of Object.keys(ctx.options.headers)) {
+        const lower = name.toLowerCase();
+        const wasReceived = receivedLower.has(lower);
+        if (safeList.has(lower)) {
+          if (!wasReceived) wrongfullyStripped.push(name);
+        } else if (wasReceived) {
+          leaked.push(name);
+        }
+      }
+
+      if (leaked.length > 0) {
+        return ctx.fail(
+          `Cross-origin request at ${probeUrl} received header(s) not in crossOriginSafeHeaders: ${leaked.join(", ")}.`
+        );
+      }
+      if (wrongfullyStripped.length > 0) {
+        return ctx.fail(
+          `Cross-origin request at ${probeUrl} did not receive allow-listed header(s): ${wrongfullyStripped.join(", ")}.`
+        );
+      }
     },
   },
   {
