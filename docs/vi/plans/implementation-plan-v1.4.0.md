@@ -6,7 +6,7 @@
 |---|---|
 | Trạng thái | Blocked Implementation Draft |
 | Chủ đề | Evidence & Provenance Module |
-| Dependency | Relations stable; citation/claim ADR |
+| Dependency | Relations `1.0` stable; Answer `1.0` stable; citation/claim ADR |
 | Wire impact | Module riêng |
 
 ## Scope

@@ -4,7 +4,8 @@
 
 | Thuộc tính | Giá trị |
 |---|---|
-| Trạng thái | Conditional Implementation Draft |
+| Trạng thái | Released / Implementation Record |
+| Release | `1.0.10` — 2026-08-02 |
 | Chủ đề | Robustness fixes từ corpus và consumer feedback |
 | Dependency | `1.0.9` đã release |
 | Wire impact | Không |

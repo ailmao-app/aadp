@@ -4,7 +4,8 @@
 
 | Thuộc tính | Giá trị |
 |---|---|
-| Trạng thái | Implementation Draft |
+| Trạng thái | Released / Implementation Record |
+| Release | `1.1.0` — 2026-08-05 |
 | Chủ đề | Bounded traversal controls |
 | Dependency | Dòng `1.0.x` ổn định |
 | Wire impact | Không đổi AADP v1.0 |
@@ -14,7 +15,7 @@
 - `AbortSignal` xuyên suốt request/body/traversal.
 - Configurable concurrency limit với default tương thích.
 - Retry/backoff/`Retry-After` opt-in.
-- Tổng request/response-byte/deadline budget.
+- Tổng response-byte/deadline budget; page/entity count tiếp tục là traversal cap.
 - Conformance profiles: `core`, `public-web`, `full-traversal`, `authenticated`.
 
 ## Kiến trúc
@@ -36,6 +37,12 @@ thuộc HTTP/CLI), nhưng **không** clock/fetch-injectable — `Date.now`,
 (bản draft ban đầu của kế hoạch này từng yêu cầu injection, nhưng seam đó
 chưa bao giờ được triển khai; test dựa trên timer thật ngắn + mock server
 thật thay vì fake clock).
+
+`1.1.0` không phát hành `maxRequests` hoặc request counter tổng quát. Request được
+giới hạn gián tiếp bởi page/entity caps, retry `maxAttempts`, deadline và
+cancellation. Module traversal cần request count độc lập phải bổ sung shared
+budget dimension mới trong minor release sau; không được diễn giải
+`maxPages`/`maxEntities` thành `maxRequests`.
 
 ## Work packages
 

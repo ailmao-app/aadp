@@ -20,6 +20,12 @@
 Attestation chỉ chứng minh check/profile đã chạy tại thời điểm xác định; không
 chứng minh accuracy, license hoặc security toàn hệ thống.
 
+Trong `1.8.0`, verification helper chỉ xác minh schema, report digest, profile,
+scope, timestamp và expiry/revocation state. Digest chứng minh artifact không bị
+thay đổi sau khi tạo; nó không chứng minh danh tính hoặc thẩm quyền của issuer.
+Khi chưa có signing ADR, key distribution và trust policy, issuer authenticity
+phải được báo `unverified`, không được suy ra `verified` từ digest hợp lệ.
+
 ## Work packages
 
 1. Certification scope/trust/retention ADR.
@@ -34,3 +40,5 @@ chứng minh accuracy, license hoặc security toàn hệ thống.
 - Inconclusive/skipped không chuyển thành pass.
 - Profile/check IDs versioned.
 - Expiry/revocation và privacy retention rõ.
+- Verification output phân biệt artifact integrity với issuer authenticity;
+  unsigned attestation không được báo trusted.

@@ -4,9 +4,10 @@
 
 | Thuộc tính | Giá trị |
 |---|---|
-| Trạng thái | Conditional Implementation Draft |
+| Trạng thái | Released / Implementation Record |
+| Release | `1.0.11` — 2026-08-03 |
 | Chủ đề | Production certification operations |
-| Dependency | `1.0.9`; có thể gộp vào `1.0.10` |
+| Dependency lịch sử | `1.0.9`; scope cuối cùng được phát hành riêng trong `1.0.11` |
 | Wire/runtime impact | Không |
 
 ## Mục tiêu

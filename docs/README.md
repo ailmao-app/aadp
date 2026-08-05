@@ -8,7 +8,7 @@
 | Audience | Implementers, reviewers, and maintainers |
 | Normative source | Versioned specifications under [`../spec/`](../spec/) |
 | Conventions | [`document-conventions.md`](document-conventions.md) |
-| Package baseline at last audit | `ail-aadp@1.0.7` |
+| Package baseline at last audit | `ail-aadp@1.1.0` |
 
 ## Abstract
 
@@ -35,6 +35,8 @@ contract. Such a change requires a new protocol version and an ADR.
 
 - [AADP v0.1 specification](../spec/v0.1/specification.md)
 - [AADP v1.0 specification](../spec/v1.0/specification.md)
+- [Relations Module v1.0 specification](../spec/modules/relations/v1.0/specification.md)
+- [Relations Module v1.0 conformance contract](../spec/modules/relations/v1.0/conformance.md)
 - [AADP v0.1 schemas](../schemas/v0.1/)
 - [AADP v1.0 schemas](../schemas/v1.0/)
 
@@ -48,7 +50,7 @@ contract. Such a change requires a new protocol version and an ADR.
 | [AADP v1.0 implementation record](records/implementation-record-v1.0.md) | Implementation record | Implemented |
 | [Manifest v1.0 design](design/manifest-v1.0-design.md) | Design memo | Accepted through ADR-0005 |
 | [Đề xuất tích hợp các cơ chế agent discovery liền kề AADP](design/agent-discovery-integrations-proposal.md) | Design memo | Proposed |
-| [Relations Module design](design/relations-module-design.md) | Design memo | Draft |
+| [Relations Module design](design/relations-module-design.md) | Design memo | Superseded |
 | [AEO/GEO integration plan](design/aeo-geo-integration-plan.md) | Design plan | Draft |
 | [Historical AADP draft](archive/aadp-draft.md) | Archive | Superseded |
 
@@ -59,6 +61,9 @@ contract. Such a change requires a new protocol version and an ADR.
 - [ADR-0003: Capability discovery](adr/0003-capability-discovery.md)
 - [ADR-0004: Backward compatibility](adr/0004-backward-compatibility.md)
 - [ADR-0005: Manifest v1.0 discovery](adr/0005-manifest-v1-discovery.md)
+- [ADR-0006: Bounded traversal controls](adr/0006-bounded-traversal-controls.md)
+- [ADR-0007: Module versioning and discovery](adr/0007-module-versioning-and-discovery.md)
+- [ADR-0008: Module traversal and authorization](adr/0008-module-traversal-and-authorization.md)
 
 ADRs retain the Context/Decision/Consequences format. They are not rewritten as
 protocol specifications.
