@@ -27,6 +27,7 @@ import {
 } from "../../src/client/v1.0/index.js";
 import { checksumOf } from "../../src/canonical-json/checksum.js";
 import { createDiscoveryBudget } from "../../src/client/discovery-budget.js";
+import { setOnRetryBackoffTimerArmedForTests } from "../../src/client/http.js";
 
 /**
  * Phase-4 reference-client tests: acceptance criteria from
@@ -598,39 +599,56 @@ describe("retry (options.retry)", () => {
 
   it("stops retrying immediately when the caller's signal aborts during backoff", async () => {
     let attempts = 0;
-    // Resolved once the server has actually sent attempt 1's response,
-    // rather than a fixed wall-clock delay: under parallel test-suite load,
-    // a blind `setTimeout(..., 10)` can fire before the first request even
-    // reaches the server (attempts still 0) or race the response, making
-    // the assertion below flaky independent of the retry/abort logic under
-    // test. Aborting only after attempt 1's response is observed removes
-    // that race entirely, while still landing well inside the 1000ms
-    // backoff window this test aborts out of.
-    let resolveFirstAttemptSent: () => void;
-    const firstAttemptSent = new Promise<void>((resolve) => {
-      resolveFirstAttemptSent = resolve;
-    });
     server = await startServer((_req, res, url) => {
       if (url.pathname === "/.well-known/ai-manifest.json") {
         attempts++;
-        sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
-        resolveFirstAttemptSent();
-        return;
+        return sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
       }
       sendJson(res, 404, {});
     });
 
-    const controller = new AbortController();
-    firstAttemptSent.then(() => controller.abort("giving up"));
+    // Synchronize on the retry backoff `setTimeout` actually being armed
+    // (production-code instrumentation, test-only — see
+    // `setOnRetryBackoffTimerArmedForTests` in `src/client/http.ts`),
+    // not on a fixed wall-clock delay or on "the server responded to
+    // attempt 1": either of those can race ahead of or behind the point
+    // where the pending backoff timer itself becomes abort-cancellable,
+    // so aborting there wouldn't actually exercise "abort cancels the
+    // pending retry timer" — it could just as well be aborting during the
+    // in-flight fetch/body-drain instead, and the two assertions below
+    // would pass either way, hiding a regression in `sleepRespectingAbort`.
+    let resolveBackoffArmed: () => void;
+    const backoffArmed = new Promise<void>((resolve) => {
+      resolveBackoffArmed = resolve;
+    });
+    setOnRetryBackoffTimerArmedForTests(() => resolveBackoffArmed());
 
-    await expect(
-      discover(server.baseUrl, {
-        ...PERMISSIVE,
-        signal: controller.signal,
-        retry: { maxAttempts: 10, baseDelayMs: 1000, maxDelayMs: 1000 },
-      })
-    ).rejects.toThrow(AbortedError);
-    expect(attempts).toBe(1);
+    const controller = new AbortController();
+    backoffArmed.then(() => controller.abort("giving up"));
+
+    const startedAt = Date.now();
+    try {
+      await expect(
+        discover(server.baseUrl, {
+          ...PERMISSIVE,
+          signal: controller.signal,
+          retry: { maxAttempts: 10, baseDelayMs: 1000, maxDelayMs: 1000 },
+        })
+      ).rejects.toThrow(AbortedError);
+      expect(attempts).toBe(1);
+      // The decisive assertion: if `sleepRespectingAbort`'s own abort
+      // listener were missing/broken, the pending `setTimeout(..., 1000)`
+      // would still (eventually) resolve, `continue attempts` back to the
+      // top of the hop loop, and get caught there by the loop's own
+      // `callerAborted()` check instead — same final error type and
+      // `attempts` count as above, but only after the full 1000ms backoff
+      // elapsed. Bounding elapsed time well under that proves the abort
+      // actually cut the pending timer short rather than being caught
+      // late by that fallback path.
+      expect(Date.now() - startedAt).toBeLessThan(500);
+    } finally {
+      setOnRetryBackoffTimerArmedForTests(undefined);
+    }
   });
 
   it("throws AadpDiscoveryBudgetExceededError instead of sleeping once a retry's backoff would exceed the shared deadline", async () => {

@@ -262,6 +262,28 @@ function parseRetryAfterMs(value: string | null, maxDelayMs: number): number | u
 }
 
 /**
+ * Test-only instrumentation, fired the instant a retry backoff `setTimeout`
+ * is actually armed and its `abort` listener attached — i.e. the moment a
+ * caller's abort would hit *this* pending timer rather than some earlier
+ * point in the retry loop (in-flight `fetch()`, body drain, ...). Exists
+ * because a test synchronizing only on "the server responded to attempt 1"
+ * cannot tell whether its subsequent `controller.abort()` actually landed
+ * on the backoff wait or raced ahead of it — see `ERROR_LOG.md` 2026-08-05
+ * and the "Testability" section of ADR-0006. Not part of the public
+ * package surface: `http.ts` is not one of `package.json`'s `exports`
+ * subpaths, so `tests/package/compatibility-contract.test.ts` (which only
+ * imports from the packed tarball's `dist/client/v1.0` etc.) can never
+ * observe or lock this hook. Defaults to a no-op; install/clear via
+ * `setOnRetryBackoffTimerArmedForTests`.
+ */
+let onRetryBackoffTimerArmedForTests: (() => void) | undefined;
+
+/** Test-only: see `onRetryBackoffTimerArmedForTests` above. */
+export function setOnRetryBackoffTimerArmedForTests(hook: (() => void) | undefined): void {
+  onRetryBackoffTimerArmedForTests = hook;
+}
+
+/**
  * Waits `ms`, rejecting early (with a plain `AbortError`-named `Error`, left
  * for the caller to map to `AbortedError`) if `signal` aborts first — a
  * pending retry backoff timer is itself cancellable, per ADR-0006.
@@ -285,6 +307,7 @@ function sleepRespectingAbort(ms: number, signal: AbortSignal | undefined): Prom
       resolve();
     }, ms);
     signal?.addEventListener("abort", onAbort);
+    onRetryBackoffTimerArmedForTests?.();
   });
 }
 
