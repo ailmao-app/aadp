@@ -37,7 +37,10 @@ describe("registerModule / getModuleEntry", () => {
     const moduleId = freshModuleId();
     registerModule({ moduleId, moduleVersion: "1.0", kind: "widget" }, { schema: widgetSchema });
     const entry = getModuleEntry({ moduleId, moduleVersion: "1.0", kind: "widget" });
-    expect(entry.schema).toBe(widgetSchema);
+    // Not `.toBe`: the registry snapshots (deep-clones) the schema at
+    // registration time, so the returned object is equal in content but
+    // not the same reference as the one passed in.
+    expect(entry.schema).toEqual(widgetSchema);
   });
 
   it("rejects a module id that does not match the ADR-0007 pattern", () => {
@@ -66,6 +69,39 @@ describe("registerModule / getModuleEntry", () => {
     expect(() =>
       registerModule({ moduleId, moduleVersion: "1.0", kind: "gadget" }, { schema: widgetSchema })
     ).not.toThrow();
+  });
+
+  it("snapshots the schema at registration: mutating the caller's original object afterwards does not affect validation", () => {
+    const moduleId = freshModuleId();
+    const mutableSchema: { type: string; properties: Record<string, unknown>; required: string[] } = {
+      type: "object",
+      properties: { label: { type: "string" } },
+      required: ["label"],
+    };
+    registerModule({ moduleId, moduleVersion: "1.0", kind: "widget" }, { schema: mutableSchema });
+
+    // Sabotage the object the caller still holds a reference to.
+    mutableSchema.required = [];
+    (mutableSchema as { type: string }).type = "null";
+
+    const result = validateModuleDocument({ moduleId, moduleVersion: "1.0", kind: "widget" }, { label: "still required" });
+    expect(result.valid).toBe(true);
+  });
+
+  it("returns a frozen schema from getModuleEntry that cannot be mutated to desync from the compiled validator", () => {
+    const moduleId = freshModuleId();
+    registerModule({ moduleId, moduleVersion: "1.0", kind: "widget" }, { schema: widgetSchema });
+    const returnedSchema = getModuleEntry({ moduleId, moduleVersion: "1.0", kind: "widget" }).schema as {
+      required: string[];
+    };
+    expect(Object.isFrozen(returnedSchema)).toBe(true);
+    expect(() => {
+      returnedSchema.required = [];
+    }).toThrow();
+
+    // Regardless of the throw above, validation still enforces the original contract.
+    const result = validateModuleDocument({ moduleId, moduleVersion: "1.0", kind: "widget" }, { kind: "widget" });
+    expect(result.valid).toBe(false);
   });
 });
 
@@ -193,6 +229,31 @@ describe("assertValidModuleDocument", () => {
     registerModule({ moduleId, moduleVersion: "1.0", kind: "widget" }, { schema: widgetSchema });
     expect(() => assertValidModuleDocument({ moduleId, moduleVersion: "1.0", kind: "widget" }, {})).toThrow(
       InvalidModuleDocumentError
+    );
+  });
+
+  // Unlike validateModuleDocument's error surface, assertValidModuleDocument
+  // does NOT collapse lookup misses into InvalidModuleDocumentError — each
+  // of the three ADR-0007 lookup errors still propagates as itself.
+  it("propagates UnsupportedModuleError, not InvalidModuleDocumentError, for an unknown moduleId", () => {
+    expect(() => assertValidModuleDocument({ moduleId: "test:missing", moduleVersion: "1.0", kind: "widget" }, {})).toThrow(
+      UnsupportedModuleError
+    );
+  });
+
+  it("propagates UnsupportedModuleVersionError, not InvalidModuleDocumentError, for an unknown moduleVersion", () => {
+    const moduleId = freshModuleId();
+    registerModule({ moduleId, moduleVersion: "1.0", kind: "widget" }, { schema: widgetSchema });
+    expect(() => assertValidModuleDocument({ moduleId, moduleVersion: "9.9", kind: "widget" }, {})).toThrow(
+      UnsupportedModuleVersionError
+    );
+  });
+
+  it("propagates UnsupportedModuleKindError, not InvalidModuleDocumentError, for an unknown kind", () => {
+    const moduleId = freshModuleId();
+    registerModule({ moduleId, moduleVersion: "1.0", kind: "widget" }, { schema: widgetSchema });
+    expect(() => assertValidModuleDocument({ moduleId, moduleVersion: "1.0", kind: "missing-kind" }, {})).toThrow(
+      UnsupportedModuleKindError
     );
   });
 });

@@ -35,6 +35,22 @@ interface CompiledEntry extends ModuleRegistryEntry {
   compiled: ValidateFunction;
 }
 
+/**
+ * Recursively freezes a cloned schema so a later mutation of the
+ * caller's original object (or of a `getModuleEntry().schema` reference)
+ * can never desync from the validator AJV already compiled for it — see
+ * the registration-is-immutable contract on `registerModule`.
+ */
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const key of Object.keys(value as object)) {
+      deepFreeze((value as Record<string, unknown>)[key]);
+    }
+    Object.freeze(value);
+  }
+  return value;
+}
+
 // moduleId -> moduleVersion -> kind -> entry. Nested maps (rather than one
 // flat `${moduleId}:${moduleVersion}:${kind}` key) keep "this moduleId
 // doesn't exist", "this version doesn't exist" and "this kind doesn't
@@ -61,7 +77,11 @@ export function registerModule(key: ModuleRegistryKey, entry: ModuleRegistryEntr
       `Module "${key.moduleId}@${key.moduleVersion}" kind "${key.kind}" is already registered; registered module entries are immutable.`
     );
   }
-  byKind.set(key.kind, { ...entry, compiled: ajv.compile(entry.schema) });
+  // Snapshot the schema before compiling: a deep clone, frozen, so neither
+  // the caller's original object nor the entry `getModuleEntry` later
+  // returns can drift from what `ajv.compile` actually validates against.
+  const schema = deepFreeze(structuredClone(entry.schema));
+  byKind.set(key.kind, { ...entry, schema, compiled: ajv.compile(schema) });
   byVersion.set(key.moduleVersion, byKind);
   registry.set(key.moduleId, byVersion);
 }
@@ -117,11 +137,14 @@ export function validateModuleDocument(
 
 /**
  * Throwing counterpart of `validateModuleDocument`, for call sites that
- * want a single `InvalidModuleDocumentError` on any failure (unknown key
- * or invalid document) instead of branching on `{valid}`. Unlike
- * `validateModuleDocument`, this does not distinguish an unknown key from
- * an invalid document — use `validateModuleDocument` directly when that
- * distinction matters.
+ * want a single try/catch instead of branching on `{valid}`. Only wraps
+ * the "known key, invalid document" case as `InvalidModuleDocumentError`;
+ * an unknown `moduleId`/`moduleVersion`/`kind` still throws its own
+ * `UnsupportedModule*Error` from the underlying lookup — this function
+ * does NOT collapse the ADR-0007 lookup-error taxonomy into one error
+ * type. Callers that need to tell "unsupported key" apart from "invalid
+ * document" can distinguish by `error.code`; callers that only care
+ * whether the document was accepted can catch `Error` generically.
  */
 export function assertValidModuleDocument(key: ModuleRegistryKey, data: unknown): void {
   const result = validateModuleDocument(key, data);
