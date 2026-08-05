@@ -91,7 +91,7 @@ Invalid fixtures:
 
 | Fixture | Expected check ID | Expected issue code |
 |---|---|---|
-| `relations-invalid-wrapper-version` | `relations.discovery.declared` | `unsupported_module_version` |
+| `relations-invalid-wrapper-version` | `relations.schema.relation_set` | `invalid_module_document` |
 | `relations-invalid-unknown-field` | `relations.schema.relation_set` | `invalid_module_document` |
 | `relations-invalid-one-with-targets` | `relations.semantic.cardinality` | `invalid_cardinality_container` |
 | `relations-invalid-many-with-both-containers` | `relations.semantic.cardinality` | `invalid_cardinality_container` |
