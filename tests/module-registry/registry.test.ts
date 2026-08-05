@@ -106,6 +106,57 @@ describe("registerModule / getModuleEntry", () => {
     expect(validateModuleDocument({ moduleId, moduleVersion: "1.0", kind: "widget" }, { item: {} }).valid).toBe(false);
   });
 
+  it("rejects a schemaDependencies entry that reuses another dependency's $id with different content (schema-poisoning guard)", () => {
+    const moduleId = freshModuleId();
+    const sharedId = `https://example.com/schemas/${moduleId.replace(":", "-")}/shared.schema.json`;
+    const officialComponent = {
+      $id: sharedId,
+      type: "object",
+      required: ["id"],
+      properties: { id: { type: "string", pattern: "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$" } },
+      additionalProperties: false,
+    };
+    const poisonedComponent = {
+      // Same $id, but drops the id-format constraint entirely — a
+      // conflicting schema that must never silently win just because it
+      // happened to register second (or first).
+      $id: sharedId,
+      type: "object",
+      required: ["id"],
+      properties: { id: { type: "string" } },
+      additionalProperties: false,
+    };
+    const documentSchema = {
+      type: "object",
+      required: ["target"],
+      properties: { target: { $ref: sharedId } },
+      additionalProperties: false,
+    };
+
+    registerModule(
+      { moduleId, moduleVersion: "1.0", kind: "widget" },
+      { schema: documentSchema, schemaDependencies: [officialComponent] }
+    );
+
+    expect(() =>
+      registerModule(
+        { moduleId, moduleVersion: "1.0", kind: "gadget" },
+        { schema: documentSchema, schemaDependencies: [poisonedComponent] }
+      )
+    ).toThrow(/dependency conflict/i);
+
+    // The first (official) registration's validation contract must be
+    // unaffected by the rejected conflicting registration attempt.
+    expect(
+      validateModuleDocument({ moduleId, moduleVersion: "1.0", kind: "widget" }, { target: { id: "not-a-valid-id" } })
+        .valid
+    ).toBe(false);
+    expect(
+      validateModuleDocument({ moduleId, moduleVersion: "1.0", kind: "widget" }, { target: { id: "character:alice" } })
+        .valid
+    ).toBe(true);
+  });
+
   it("snapshots the schema at registration: mutating the caller's original object afterwards does not affect validation", () => {
     const moduleId = freshModuleId();
     const mutableSchema: { type: string; properties: Record<string, unknown>; required: string[] } = {

@@ -33,6 +33,7 @@ nhưng có suite riêng; core `CHECKS` và IDs MUST không đổi.
 | `relations.collection.checksum` | Canonical items checksum |
 | `relations.registry.unique_token` | Registry token uniqueness |
 | `relations.registry.checksum` | Canonical relations checksum |
+| `relations.registry.symmetric` | `symmetric: true` requires `inverse` == `token` |
 | `relations.http.errors` | Empty/error semantics |
 | `relations.http.cache` | Conditional GET |
 | `relations.traversal.budget` | Effective limits |
@@ -60,6 +61,7 @@ Released check IDs là stable machine contract.
 | `collection_checksum_mismatch` | failed |
 | `duplicate_registry_token` | failed |
 | `registry_checksum_mismatch` | failed |
+| `symmetric_inverse_mismatch` | failed |
 | `cursor_cycle` | partial/inconclusive |
 | `graph_cycle` | partial/inconclusive |
 | `traversal_budget_exceeded` | partial/inconclusive |
@@ -104,6 +106,8 @@ Invalid fixtures:
 | `relations-invalid-checksum` | `relations.collection.checksum` | `collection_checksum_mismatch` |
 | `relations-invalid-registry-duplicate-token` | `relations.registry.unique_token` | `duplicate_registry_token` |
 | `relations-invalid-registry-checksum` | `relations.registry.checksum` | `registry_checksum_mismatch` |
+| `relations-invalid-registry-token` | `relations.semantic.tokens` | `invalid_relation_token` |
+| `relations-invalid-registry-symmetric-mismatch` | `relations.registry.symmetric` | `symmetric_inverse_mismatch` |
 
 Traversal/security fixtures:
 

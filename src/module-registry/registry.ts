@@ -8,6 +8,7 @@
  */
 import { createRequire } from "node:module";
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
+import { canonicalize } from "../canonical-json/canonicalize.js";
 import {
   UnsupportedModuleError,
   UnsupportedModuleVersionError,
@@ -57,16 +58,40 @@ function deepFreeze<T>(value: T): T {
 // exist" distinguishable without re-deriving them from a miss.
 const registry = new Map<string, Map<string, Map<string, CompiledEntry>>>();
 
+// $id -> canonical JSON of the schema last registered under it. Lets a
+// second `registerModule` call reuse a shared dependency (two document
+// kinds `$ref`ing the same component, e.g. Relations' `relation-set` and
+// `relation-collection` both depending on `target.schema.json`) while
+// still rejecting a *different* schema smuggled in under the same `$id` —
+// see the P1 "schema-poisoning" finding this replaced (an `$id`-only
+// existence check let whichever caller registered first silently win).
+const dependencyCanonicalById = new Map<string, string>();
+
 /**
  * Adds `dependency` to the shared AJV instance so a document schema's
- * internal `$ref` to it resolves, unless a schema with the same `$id` is
- * already registered (safe for two document kinds that share a component
- * schema, e.g. Relations' `relation-set` and `relation-collection` both
- * depending on `target.schema.json`).
+ * internal `$ref` to it resolves. Reuses an already-registered schema only
+ * when it is canonically identical to the one being added; a same-`$id`,
+ * different-content dependency throws instead of silently keeping
+ * whichever version was registered first.
  */
 function addSchemaDependency(dependency: object): void {
   const id = (dependency as { $id?: string }).$id;
-  if (id && ajv.getSchema(id)) return;
+  if (!id) {
+    // No `$id` to dedupe or conflict-check against — add it standalone.
+    ajv.addSchema(deepFreeze(structuredClone(dependency)));
+    return;
+  }
+  const canonical = canonicalize(dependency);
+  const existingCanonical = dependencyCanonicalById.get(id);
+  if (existingCanonical !== undefined) {
+    if (existingCanonical !== canonical) {
+      throw new Error(
+        `Schema dependency conflict: "${id}" was already registered with different content. A schema dependency's $id MUST always resolve to the same schema — this looks like two modules (or two registrations) shipping conflicting schemas under the same $id.`
+      );
+    }
+    return; // Canonically identical to what's already registered — safe to reuse.
+  }
+  dependencyCanonicalById.set(id, canonical);
   ajv.addSchema(deepFreeze(structuredClone(dependency)));
 }
 

@@ -283,6 +283,8 @@ export function checkRelationCollectionSemantics(doc: unknown): ModuleSemanticIs
 
 interface RelationRegistryEntryLike {
   token?: unknown;
+  inverse?: unknown;
+  symmetric?: unknown;
 }
 
 interface RelationRegistryLike {
@@ -307,6 +309,36 @@ export function checkRelationRegistrySemantics(doc: unknown): ModuleSemanticIssu
 
   const seen = new Map<string, number>();
   relations.forEach((entry, i) => {
+    // specification.md §8: a registry entry's own `token`/`inverse` are
+    // grammar-checked the same way an item's `rel`/`inverse` are — a
+    // registry MUST NOT itself define a token outside the standard set
+    // and outside the vendor namespace.
+    if (isString(entry.token) && !isValidRelationToken(entry.token)) {
+      issues.push({
+        level: "error",
+        code: "invalid_relation_token",
+        path: `/relations/${i}/token`,
+        message: `Token "${entry.token}" is neither a standard v1.0 token nor a namespaced vendor token (^x_[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$).`,
+      });
+    }
+    if (isString(entry.inverse) && !isValidRelationToken(entry.inverse)) {
+      issues.push({
+        level: "error",
+        code: "invalid_relation_token",
+        path: `/relations/${i}/inverse`,
+        message: `Inverse "${entry.inverse}" is neither a standard v1.0 token nor a namespaced vendor token (^x_[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$).`,
+      });
+    }
+    // specification.md §8: "symmetric: true yêu cầu inverse bằng chính token."
+    if (entry.symmetric === true && isString(entry.inverse) && isString(entry.token) && entry.inverse !== entry.token) {
+      issues.push({
+        level: "error",
+        code: "symmetric_inverse_mismatch",
+        path: `/relations/${i}/inverse`,
+        message: `Entry "${entry.token}" declares symmetric: true, which requires inverse to equal the token itself; got inverse "${entry.inverse}".`,
+      });
+    }
+
     if (!isString(entry.token)) return;
     const first = seen.get(entry.token);
     if (first !== undefined) {

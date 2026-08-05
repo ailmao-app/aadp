@@ -56,6 +56,8 @@ const EXPECTED_INVALID: Record<string, string | null> = {
   "relations-invalid-checksum.json": "collection_checksum_mismatch",
   "relations-invalid-registry-duplicate-token.json": "duplicate_registry_token",
   "relations-invalid-registry-checksum.json": "registry_checksum_mismatch",
+  "relations-invalid-registry-token.json": "invalid_relation_token",
+  "relations-invalid-registry-symmetric-mismatch.json": "symmetric_inverse_mismatch",
 };
 
 describe("Relations v1.0 invalid fixture catalog", () => {
