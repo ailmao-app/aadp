@@ -71,6 +71,26 @@ export {
   type TraversedRelationEdge,
 } from "./client/index.js";
 
+// Conformance (AADP-REL-006). Own suite/check-ID registry, sharing only
+// the core `renderCheckLines` report primitive — core `CHECKS` and check
+// IDs are never touched (ADR-0007 "Conformance boundary").
+export {
+  runRelationsConformance,
+  renderRelationsTextReport,
+  renderRelationsSummary,
+  renderRelationsJsonReport,
+  renderRelationsJUnitReport,
+  relationsExitCodeFor,
+  RELATIONS_CHECKS,
+  RELATIONS_CONFORMANCE_PROFILES,
+  InvalidRelationsConformanceOptionsError,
+  type RelationsCheck,
+  type RelationsJUnitReportOptions,
+  type RelationsConformanceOptions,
+  type RelationsConformanceProfile,
+  type RelationsConformanceReport,
+} from "./conformance/index.js";
+
 const MODULE_ID = "aadp:relations" as const;
 const MODULE_VERSION = "1.0" as const;
 

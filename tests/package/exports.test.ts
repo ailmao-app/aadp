@@ -85,6 +85,25 @@ describe("published package: every public entry point resolves from the tarball"
       "moduleDispatchSchema",
       "relationsSchemasByKind",
       "RELATIONS_DOCUMENT_KINDS",
+      // Client/traversal (AADP-REL-005)
+      "createRelationsTraversalBudget",
+      "resolveRelationTarget",
+      "resolveRelationItem",
+      "iterateRelationCollection",
+      "traverseRelations",
+      "fetchAndValidateRelationsDocument",
+      "RelationsSchemaValidationError",
+      "RelationsIntegrityMismatchError",
+      "RelationsCursorCycleError",
+      // Conformance (AADP-REL-006)
+      "runRelationsConformance",
+      "renderRelationsTextReport",
+      "renderRelationsJsonReport",
+      "renderRelationsJUnitReport",
+      "relationsExitCodeFor",
+      "RELATIONS_CHECKS",
+      "RELATIONS_CONFORMANCE_PROFILES",
+      "InvalidRelationsConformanceOptionsError",
     ],
     "conformance": ["runConformance", "renderTextReport", "renderJsonReport", "renderJUnitReport", "exitCodeFor", "CHECKS", "collectAdvertisedUrls", "InvalidConformanceOptionsError", "UnsupportedConformanceVersionError", "SUPPORTED_CONFORMANCE_VERSIONS"],
     "server": ["defineAADP", "defineResource", "AadpServerError", "notFound", "invalidRequest", "unsupportedType", "upstreamUnavailable", "rateLimited", "unauthorized", "forbidden"],
@@ -111,6 +130,8 @@ describe("published package: every public entry point resolves from the tarball"
       "registerRelationsModule",
       "checkRelationSetSemantics",
       "relationSetSchema",
+      "traverseRelations",
+      "runRelationsConformance",
     ]) {
       expect(mod, `"${name}" must not be re-exported from the package root`).not.toHaveProperty(name);
     }
@@ -172,6 +193,23 @@ describe("published package: every public entry point resolves from the tarball"
     expect(validateRelationsDocument("relation-set", relationSet).valid).toBe(true);
     expect(validateRelationsDocument("relation-collection", relationCollection).valid).toBe(true);
     expect(validateRelationsDocument("relation-registry", relationRegistry).valid).toBe(true);
+  });
+
+  it("runs runRelationsConformance from a clean tarball install (AADP-REL-006 neutral implementation gate)", async () => {
+    const mod = await importFromTarball("modules/relations/v1.0");
+    const runRelationsConformance = mod.runRelationsConformance as (options: unknown) => Promise<{
+      module: unknown;
+      status: string;
+      checks: unknown[];
+    }>;
+    // No baseUrl/sample URLs supplied: every check must reach a verdict of
+    // its own (skipped/inconclusive), not throw — proving the packaged
+    // runner is self-contained and distinguishes skipped/inconclusive from
+    // passed, per the conformance.md "Neutral implementation gate".
+    const report = await runRelationsConformance({});
+    expect(report.module).toEqual({ id: "aadp:relations", version: "1.0" });
+    expect(report.status).toBe("inconclusive");
+    expect(report.checks.length).toBeGreaterThan(15);
   });
 
   it("resolves package.json itself as a subpath export", () => {
