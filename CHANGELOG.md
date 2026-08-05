@@ -4,6 +4,23 @@ All notable changes to `ail-aadp` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Protocol compatibility follows [ADR-0004](docs/adr/0004-backward-compatibility.md); released schemas are immutable and wire-breaking changes require a new protocol version.
 
+## 1.1.0 - 2026-08-05
+
+Bounded traversal controls (`docs/adr/0006-bounded-traversal-controls.md`, `docs/vi/plans/implementation-plan-v1.1.0.md`). Does not change AADP wire version `1.0`. Every new field is optional and additive; a caller who upgrades and passes no new options keeps `1.0.x`'s exact request count, ordering, and timing.
+
+### Added
+
+- Added caller-driven cancellation: `FetchJsonOptions`/`ConformanceOptions` gain an optional `signal?: AbortSignal`, combined with this package's own per-hop timeout controller via `AbortSignal.any()`. Aborting stops the in-flight request (headers and body), any pending retry backoff timer, and causes `iterateSitemap`/`discoverAllEntities`/`runConformance` to stop issuing further requests and reject/return promptly.
+- Added bounded concurrency: new optional `concurrency?: number` on `DiscoverAllEntitiesOptions` bounds how many entity fetches may be in flight at once, backed by a new pure scheduler module (`src/client/scheduler.ts`). Default `1` — fully serial, identical request ordering and timing to every `1.0.x` release.
+- Added opt-in retry/backoff: new optional `retry?: RetryOptions` (`{ maxAttempts?, baseDelayMs?, maxDelayMs? }`) on `FetchJsonOptions` and `ConformanceOptions`. Retries only a network/connect-level error, this package's own per-hop timeout, and HTTP `429`/`503` — never a `BlockedUrlError`, an aborted request, or a retry that would exceed a shared traversal budget/deadline. Backoff is exponential with full jitter; a `Retry-After` response header overrides the computed delay, itself capped at `maxDelayMs`. Default is no retry (identical to every `1.0.x` release).
+- Added a total response-byte traversal budget: `DiscoveryBudgetState` (`src/client/discovery-budget.ts`) gains an optional `maxTotalBytes` limit charged from bytes actually streamed across every request in a walk, distinct from the existing per-response `maxResponseBytes` cap. Default unbounded (same as every `1.0.x` release).
+- Added a conformance profile registry (`src/conformance/types.ts`): `ConformanceOptions.profile?: "core" | "public-web" | "full-traversal" | "authenticated"` is a named preset of budget/retry defaults, applied first and overridable per field. `core`/`public-web` are `1.0.x`'s implicit defaults; `full-traversal` raises `maxPages`/`maxEntities`/`deadlineMs` for deliberately exhaustive crawls; `authenticated` documents the expectation that the caller supplies credentials via `headers`. `report.profile` records which preset a run used.
+
+### Fixed
+
+- Fixed `links.no_dead_urls` bypassing the shared traversal budget/deadline and swallowing budget/abort errors as warnings instead of propagating them, so a probe made under this check now counts against the same shared budget every other HTTP call site does.
+- Fixed a retry that could exceed the shared deadline and a `maxTotalBytes` check that was only enforced after a full body read instead of streaming; both are now checked before a retry sleeps and while a body is still being read. See `ERROR_LOG.md` 2026-08-03.
+
 ## 1.0.11 - 2026-08-03
 
 Production certification operations (docs/vi/plans/implementation-plan-v1.0.11.md). Does not change AADP wire version `1.0`, the JSON Schemas, package public API, or any validation result — CI/test tooling only.

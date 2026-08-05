@@ -20,6 +20,7 @@ import { runConformance } from "./runner.js";
 import { renderJsonReport, renderJUnitReport, renderCheckLines, renderSummary, exitCodeFor } from "./report.js";
 import {
   SUPPORTED_CONFORMANCE_VERSIONS,
+  CONFORMANCE_PROFILES,
   UnsupportedConformanceVersionError,
   type CheckResult,
   type ConformanceOptions,
@@ -27,6 +28,7 @@ import {
 
 interface CliOptions {
   protocolVersion: string;
+  profile?: string;
   timeout?: number;
   maxRedirects?: number;
   maxResponseBytes?: number;
@@ -34,6 +36,10 @@ interface CliOptions {
   maxEntities?: number;
   maxSitemaps?: number;
   deadline?: number;
+  maxTotalBytes?: number;
+  retryMaxAttempts?: number;
+  retryBaseDelay?: number;
+  retryMaxDelay?: number;
   unknownEntityUrl?: string;
   unknownTypeUrl?: string;
   allowPrivateNetwork?: boolean;
@@ -120,6 +126,11 @@ program
     `AADP wire version to exercise (${SUPPORTED_CONFORMANCE_VERSIONS.join(", ")})`,
     "1.0"
   )
+  .option(
+    "--profile <name>",
+    `named preset of budget/retry defaults (${CONFORMANCE_PROFILES.join(", ")}); any flag below still overrides ` +
+      "the preset's value for that one field"
+  )
   .option("--timeout <ms>", "per-request timeout in milliseconds", intOption)
   .option("--max-redirects <n>", "maximum redirect hops per request", intOption)
   .option("--max-response-bytes <n>", "maximum response body size in bytes", intOption)
@@ -127,6 +138,14 @@ program
   .option("--max-entities <n>", "traversal budget: maximum entities fetched", intOption)
   .option("--max-sitemaps <n>", "traversal budget: maximum sitemaps the index may list", intOption)
   .option("--deadline <ms>", "traversal budget: wall-clock deadline for the walk", intOption)
+  .option("--max-total-bytes <n>", "traversal budget: maximum total response bytes across the whole run", intOption)
+  .option(
+    "--retry-max-attempts <n>",
+    "enable retry: maximum attempts per request, including the first (default 3 once retry is enabled)",
+    intOption
+  )
+  .option("--retry-base-delay <ms>", "enable retry: base exponential-backoff delay in ms (default 500)", intOption)
+  .option("--retry-max-delay <ms>", "enable retry: maximum backoff delay in ms, also caps Retry-After (default 10000)", intOption)
   .option(
     "--allow-private-network",
     "allow the target (and its redirects) to resolve to a private/loopback/link-local address. " +
@@ -187,6 +206,7 @@ program
     const options: ConformanceOptions = {
       baseUrl,
       version: opts.protocolVersion,
+      profile: opts.profile as ConformanceOptions["profile"],
       timeoutMs: opts.timeout,
       maxRedirects: opts.maxRedirects,
       maxResponseBytes: opts.maxResponseBytes,
@@ -194,6 +214,7 @@ program
       maxEntities: opts.maxEntities,
       maxSitemaps: opts.maxSitemaps,
       deadlineMs: opts.deadline,
+      maxTotalBytes: opts.maxTotalBytes,
       allowPrivateNetwork: opts.allowPrivateNetwork,
       failOnWarning: opts.failOnWarning,
       onCheck,
@@ -202,6 +223,16 @@ program
       options.negativeTargets = {
         ...(opts.unknownEntityUrl ? { unknownEntityUrl: opts.unknownEntityUrl } : {}),
         ...(opts.unknownTypeUrl ? { unknownTypeUrl: opts.unknownTypeUrl } : {}),
+      };
+    }
+    // Any one of the three flags opts into retry; the others fall back to
+    // RetryOptions' own defaults (maxAttempts 3, baseDelayMs 500, maxDelayMs
+    // 10000) rather than this CLI inventing a second set of defaults.
+    if (opts.retryMaxAttempts !== undefined || opts.retryBaseDelay !== undefined || opts.retryMaxDelay !== undefined) {
+      options.retry = {
+        ...(opts.retryMaxAttempts !== undefined ? { maxAttempts: opts.retryMaxAttempts } : {}),
+        ...(opts.retryBaseDelay !== undefined ? { baseDelayMs: opts.retryBaseDelay } : {}),
+        ...(opts.retryMaxDelay !== undefined ? { maxDelayMs: opts.retryMaxDelay } : {}),
       };
     }
     // Not a Commander option-parser (it validates the whole repeated
