@@ -131,6 +131,46 @@ describe("aadp-conformance, run from the packed tarball", () => {
     expect(result.stderr).toContain("Invalid conformance option");
   });
 
+  it("exits 2 for an unknown --profile name", async () => {
+    const result = await runCli([server.baseUrl, "--allow-private-network", "--profile", "not-a-real-profile"]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Invalid conformance option");
+  });
+
+  it("--profile full-traversal raises the traversal budgets enough to finish the walk", async () => {
+    const result = await runCli([
+      server.baseUrl,
+      "--allow-private-network",
+      "--profile",
+      "full-traversal",
+      ...NEGATIVE_TARGET_FLAGS(),
+    ]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("RESULT: PASSED");
+  });
+
+  it("--json report includes the profile field only when --profile was passed", async () => {
+    const withProfile = await runCli([server.baseUrl, "--allow-private-network", "--profile", "core", "--json"]);
+    expect(JSON.parse(withProfile.stdout).profile).toBe("core");
+
+    const withoutProfile = await runCli([server.baseUrl, "--allow-private-network", "--json"]);
+    expect(JSON.parse(withoutProfile.stdout).profile).toBeUndefined();
+  });
+
+  it("--retry-max-attempts alone is enough to enable retry", async () => {
+    // Not asserting retry actually fires here (no flaky upstream to
+    // trigger it against the static mock server) — just that passing the
+    // flag doesn't error and the run still completes normally.
+    const result = await runCli([
+      server.baseUrl,
+      "--allow-private-network",
+      "--retry-max-attempts",
+      "2",
+      ...NEGATIVE_TARGET_FLAGS(),
+    ]);
+    expect(result.status).toBe(0);
+  });
+
   it("exits 2, never 0, for a malformed --header — an action error must never look like an untouched success", async () => {
     // parseHeaders() throws from inside the action callback, not through
     // Commander's own argv parser/exitOverride() — regression for a run

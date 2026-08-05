@@ -131,6 +131,28 @@ const manifest = await v1.discover("https://example.com");
 
 The unversioned `ail-aadp/client` entry point continues to export the v0.1 client for compatibility with existing consumers. New integrations should use `ail-aadp/client/v1.0`.
 
+### Cancellation, concurrency, retry and byte budgets
+
+Every option below is opt-in — omitting all of them reproduces the exact request count, ordering and timing of every release before `1.1.0` (see [ADR-0006](docs/adr/0006-bounded-traversal-controls.md)):
+
+```ts
+import { discoverAllEntities, type RetryOptions } from "ail-aadp/client/v1.0";
+
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 30_000);
+
+for await (const entity of discoverAllEntities("https://example.com", {
+  signal: controller.signal, // stops in-flight requests and the walk itself
+  concurrency: 4, // entity fetches in flight at once; default 1 (serial)
+  retry: { maxAttempts: 3, baseDelayMs: 500, maxDelayMs: 10_000 }, // opt-in only
+  maxTotalBytes: 50 * 1024 * 1024, // total response bytes across the whole walk
+})) {
+  console.log(entity.id);
+}
+```
+
+Retry only fires for a network/connect-level error, this module's own per-request timeout, or HTTP `429`/`503` — never a real client error (`4xx` other than `429`) or a security block (`BlockedUrlError`) — with exponential backoff and full jitter, honoring a `Retry-After` response header capped at `maxDelayMs`.
+
 ## Validate documents
 
 ### Command line
@@ -409,6 +431,14 @@ npx aadp-conformance https://example.com --junit conformance-junit.xml
 
 # Bound the traversal on a large catalogue
 npx aadp-conformance https://example.com --max-pages 20 --max-entities 50 --timeout 15000
+
+# Named preset of budget/retry defaults (core, public-web, full-traversal,
+# authenticated) — any flag above still overrides the preset for that field
+npx aadp-conformance https://example.com --profile full-traversal
+
+# Cap total response bytes across the whole run, and retry a transient
+# network error/timeout/429/503 (opt-in; omitting these flags retries nothing)
+npx aadp-conformance https://example.com --max-total-bytes 52428800 --retry-max-attempts 3
 
 # Send an API key to the target origin only
 npx aadp-conformance https://example.com --header "Authorization: Bearer $TOKEN"

@@ -16,6 +16,10 @@
 const DEFAULT_MAX_PAGES = 10_000;
 const DEFAULT_MAX_ENTITIES = 100_000;
 const DEFAULT_DEADLINE_MS = 5 * 60_000;
+// Unbounded by default (ADR-0006): omitting `maxTotalBytes` means every
+// release before 1.1.0's behavior — only the existing per-request
+// `maxResponseBytes` cap applies, no whole-run total.
+const DEFAULT_MAX_TOTAL_BYTES = Number.POSITIVE_INFINITY;
 
 export interface DiscoveryBudget {
   /** Maximum sitemap pages fetched. Default 10000. */
@@ -24,15 +28,23 @@ export interface DiscoveryBudget {
   maxEntities?: number;
   /** Wall-clock deadline, in ms. Default 5 minutes. */
   deadlineMs?: number;
+  /**
+   * Maximum total response bytes across every request the whole walk
+   * makes (ADR-0006) — distinct from `FetchJsonOptions.maxResponseBytes`,
+   * which caps a single response. Default unbounded.
+   */
+  maxTotalBytes?: number;
 }
 
 export interface DiscoveryBudgetState {
   readonly maxPages: number;
   readonly maxEntities: number;
   readonly deadlineMs: number;
+  readonly maxTotalBytes: number;
   readonly startedAt: number;
   pagesFetched: number;
   entitiesYielded: number;
+  bytesFetched: number;
 }
 
 /** A traversal exceeded one of its `DiscoveryBudget` limits. */
@@ -48,9 +60,11 @@ export function createDiscoveryBudget(budget: DiscoveryBudget = {}): DiscoveryBu
     maxPages: budget.maxPages ?? DEFAULT_MAX_PAGES,
     maxEntities: budget.maxEntities ?? DEFAULT_MAX_ENTITIES,
     deadlineMs: budget.deadlineMs ?? DEFAULT_DEADLINE_MS,
+    maxTotalBytes: budget.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES,
     startedAt: Date.now(),
     pagesFetched: 0,
     entitiesYielded: 0,
+    bytesFetched: 0,
   };
 }
 
@@ -77,5 +91,22 @@ export function chargeDiscoveryBudget(
         `${context} yielded more than the maxEntities limit of ${state.maxEntities} entities`
       );
     }
+  }
+}
+
+/**
+ * Adds `bytes` (a response body actually read, e.g. `FetchJsonResult.bodyBytes`)
+ * to the whole-run total and throws if `maxTotalBytes` is now exceeded.
+ * Distinct budget dimension from `chargeDiscoveryBudget`'s page/entity
+ * counts, charged at every request that reads a body — per the precedent
+ * in `ERROR_LOG.md` 2026-07-27, a request charged for page/entity count but
+ * not for bytes would let this dimension be bypassed the same way.
+ */
+export function chargeDiscoveryBudgetBytes(state: DiscoveryBudgetState, bytes: number, context: string): void {
+  state.bytesFetched += bytes;
+  if (state.bytesFetched > state.maxTotalBytes) {
+    throw new AadpDiscoveryBudgetExceededError(
+      `${context} fetched more than the maxTotalBytes limit of ${state.maxTotalBytes} bytes in total across the run`
+    );
   }
 }

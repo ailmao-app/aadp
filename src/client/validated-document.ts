@@ -13,6 +13,7 @@
 import { fetchJson, type FetchJsonOptions } from "./http.js";
 import { AadpRequestError, type AadpErrorEnvelope } from "./errors.js";
 import { checksumOf } from "../canonical-json/checksum.js";
+import type { DiscoveryBudgetState } from "./discovery-budget.js";
 import {
   validateDocument,
   UnsupportedAadpVersionError,
@@ -98,14 +99,21 @@ function assertOwnChecksum(url: string, kind: ResourceKind, data: unknown): void
  * `kind` under `version`, and recomputes its own checksum — in every
  * failure case, no URL the document contains is ever trusted for further
  * traversal.
+ *
+ * `budget`, when given, is passed straight through to `fetchJson()`, which
+ * charges the shared byte budget (and enforces the shared deadline against
+ * retries) *while streaming the response*, not after the fact — a run with
+ * little budget left stops reading a large response mid-stream instead of
+ * buffering the whole thing first. See `http.ts`'s `readBodyCapped()`.
  */
 export async function fetchAndValidateDocument<T>(
   url: string,
   version: AadpVersion,
   kind: ResourceKind,
-  options: FetchJsonOptions
+  options: FetchJsonOptions,
+  budget?: DiscoveryBudgetState
 ): Promise<T> {
-  const { status, data } = await fetchJson(url, options);
+  const { status, data } = await fetchJson(url, options, budget);
   if (status === 304) {
     throw new AadpRequestError("Not modified", 304);
   }

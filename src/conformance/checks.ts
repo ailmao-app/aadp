@@ -29,7 +29,7 @@ import {
   type EntityV1,
 } from "../client/v1.0/index.js";
 import { AadpRequestError } from "../client/errors.js";
-import { fetchJson, probeUrl } from "../client/http.js";
+import { fetchJson, probeUrl, AbortedError } from "../client/http.js";
 import {
   AadpDiscoveryBudgetExceededError,
   chargeDiscoveryBudget,
@@ -189,12 +189,12 @@ async function budgetedFetchSitemap(
   context: string
 ): Promise<SitemapV1> {
   chargeDiscoveryBudget(ctx.budget, "page", context);
-  return fetchSitemap(url, cursor, ctx.scoped(url));
+  return fetchSitemap(url, cursor, ctx.scoped(url), ctx.budget);
 }
 
 async function budgetedFetchEntity(ctx: CheckContext, url: string, context: string): Promise<EntityV1> {
   chargeDiscoveryBudget(ctx.budget, "entity", context);
-  return fetchEntity(url, ctx.scoped(url));
+  return fetchEntity(url, ctx.scoped(url), ctx.budget);
 }
 
 /**
@@ -223,7 +223,7 @@ async function assertCacheValidators(
     if (budgetKind) chargeDiscoveryBudget(ctx.budget, budgetKind, context);
   };
   charge();
-  const first = await fetchJson(url, client);
+  const first = await fetchJson(url, client, ctx.budget);
   const etag = first.headers.get("etag");
   if (!etag) ctx.fail(`${url} returned no ETag; a document carrying a checksum must expose one`);
   const strongTag = etag!.startsWith("W/") ? etag!.slice(2) : etag!;
@@ -251,7 +251,11 @@ async function assertCacheValidators(
   // one, letting an exact-match-only implementation through.
   for (const tag of [strongTag, `W/${strongTag}`]) {
     charge();
-    const conditional = await fetchJson(url, { ...client, headers: { ...client.headers, "If-None-Match": tag } });
+    const conditional = await fetchJson(
+      url,
+      { ...client, headers: { ...client.headers, "If-None-Match": tag } },
+      ctx.budget
+    );
     if (conditional.status !== 304) {
       ctx.fail(
         `${url} answered If-None-Match: ${tag} with ${conditional.status}, expected 304 ` +
@@ -270,7 +274,7 @@ export const CHECKS: Check[] = [
     group: "manifest",
     title: "Manifest is served at /.well-known/ai-manifest.json as application/json 200",
     async run(ctx) {
-      const result = await fetchJson(ctx.state.manifestUrl, ctx.client);
+      const result = await fetchJson(ctx.state.manifestUrl, ctx.client, ctx.budget);
       if (result.status !== 200) {
         ctx.fail(`${ctx.state.manifestUrl} returned HTTP ${result.status}, expected 200`);
       }
@@ -352,7 +356,7 @@ export const CHECKS: Check[] = [
       // semantic gate) through the public client entry point, so the run
       // proves the documented consumer API works — not just that the
       // pieces do individually.
-      await discover(ctx.baseUrl, ctx.client);
+      await discover(ctx.baseUrl, ctx.client, ctx.budget);
     },
   },
   {
@@ -367,7 +371,8 @@ export const CHECKS: Check[] = [
       // runner records as a failure.
       const index = await fetchSitemapIndex(
         manifest.discovery.sitemap_index,
-        ctx.scoped(manifest.discovery.sitemap_index)
+        ctx.scoped(manifest.discovery.sitemap_index),
+        ctx.budget
       );
       ctx.state.index = index;
       if (index.sitemaps.length > ctx.maxSitemaps) {
@@ -545,9 +550,19 @@ export const CHECKS: Check[] = [
           // Body discarded and content type unchecked: these are ordinary
           // web pages, not AADP documents. A policy or documentation URL
           // very often lives on another host, so headers are scoped.
-          const probe = await probeUrl(url, ctx.scoped(url));
+          // `ctx.budget` is passed through so these probes are bound by the
+          // same whole-run deadline/maxTotalBytes as every other request
+          // (ADR-0006) — without it, a run with little budget left could
+          // still read/retry every advertised URL unbounded.
+          const probe = await probeUrl(url, ctx.scoped(url), ctx.budget);
           if (probe.status === 404 || probe.status === 410) dead.push(`${url} -> HTTP ${probe.status}`);
         } catch (err) {
+          // A budget/deadline stop or a caller abort is the run stopping
+          // itself, not evidence this URL is dead or merely unreachable —
+          // `runCheck()` (runner.ts) already has dedicated handling for
+          // both (inconclusive skip / aborted skip) that must see the real
+          // error type, not have it flattened into a warning here first.
+          if (err instanceof AadpDiscoveryBudgetExceededError || err instanceof AbortedError) throw err;
           unreachable.push(`${url} -> ${(err as Error).message}`);
         }
       }
