@@ -19,6 +19,7 @@ import { createStrictUrlPolicy, assertAllowed, BlockedUrlError, type UrlPolicy }
 import { dispatcherFor } from "./dns-pin.js";
 import {
   chargeDiscoveryBudgetBytes,
+  chargeDiscoveryBudgetRequest,
   AadpDiscoveryBudgetExceededError,
   type DiscoveryBudgetState,
 } from "./discovery-budget.js";
@@ -567,6 +568,12 @@ async function requestWithPolicy<T>(
         // no backoff delay is involved (attempt 1 of a fresh retry cycle).
         assertWithinDeadline(budget, `request to ${current.toString()}`);
         assertAllowed(current, policy);
+        // Charged for the original request, every retry attempt, and every
+        // redirect hop alike — each re-enters this loop and reaches this
+        // line before its own `fetch()` call below (AADP-REL-005). Never
+        // charged for a hop that `assertAllowed` already rejected: a
+        // blocked URL was never actually sent over the network.
+        if (budget) chargeDiscoveryBudgetRequest(budget, `request to ${current.toString()}`);
 
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);

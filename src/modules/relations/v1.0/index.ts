@@ -44,6 +44,33 @@ export {
 
 export { registerRelationsModule } from "./register.js";
 
+// Client/traversal (AADP-REL-005). Reuses core client HTTP/URL-policy/
+// scheduler/cancellation; adds only cardinality dispatch, collection
+// pagination, and node/depth/cross-origin budget dimensions.
+export {
+  createRelationsTraversalBudget,
+  canonicalTargetKey,
+  isCrossOrigin,
+  resolveRelationTarget,
+  resolveRelationItem,
+  iterateRelationCollection,
+  traverseRelations,
+  fetchAndValidateRelationsDocument,
+  RelationsSchemaValidationError,
+  RelationsIntegrityMismatchError,
+  RelationsCursorCycleError,
+  type RelationsTraversalLimits,
+  type RelationsTraversalBudgetState,
+  type RelationsClientOptions,
+  type ResolveRelationItemOptions,
+  type RelationCollectionExpectation,
+  type TraverseRelationsOptions,
+  type RelationsTraversalIssue,
+  type ResolvedRelationTarget,
+  type RelationsResolutionResult,
+  type TraversedRelationEdge,
+} from "./client/index.js";
+
 const MODULE_ID = "aadp:relations" as const;
 const MODULE_VERSION = "1.0" as const;
 
