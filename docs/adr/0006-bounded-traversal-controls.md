@@ -192,7 +192,12 @@ no new options.
   by design — this ADR intentionally does not invent auth-specific
   conformance checks. A future ADR is needed before `authenticated` can mean
   anything behaviorally different from `public-web`.
-- The scheduler/retry/budget modules being clock/fetch-injectable pure
-  modules (internal-only parameters) is what makes their tests deterministic
-  without real timers or network access, per
-  `docs/vi/plans/implementation-plan-v1.1.0.md`'s own architecture note.
+- The scheduler/retry/budget modules are plain functions over
+  `DiscoveryBudgetState`/options — no HTTP or CLI concern leaks into them —
+  but, per the "Testability" revision above, they are **not**
+  clock/fetch-injectable: `Date.now()`, `Math.random()`, `setTimeout`, and
+  the global `fetch` are called directly. Their tests stay deterministic on
+  *state transitions* (attempt counts, which error type, budget fields)
+  using real short timers against a real local mock server, not a fake
+  clock. `docs/vi/plans/implementation-plan-v1.1.0.md`'s architecture note
+  predates this revision and has been updated to match.

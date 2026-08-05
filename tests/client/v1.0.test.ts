@@ -598,16 +598,30 @@ describe("retry (options.retry)", () => {
 
   it("stops retrying immediately when the caller's signal aborts during backoff", async () => {
     let attempts = 0;
+    // Resolved once the server has actually sent attempt 1's response,
+    // rather than a fixed wall-clock delay: under parallel test-suite load,
+    // a blind `setTimeout(..., 10)` can fire before the first request even
+    // reaches the server (attempts still 0) or race the response, making
+    // the assertion below flaky independent of the retry/abort logic under
+    // test. Aborting only after attempt 1's response is observed removes
+    // that race entirely, while still landing well inside the 1000ms
+    // backoff window this test aborts out of.
+    let resolveFirstAttemptSent: () => void;
+    const firstAttemptSent = new Promise<void>((resolve) => {
+      resolveFirstAttemptSent = resolve;
+    });
     server = await startServer((_req, res, url) => {
       if (url.pathname === "/.well-known/ai-manifest.json") {
         attempts++;
-        return sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
+        sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
+        resolveFirstAttemptSent();
+        return;
       }
       sendJson(res, 404, {});
     });
 
     const controller = new AbortController();
-    setTimeout(() => controller.abort("giving up"), 10);
+    firstAttemptSent.then(() => controller.abort("giving up"));
 
     await expect(
       discover(server.baseUrl, {
