@@ -4,9 +4,10 @@
 
 | Thuộc tính | Giá trị |
 |---|---|
-| Trạng thái | Blocked Implementation Draft |
+| Trạng thái | Implementation Ready |
 | Chủ đề | Module infrastructure và Relations Module pilot |
-| Blocking dependency | ADR hóa các quyết định đã chốt và hoàn tất semantics security/traversal |
+| Contract baseline | ADR-0007, ADR-0008 và Relations Module specification v1.0 Accepted |
+| Owner | AADP maintainers |
 | Wire impact | Module riêng; không đổi core schema v1.0 |
 
 ## Mục tiêu
@@ -27,6 +28,12 @@
 - Không đưa application-specific relation mapping vào package `ail-aadp`.
 
 ## Dependency bắt buộc
+
+Trạng thái dependency: **đã chốt** qua
+[ADR-0007](../../adr/0007-module-versioning-and-discovery.md),
+[ADR-0008](../../adr/0008-module-traversal-and-authorization.md),
+[Relations Module v1.0 specification](../../../spec/modules/relations/v1.0/specification.md)
+và [conformance contract](../../../spec/modules/relations/v1.0/conformance.md).
 
 Chỉ bắt đầu thay đổi wire contract sau khi các quyết định sau được chấp nhận:
 
@@ -367,9 +374,7 @@ Dependency: `AADP-REL-005`.
 
 ## Điều kiện chuyển trạng thái
 
-- `Blocked Implementation Draft` → `Implementation Draft`: toàn bộ dependency
-  bắt buộc đã Accepted.
-- `Implementation Draft` → `Implementation Ready`: work-package owner, stable
-  check IDs và normative fixtures đã được chốt; public paths và module version
-  phải khớp mục Quyết định contract đã chốt.
+- `Blocked Implementation Draft` → `Implementation Ready`: đã đạt; ADR-0007,
+  ADR-0008, specification, owner, stable check IDs và normative fixture catalog
+  đã được chốt.
 - `Implementation Ready` → `Implemented`: toàn bộ Acceptance và Release gate đạt.

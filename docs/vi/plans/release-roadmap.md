@@ -47,7 +47,7 @@ Không tạo release rỗng chỉ để đạt số version trong roadmap. Patch
 | `1.0.11` | Production certification và release operations | Đã phát hành | Không |
 | `1.1.0` | Bounded traversal controls và conformance profiles | Đã phát hành | Không đổi core schema |
 | `1.1.x` | Stabilization cho public API 1.1 | Có điều kiện | Không |
-| `1.2.0` | Module infrastructure và Relations pilot | Chờ ADR | Extension/module riêng |
+| `1.2.0` | Module infrastructure và Relations pilot | Implementation Ready | Extension/module riêng |
 | `1.3.0` | Answer Module | Chờ Relations ổn định | Module riêng |
 | `1.4.0` | Evidence & Provenance Module | Chờ Answer/Relations | Module riêng |
 | `1.5.0` | Cross-module graph traversal và composition | Chờ ba module ổn định | Không đổi core schema |
@@ -200,18 +200,20 @@ Không dùng `1.1.x` để thêm module wire mới.
 
 ## 9. Release 1.2.0 — Module infrastructure và Relations pilot
 
-Trạng thái: blocked cho tới khi ADR hóa contract đã chốt và hoàn tất
-security/traversal semantics. Plan authoritative:
+Trạng thái: Implementation Ready sau khi ADR-0007, ADR-0008, Relations Module
+v1.0 specification và conformance contract được chấp nhận. Plan authoritative:
 [`implementation-plan-v1.2.0.md`](implementation-plan-v1.2.0.md).
 
-Dependency bắt buộc:
+Dependency đã chốt:
 
-1. ADR quan hệ giữa core protocol version và module version.
-2. Module discovery/compatibility/export-path rules.
-3. Extension/document envelope boundary.
-4. Authorization, traversal budget và cycle semantics.
+1. [ADR-0007](../../adr/0007-module-versioning-and-discovery.md): core/module
+   version, discovery, envelope, registry và export paths.
+2. [ADR-0008](../../adr/0008-module-traversal-and-authorization.md): authorization,
+   shared traversal budget, cursor và cycle semantics.
+3. [Relations Module v1.0 specification](../../../spec/modules/relations/v1.0/specification.md).
+4. [Relations conformance contract](../../../spec/modules/relations/v1.0/conformance.md).
 
-Scope đã chốt, chỉ bắt đầu implementation normative sau khi ADR Accepted:
+Scope implementation đã chốt:
 
 - Module registry theo `{moduleId, moduleVersion, kind}`.
 - Version-aware module schema/validator registry.
@@ -582,7 +584,7 @@ Release gate:
 | Robustness/production operations | `1.0.10–1.0.11` | Đã phát hành |
 | `AADP-ACCESS-001` explicit `none` cache semantics | `1.0.10` | Đã triển khai |
 | Abort/concurrency/retry/byte budget/profiles | `1.1.0` | Đã phát hành |
-| `AADP-MODULE-001`, `AADP-REL-001..006` | `1.2.0` | Chờ ADR |
+| `AADP-MODULE-001`, `AADP-REL-001..006` | `1.2.0` | Implementation Ready |
 | `AADP-MODULE-002` Answer | `1.3.0` | Chờ Relations |
 | `AADP-MODULE-003` Evidence & Provenance | `1.4.0` | Chờ citation/claim ADR |
 | `AADP-MODULE-004..006` cross-module completion | `1.3.0–1.5.0` | Chia theo module/orchestration |

@@ -2,15 +2,14 @@
 
 > Ngôn ngữ: Tiếng Việt.
 >
-> Trạng thái: Design Draft. Đây là module built-in của AADP, không phải protocol hoặc add-on bên ngoài.
+> Trạng thái: Superseded bởi [Relations Module v1.0 specification](../../../spec/modules/relations/v1.0/specification.md), [ADR-0007](../../adr/0007-module-versioning-and-discovery.md) và [ADR-0008](../../adr/0008-module-traversal-and-authorization.md). Nội dung bên dưới chỉ giữ làm lịch sử thiết kế.
 >
 > Owner quyết định: AADP maintainers.
 >
 > Dependency bắt buộc: ADR module versioning.
 
-Tài liệu chỉ chuyển sang Proposed khi ADR module versioning được Accepted, các
-câu hỏi envelope/cursor đã đóng và có schema cùng fixture conformance. Version
-trong ví dụ không phải version wire đã được cấp.
+Không dùng version, envelope, registry hoặc URL ví dụ bên dưới để implement.
+Nguồn contract hiện hành là specification và ADR được liên kết ở trên.
 
 ## 1. Mục tiêu
 
