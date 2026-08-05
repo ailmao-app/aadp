@@ -48,6 +48,9 @@ Manifest v1.0 chỉ dùng contract đã release:
 
 Server MUST chỉ quảng bá module khi endpoints và artifacts đã deploy và đạt module
 conformance. Không thêm field không có namespace như `registry` vào declaration.
+Field `schema` MUST trỏ tới schema dispatch cho các top-level module documents.
+Discovery entry `{id, version, schema}` tiếp tục được validate bởi core manifest
+schema; module schema MUST NOT dùng lại vai trò đó.
 
 ### Registry lookup
 

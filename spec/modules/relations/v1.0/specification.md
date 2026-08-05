@@ -37,6 +37,8 @@ hoặc automatic credential acquisition.
 Server MUST chỉ quảng bá module khi payload, endpoints, schema và conformance
 artifacts đã deploy. Core-only client MUST bỏ qua declaration và `x_relations`.
 Relations client MUST exact-match ID/version và MUST NOT fallback version.
+Field `schema` trỏ tới schema dispatch của các top-level Relations documents;
+discovery entry được validate bởi core manifest schema v1.0, không bởi schema này.
 
 ## 3. Document kinds
 
@@ -166,8 +168,9 @@ Machine-readable registry dùng envelope:
 
 ```json
 {
+  "aadp_version": "1.0",
   "module": "aadp:relations",
-  "version": "1.0",
+  "module_version": "1.0",
   "kind": "relation-registry",
   "generated_at": "2026-08-05T00:00:00Z",
   "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -182,10 +185,10 @@ Machine-readable registry dùng envelope:
 }
 ```
 
-`module`, `version`, `kind`, `generated_at`, `checksum`, `relations` REQUIRED.
-`checksum` tính trên canonical `relations`. Mỗi token MUST unique. `inverse` MAY
-omit khi không có inverse chuẩn; `symmetric: true` yêu cầu `inverse` bằng chính
-token. `description` là untrusted informational text.
+`aadp_version`, `module`, `module_version`, `kind`, `generated_at`, `checksum`,
+`relations` REQUIRED. `checksum` tính trên canonical `relations`. Mỗi token MUST
+unique. `inverse` MAY omit khi không có inverse chuẩn; `symmetric: true` yêu cầu
+`inverse` bằng chính token. `description` là untrusted informational text.
 
 | Token | Inverse hint | Semantics |
 |---|---|---|
@@ -239,9 +242,10 @@ schemas/modules/relations/v1.0/
 └── relation-registry.schema.json
 ```
 
-`module.schema.json` là discovery entry schema và MUST dùng `oneOf` để dispatch
-theo `kind` tới ba top-level document schemas. Component schemas MUST không được
-đăng ký như document kinds.
+`module.schema.json` là schema dispatch của module và MUST dùng `oneOf` theo
+`kind` tới đúng ba top-level document schemas. Nó MUST NOT validate discovery
+entry `{id, version, schema}`; entry đó thuộc core manifest schema v1.0. Component
+schemas MUST không được đăng ký như document kinds.
 
 ## 11. Validation model
 

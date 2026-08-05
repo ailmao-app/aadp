@@ -23,12 +23,16 @@ nhưng có suite riêng; core `CHECKS` và IDs MUST không đổi.
 | `relations.schema.reachable` | Module schema URL usable |
 | `relations.schema.relation_set` | `x_relations` schema |
 | `relations.schema.collection` | Collection schema |
+| `relations.schema.registry` | Registry schema |
 | `relations.semantic.cardinality` | Cardinality/container |
 | `relations.semantic.tokens` | Standard/vendor tokens |
 | `relations.semantic.target_identity` | ID prefix/type |
+| `relations.semantic.duplicate_target` | Duplicate target IDs |
 | `relations.collection.context` | Source/rel/type context |
 | `relations.collection.pagination` | Cursor termination/context |
 | `relations.collection.checksum` | Canonical items checksum |
+| `relations.registry.unique_token` | Registry token uniqueness |
+| `relations.registry.checksum` | Canonical relations checksum |
 | `relations.http.errors` | Empty/error semantics |
 | `relations.http.cache` | Conditional GET |
 | `relations.traversal.budget` | Effective limits |
@@ -51,8 +55,11 @@ Released check IDs là stable machine contract.
 | `invalid_relation_token` | failed |
 | `invalid_cardinality_container` | failed |
 | `target_identity_mismatch` | failed |
+| `duplicate_target` | failed |
 | `collection_context_mismatch` | failed |
 | `collection_checksum_mismatch` | failed |
+| `duplicate_registry_token` | failed |
+| `registry_checksum_mismatch` | failed |
 | `cursor_cycle` | partial/inconclusive |
 | `graph_cycle` | partial/inconclusive |
 | `traversal_budget_exceeded` | partial/inconclusive |
@@ -69,47 +76,54 @@ ID khi có.
 
 Valid fixtures:
 
-- `relations-valid-one`
-- `relations-valid-inline-many`
-- `relations-valid-empty-inline-many`
-- `relations-valid-collection-first-page`
-- `relations-valid-collection-last-page`
-- `relations-valid-vendor-token`
-- `relations-valid-empty-collection`
-- `relations-valid-registry`
+| Fixture | Primary expected check ID | Expected result |
+|---|---|---|
+| `relations-valid-one` | `relations.schema.relation_set` | passed |
+| `relations-valid-inline-many` | `relations.semantic.cardinality` | passed |
+| `relations-valid-empty-inline-many` | `relations.semantic.cardinality` | passed |
+| `relations-valid-collection-first-page` | `relations.collection.pagination` | passed |
+| `relations-valid-collection-last-page` | `relations.collection.pagination` | passed |
+| `relations-valid-vendor-token` | `relations.semantic.tokens` | passed |
+| `relations-valid-empty-collection` | `relations.schema.collection` | passed |
+| `relations-valid-registry` | `relations.schema.registry` | passed |
 
 Invalid fixtures:
 
-- `relations-invalid-wrapper-version`
-- `relations-invalid-unknown-field`
-- `relations-invalid-one-with-targets`
-- `relations-invalid-many-with-both-containers`
-- `relations-invalid-many-without-container`
-- `relations-invalid-inline-over-limit`
-- `relations-invalid-token`
-- `relations-invalid-id-type-prefix`
-- `relations-invalid-duplicate-target`
-- `relations-invalid-collection-context`
-- `relations-invalid-checksum`
-- `relations-invalid-registry-duplicate-token`
-- `relations-invalid-registry-checksum`
+| Fixture | Expected check ID | Expected issue code |
+|---|---|---|
+| `relations-invalid-wrapper-version` | `relations.discovery.declared` | `unsupported_module_version` |
+| `relations-invalid-unknown-field` | `relations.schema.relation_set` | `invalid_module_document` |
+| `relations-invalid-one-with-targets` | `relations.semantic.cardinality` | `invalid_cardinality_container` |
+| `relations-invalid-many-with-both-containers` | `relations.semantic.cardinality` | `invalid_cardinality_container` |
+| `relations-invalid-many-without-container` | `relations.semantic.cardinality` | `invalid_cardinality_container` |
+| `relations-invalid-inline-over-limit` | `relations.semantic.cardinality` | `invalid_cardinality_container` |
+| `relations-invalid-token` | `relations.semantic.tokens` | `invalid_relation_token` |
+| `relations-invalid-id-type-prefix` | `relations.semantic.target_identity` | `target_identity_mismatch` |
+| `relations-invalid-duplicate-target` | `relations.semantic.duplicate_target` | `duplicate_target` |
+| `relations-invalid-collection-context` | `relations.collection.context` | `collection_context_mismatch` |
+| `relations-invalid-checksum` | `relations.collection.checksum` | `collection_checksum_mismatch` |
+| `relations-invalid-registry-duplicate-token` | `relations.registry.unique_token` | `duplicate_registry_token` |
+| `relations-invalid-registry-checksum` | `relations.registry.checksum` | `registry_checksum_mismatch` |
 
 Traversal/security fixtures:
 
-- `relations-cursor-cycle`
-- `relations-graph-cycle`
-- `relations-budget-depth`
-- `relations-budget-node`
-- `relations-budget-request`
-- `relations-budget-byte`
-- `relations-budget-deadline`
-- `relations-cross-origin-cap`
-- `relations-ssrf-private-target`
-- `relations-cross-origin-credential-strip`
-- `relations-private-social-graph-omitted`
+| Fixture | Expected check ID | Expected issue/result |
+|---|---|---|
+| `relations-cursor-cycle` | `relations.traversal.cycle` | `cursor_cycle` |
+| `relations-graph-cycle` | `relations.traversal.cycle` | `graph_cycle` |
+| `relations-budget-depth` | `relations.traversal.budget` | `traversal_budget_exceeded` |
+| `relations-budget-node` | `relations.traversal.budget` | `traversal_budget_exceeded` |
+| `relations-budget-request` | `relations.traversal.budget` | `traversal_budget_exceeded` |
+| `relations-budget-byte` | `relations.traversal.budget` | `traversal_budget_exceeded` |
+| `relations-budget-deadline` | `relations.traversal.budget` | `traversal_budget_exceeded` |
+| `relations-cross-origin-cap` | `relations.traversal.budget` | `traversal_budget_exceeded` |
+| `relations-ssrf-private-target` | `relations.security.url_policy` | `blocked_url` |
+| `relations-cross-origin-credential-strip` | `relations.security.credentials` | passed |
+| `relations-private-social-graph-omitted` | `relations.privacy.social_graph` | passed |
 
-Fixture trở thành normative vector khi payload, schema, expected result và expected
-issue/check ID được review cùng nhau. Không dùng Ailmao domain data.
+Mỗi hàng chỉ khóa primary check; fixture metadata MAY khai báo thêm check IDs liên
+quan. Fixture trở thành normative vector khi payload, schema, expected result và
+expected issue/check ID được review cùng nhau. Không dùng Ailmao domain data.
 
 ## Profiles
 

@@ -97,6 +97,10 @@ Không thêm `registry` hoặc module-specific field không có namespace vào
 `manifest.modules[]`. Relation registry được liên kết từ Relations specification
 và module schema, không mở rộng core manifest contract.
 
+`manifest.modules[].schema` trỏ tới schema dispatch của các top-level module
+documents. Core manifest schema validate discovery entry; `module.schema.json`
+không đồng thời validate discovery entry.
+
 ### Inline relation set
 
 Relation set nằm tại `x_relations` ở root entity. Không đặt nó trong `data` vì
