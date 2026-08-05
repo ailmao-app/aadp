@@ -7,10 +7,24 @@
  * `aadp-conformance` CLI in someone else's CI.
  */
 import type { UrlPolicy } from "../client/url-policy.js";
+import type { RetryOptions } from "../client/http.js";
 
 /** Protocol versions this runner knows how to exercise over HTTP. */
 export const SUPPORTED_CONFORMANCE_VERSIONS = ["1.0"] as const;
 export type ConformanceVersion = (typeof SUPPORTED_CONFORMANCE_VERSIONS)[number];
+
+/**
+ * Named presets of budget/retry defaults (ADR-0006) — NOT a filter over
+ * which check IDs run; every profile exercises the exact same `CHECKS`.
+ * `core`/`public-web` are numerically identical at introduction (both
+ * "what `1.0.x` already does"); `full-traversal` raises the traversal
+ * budgets for a deliberately exhaustive crawl; `authenticated` is
+ * numerically identical to `public-web` and exists to document intent and
+ * be recorded in `report.profile` — this package defines no
+ * authenticated-only check behavior.
+ */
+export const CONFORMANCE_PROFILES = ["core", "public-web", "full-traversal", "authenticated"] as const;
+export type ConformanceProfile = (typeof CONFORMANCE_PROFILES)[number];
 
 /**
  * `passed` and `failed` are the only two statuses that move the overall
@@ -88,6 +102,8 @@ export interface ConformanceReport {
   status: "passed" | "failed" | "inconclusive";
   summary: ConformanceSummary;
   fatal?: ConformanceFatal;
+  /** Which named preset (ADR-0006) this run used, if the caller passed one. Absent when `profile` was omitted. */
+  profile?: ConformanceProfile;
   checks: CheckResult[];
 }
 
@@ -96,6 +112,13 @@ export interface ConformanceOptions {
   baseUrl: string;
   /** Protocol version to target. Default `1.0`. */
   version?: string;
+  /**
+   * Named preset (ADR-0006) of `maxPages`/`maxEntities`/`maxSitemaps`/
+   * `deadlineMs`/`retry` defaults — applied first, so any of those fields
+   * set explicitly here still overrides the preset's value for that one
+   * field. Omitting `profile` is exactly `"core"`. See `CONFORMANCE_PROFILES`.
+   */
+  profile?: ConformanceProfile;
   /** Per-request timeout in ms. Default 10000 (client default). */
   timeoutMs?: number;
   /** Maximum redirect hops per request. Default 5 (client default). */
@@ -118,6 +141,12 @@ export interface ConformanceOptions {
   maxSitemaps?: number;
   /** Traversal budget: wall-clock deadline for the traversal walk, in ms. Default 120000. */
   deadlineMs?: number;
+  /**
+   * Traversal budget: maximum total response bytes across every request
+   * the whole run makes (ADR-0006) — distinct from `maxResponseBytes`,
+   * which caps a single response. Default unbounded.
+   */
+  maxTotalBytes?: number;
   /**
    * Allow the target (and its redirects) to resolve to a private,
    * loopback or link-local address. Off by default: the runner is
@@ -155,6 +184,21 @@ export interface ConformanceOptions {
   failOnWarning?: boolean;
   /** Called as each check settles, for progress output. Never throws into the run. */
   onCheck?: (result: CheckResult) => void;
+  /**
+   * Caller-driven cancellation (ADR-0006). Stops in-flight requests and
+   * every check not yet started — each remaining check is recorded
+   * `skipped`/`inconclusive` rather than run, so the report reflects a
+   * stopped run instead of either a false pass or a false failure caused
+   * by the caller's own cancellation. Omitting this is a no-op: behavior
+   * matches every release before 1.1.0.
+   */
+  signal?: AbortSignal;
+  /**
+   * Opt-in retry/backoff for every request this run makes (ADR-0006). See
+   * `RetryOptions` (`ail-aadp/client`). Omitting `retry` disables it
+   * entirely — identical to every release before 1.1.0.
+   */
+  retry?: RetryOptions;
 }
 
 /**

@@ -29,8 +29,13 @@ CLI/options → traversal policy service
                  HTTP + URL/DNS policy
 ```
 
-CLI chỉ parse/render. Scheduler, retry và budget là module thuần có clock/fetch
-injectable để test deterministic.
+CLI chỉ parse/render. Scheduler, retry và budget là module thuần (không phụ
+thuộc HTTP/CLI), nhưng **không** clock/fetch-injectable — `Date.now`,
+`Math.random`, `setTimeout` và `fetch` được gọi trực tiếp. Quyết định này đã
+được chốt lại trong `docs/adr/0006-bounded-traversal-controls.md` §Testability
+(bản draft ban đầu của kế hoạch này từng yêu cầu injection, nhưng seam đó
+chưa bao giờ được triển khai; test dựa trên timer thật ngắn + mock server
+thật thay vì fake clock).
 
 ## Work packages
 

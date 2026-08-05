@@ -15,15 +15,19 @@ import {
   UnsupportedAadpVersionError,
   BlockedUrlError,
   TimeoutError,
+  AbortedError,
   TooManyRedirectsError,
   ResponseTooLargeError,
   InvalidContentTypeError,
   MalformedJsonError,
   InvalidOptionError,
   createPermissiveUrlPolicy,
+  AadpRequestError,
   type ClientOptions,
 } from "../../src/client/v1.0/index.js";
 import { checksumOf } from "../../src/canonical-json/checksum.js";
+import { createDiscoveryBudget } from "../../src/client/discovery-budget.js";
+import { setOnRetryBackoffTimerArmedForTests } from "../../src/client/http.js";
 
 /**
  * Phase-4 reference-client tests: acceptance criteria from
@@ -175,6 +179,45 @@ describe("discoverAllEntities — happy path", () => {
     }
     expect(entities.map((e) => e.id)).toEqual(["example:sample-1", "example:sample-2"]);
   });
+
+  it("with concurrency > 1, still yields entities in sitemap order even when a later one answers first", async () => {
+    const items = [
+      { id: "example:c1", data: { n: 1 }, updatedAt: "2026-07-25T08:00:00Z", delayMs: 40 },
+      { id: "example:c2", data: { n: 2 }, updatedAt: "2026-07-25T08:00:01Z", delayMs: 5 },
+      { id: "example:c3", data: { n: 3 }, updatedAt: "2026-07-25T08:00:02Z", delayMs: 5 },
+    ];
+    server = await startServer((req, res, url) => {
+      const host = req.headers.host!;
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(host));
+      if (url.pathname === "/ai/v1.0/sitemap-index.json") return sendJson(res, 200, buildSitemapIndex(host));
+      if (url.pathname === "/ai/v1.0/sitemaps/example.json") {
+        const sitemapItems = items.map((item) => buildSitemapItem(host, item));
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          type: "example",
+          generated_at: "2026-07-25T09:30:00Z",
+          checksum: checksumOf(sitemapItems),
+          items: sitemapItems,
+          cursor: { next: null },
+        });
+      }
+      const entityMatch = url.pathname.match(/^\/ai\/v1\.0\/entities\/example\/(.+)\.json$/);
+      if (entityMatch) {
+        const item = items.find((e) => e.id === `example:${entityMatch[1]}`)!;
+        // Slower first item, faster later items: proves output order
+        // comes from the sitemap, not completion order.
+        setTimeout(() => sendJson(res, 200, buildEntity(host, item)), item.delayMs);
+        return;
+      }
+      sendJson(res, 404, { error: { code: "not_found", message: "no route", request_id: "req_1" } });
+    });
+
+    const entities = [];
+    for await (const entity of discoverAllEntities(server.baseUrl, { ...PERMISSIVE, concurrency: 3 })) {
+      entities.push(entity);
+    }
+    expect(entities.map((e) => e.id)).toEqual(["example:c1", "example:c2", "example:c3"]);
+  });
 });
 
 describe("unsupported version", () => {
@@ -325,6 +368,24 @@ describe("invalid numeric options", () => {
       discover("https://example.com", { ...PERMISSIVE, maxResponseBytes: 10.5 })
     ).rejects.toThrow(InvalidOptionError);
   });
+
+  it("throws InvalidOptionError for an invalid retry.maxAttempts before making any request", async () => {
+    await expect(
+      discover("https://example.com", { ...PERMISSIVE, retry: { maxAttempts: 0 } })
+    ).rejects.toThrow(InvalidOptionError);
+  });
+
+  it("throws InvalidOptionError for a non-integer retry.baseDelayMs", async () => {
+    await expect(
+      discover("https://example.com", { ...PERMISSIVE, retry: { baseDelayMs: 1.5 } })
+    ).rejects.toThrow(InvalidOptionError);
+  });
+
+  it("throws InvalidOptionError for a negative retry.maxDelayMs", async () => {
+    await expect(
+      discover("https://example.com", { ...PERMISSIVE, retry: { maxDelayMs: -1 } })
+    ).rejects.toThrow(InvalidOptionError);
+  });
 });
 
 describe("timeout", () => {
@@ -340,6 +401,335 @@ describe("timeout", () => {
     await expect(discover(server.baseUrl, { ...PERMISSIVE, timeoutMs: 20 })).rejects.toThrow(
       TimeoutError
     );
+  });
+});
+
+describe("cancellation (options.signal)", () => {
+  it("rejects with AbortedError, not TimeoutError, when the caller's signal fires mid-request", async () => {
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        setTimeout(() => sendJson(res, 200, {}), 5_000);
+        return;
+      }
+      sendJson(res, 404, {});
+    });
+
+    const controller = new AbortController();
+    setTimeout(() => controller.abort("caller gave up"), 20);
+
+    await expect(discover(server.baseUrl, { ...PERMISSIVE, signal: controller.signal })).rejects.toThrow(
+      AbortedError
+    );
+  });
+
+  it("rejects immediately when the signal is already aborted before the first request", async () => {
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        return sendJson(res, 200, buildManifest(req.headers.host!));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(discover(server.baseUrl, { ...PERMISSIVE, signal: controller.signal })).rejects.toThrow(
+      AbortedError
+    );
+    expect(server.requestLog).toEqual([]);
+  });
+
+  it("stops discoverAllEntities from issuing further requests once aborted mid-traversal", async () => {
+    server = await startServer((req, res, url) => {
+      const host = req.headers.host!;
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(host));
+      if (url.pathname === "/ai/v1.0/sitemap-index.json") return sendJson(res, 200, buildSitemapIndex(host));
+      if (url.pathname === "/ai/v1.0/sitemaps/example.json") {
+        const items = ENTITIES.map((e) => buildSitemapItem(host, e));
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          type: "example",
+          generated_at: "2026-07-25T09:30:00Z",
+          checksum: checksumOf(items),
+          items,
+        });
+      }
+      if (url.pathname.startsWith("/ai/v1.0/entities/")) {
+        const item = ENTITIES.find((e) => url.pathname.endsWith(`${e.id.split(":")[1]}.json`));
+        if (item) return sendJson(res, 200, buildEntity(host, item));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const controller = new AbortController();
+    const seen: string[] = [];
+    // Aborts right after the first entity is yielded (not from inside the
+    // server handler, which would race the in-flight response for that
+    // same first entity) — the second entity must never be requested.
+    await expect(async () => {
+      for await (const entity of discoverAllEntities(server!.baseUrl, { ...PERMISSIVE, signal: controller.signal })) {
+        seen.push(entity.id);
+        controller.abort();
+      }
+    }).rejects.toThrow(AbortedError);
+
+    expect(seen).toEqual([ENTITIES[0].id]);
+    expect(server.requestLog.filter((p) => p.startsWith("/ai/v1.0/entities/"))).toHaveLength(1);
+  });
+});
+
+function errorEnvelope(code: string, message: string) {
+  return { error: { code, message, request_id: "req_retry_test" } };
+}
+
+describe("retry (options.retry)", () => {
+  it("does not retry anything when retry is omitted (default, matches every release before 1.1.0)", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        return sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const err = await discover(server.baseUrl, PERMISSIVE).catch((e) => e);
+    expect(err).toBeInstanceOf(AadpRequestError);
+    expect((err as AadpRequestError).status).toBe(503);
+    expect(attempts).toBe(1);
+  });
+
+  it("retries a 503 up to maxAttempts and succeeds once the server recovers", async () => {
+    let attempts = 0;
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        if (attempts < 3) {
+          return sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
+        }
+        return sendJson(res, 200, buildManifest(req.headers.host!));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const manifest = await discover(server.baseUrl, {
+      ...PERMISSIVE,
+      retry: { maxAttempts: 5, baseDelayMs: 1, maxDelayMs: 5 },
+    });
+    expect(manifest.aadp_version).toBe("1.0");
+    expect(attempts).toBe(3);
+  });
+
+  it("gives up after maxAttempts and surfaces the last response", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        return sendJson(res, 429, errorEnvelope("rate_limited", "too many requests"));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const err = await discover(server.baseUrl, {
+      ...PERMISSIVE,
+      retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 5 },
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(AadpRequestError);
+    expect((err as AadpRequestError).status).toBe(429);
+    expect(attempts).toBe(3);
+  });
+
+  it("never retries a non-retryable 4xx", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        return sendJson(res, 400, errorEnvelope("invalid_request", "bad request"));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const err = await discover(server.baseUrl, {
+      ...PERMISSIVE,
+      retry: { maxAttempts: 5, baseDelayMs: 1, maxDelayMs: 5 },
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(AadpRequestError);
+    expect((err as AadpRequestError).status).toBe(400);
+    expect(attempts).toBe(1);
+  });
+
+  it("never retries a blocked private-network URL", async () => {
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(req.headers.host!));
+      sendJson(res, 404, {});
+    });
+
+    // No urlPolicy override: strict default blocks this loopback origin.
+    await expect(
+      discover(server.baseUrl, { retry: { maxAttempts: 5, baseDelayMs: 1, maxDelayMs: 5 } })
+    ).rejects.toThrow(BlockedUrlError);
+    expect(server.requestLog).toEqual([]);
+  });
+
+  it("honors a numeric Retry-After header, capped at maxDelayMs", async () => {
+    let attempts = 0;
+    const timestamps: number[] = [];
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        timestamps.push(Date.now());
+        if (attempts === 1) {
+          res.writeHead(503, { "Content-Type": "application/json", "Retry-After": "10" });
+          return res.end(JSON.stringify(errorEnvelope("upstream_unavailable", "busy")));
+        }
+        return sendJson(res, 200, buildManifest(req.headers.host!));
+      }
+      sendJson(res, 404, {});
+    });
+
+    await discover(server.baseUrl, {
+      ...PERMISSIVE,
+      // maxDelayMs (50ms) caps the 10-second Retry-After down to something
+      // this test can actually wait out.
+      retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 50 },
+    });
+    expect(attempts).toBe(2);
+    expect(timestamps[1] - timestamps[0]).toBeGreaterThanOrEqual(45);
+  });
+
+  it("stops retrying immediately when the caller's signal aborts during backoff", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        return sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
+      }
+      sendJson(res, 404, {});
+    });
+
+    // Synchronize on the retry backoff `setTimeout` actually being armed
+    // (production-code instrumentation, test-only — see
+    // `setOnRetryBackoffTimerArmedForTests` in `src/client/http.ts`),
+    // not on a fixed wall-clock delay or on "the server responded to
+    // attempt 1": either of those can race ahead of or behind the point
+    // where the pending backoff timer itself becomes abort-cancellable,
+    // so aborting there wouldn't actually exercise "abort cancels the
+    // pending retry timer" — it could just as well be aborting during the
+    // in-flight fetch/body-drain instead, and the two assertions below
+    // would pass either way, hiding a regression in `sleepRespectingAbort`.
+    let resolveBackoffArmed: () => void;
+    let backoffArmedAt = 0;
+    const backoffArmed = new Promise<void>((resolve) => {
+      resolveBackoffArmed = resolve;
+    });
+    setOnRetryBackoffTimerArmedForTests(() => {
+      // Recorded here, not before `discover()` starts: attempt 1's own
+      // DNS/socket/fetch/server/body-drain time is unrelated to the
+      // pending-backoff-timer cancellation this test targets, and on a
+      // loaded CI worker can by itself exceed any fixed elapsed-time
+      // budget — asserting from "before the whole request" would make
+      // this test flake on an unrelated, correct code path exactly like
+      // the wall-clock race this instrumentation was added to fix.
+      backoffArmedAt = Date.now();
+      resolveBackoffArmed();
+    });
+
+    const controller = new AbortController();
+    backoffArmed.then(() => controller.abort("giving up"));
+
+    try {
+      await expect(
+        discover(server.baseUrl, {
+          ...PERMISSIVE,
+          signal: controller.signal,
+          retry: { maxAttempts: 10, baseDelayMs: 1000, maxDelayMs: 1000 },
+        })
+      ).rejects.toThrow(AbortedError);
+      expect(attempts).toBe(1);
+      // The decisive assertion: if `sleepRespectingAbort`'s own abort
+      // listener were missing/broken, the pending `setTimeout(..., 1000)`
+      // would still (eventually) resolve, `continue attempts` back to the
+      // top of the hop loop, and get caught there by the loop's own
+      // `callerAborted()` check instead — same final error type and
+      // `attempts` count as above, but only after the full 1000ms backoff
+      // elapsed. Bounding elapsed time *since the backoff timer armed*
+      // (not since the test started) proves the abort actually cut the
+      // pending timer short rather than being caught late by that
+      // fallback path, without coupling the assertion to attempt 1's own
+      // unrelated request latency.
+      expect(Date.now() - backoffArmedAt).toBeLessThan(500);
+    } finally {
+      setOnRetryBackoffTimerArmedForTests(undefined);
+    }
+  });
+
+  it("throws AadpDiscoveryBudgetExceededError instead of sleeping once a retry's backoff would exceed the shared deadline", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        return sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
+      }
+      sendJson(res, 404, {});
+    });
+
+    // deadlineMs (20ms) is far smaller than the backoff a real attempt 2
+    // would need to wait (baseDelayMs 5000) — the retry must never sleep
+    // for it, let alone send a second request.
+    const budget = createDiscoveryBudget({ deadlineMs: 20 });
+    await expect(
+      discover(
+        server.baseUrl,
+        { ...PERMISSIVE, retry: { maxAttempts: 10, baseDelayMs: 5000, maxDelayMs: 5000 } },
+        budget
+      )
+    ).rejects.toThrow(AadpDiscoveryBudgetExceededError);
+    expect(attempts).toBe(1);
+  });
+
+  it("throws AadpDiscoveryBudgetExceededError instead of retrying once the deadline has already passed", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        return sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const budget = createDiscoveryBudget({ deadlineMs: 5000 });
+    // Simulate the deadline already having elapsed (e.g. spent by earlier
+    // requests in the same traversal) without a slow real-time test.
+    (budget as { startedAt: number }).startedAt = Date.now() - 10_000;
+
+    await expect(
+      discover(server.baseUrl, { ...PERMISSIVE, retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 5 } }, budget)
+    ).rejects.toThrow(AadpDiscoveryBudgetExceededError);
+    expect(attempts).toBe(0);
+  });
+
+  it("honoring a Retry-After that alone would exceed the deadline also throws instead of sleeping", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        res.writeHead(503, { "Content-Type": "application/json", "Retry-After": "30" });
+        return res.end(JSON.stringify(errorEnvelope("upstream_unavailable", "busy")));
+      }
+      sendJson(res, 404, {});
+    });
+
+    // Retry-After asks for 30s, capped at maxDelayMs (20s) — still far more
+    // than the 20ms deadline below.
+    const budget = createDiscoveryBudget({ deadlineMs: 20 });
+    await expect(
+      discover(
+        server.baseUrl,
+        { ...PERMISSIVE, retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 20_000 } },
+        budget
+      )
+    ).rejects.toThrow(AadpDiscoveryBudgetExceededError);
+    expect(attempts).toBe(1);
   });
 });
 
@@ -610,6 +1000,55 @@ describe("cross-document integrity", () => {
   });
 });
 
+describe("maxTotalBytes stops streaming mid-response, not after the full body is buffered", () => {
+  it("aborts the body read before the server finishes writing every chunk", async () => {
+    const CHUNK = "x".repeat(1024); // 1 KiB
+    const TOTAL_CHUNKS = 50; // 50 KiB total — comfortably under maxResponseBytes (2 MiB default)
+    let chunksWritten = 0;
+    let clientDisconnectedEarly = false;
+
+    server = await startServer((req, res, url) => {
+      if (url.pathname !== "/.well-known/ai-manifest.json") {
+        sendJson(res, 404, {});
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      // Leading bytes make it a syntactically-plausible (if oversized)
+      // JSON string value so a truncated read fails on the *budget*, not
+      // on JSON.parse first.
+      res.write('{"padding":"');
+      const timer = setInterval(() => {
+        if (res.writableEnded || res.destroyed) {
+          clearInterval(timer);
+          return;
+        }
+        if (chunksWritten >= TOTAL_CHUNKS) {
+          clearInterval(timer);
+          res.end('"}');
+          return;
+        }
+        res.write(CHUNK);
+        chunksWritten++;
+      }, 2);
+      res.on("close", () => {
+        clearInterval(timer);
+        if (chunksWritten < TOTAL_CHUNKS) clientDisconnectedEarly = true;
+      });
+    });
+
+    const budget = createDiscoveryBudget({ maxTotalBytes: 4 * 1024 }); // 4 KiB — far less than the 50 KiB body
+    await expect(
+      discover(server.baseUrl, { ...PERMISSIVE, maxResponseBytes: 10 * 1024 * 1024 }, budget)
+    ).rejects.toThrow(AadpDiscoveryBudgetExceededError);
+
+    // Give the server's 'close' listener a moment to fire after the client
+    // cancels the reader.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(clientDisconnectedEarly).toBe(true);
+    expect(chunksWritten).toBeLessThan(TOTAL_CHUNKS);
+  });
+});
+
 describe("discovery traversal budgets", () => {
   it("throws AadpDiscoveryBudgetExceededError when the walk yields more entities than maxEntities", async () => {
     server = await startServer((req, res, url) => {
@@ -642,6 +1081,72 @@ describe("discovery traversal budgets", () => {
         }
       })()
     ).rejects.toThrow(AadpDiscoveryBudgetExceededError);
+  });
+
+  it("throws AadpDiscoveryBudgetExceededError once the whole walk's response bytes exceed maxTotalBytes", async () => {
+    server = await startServer((req, res, url) => {
+      const host = req.headers.host!;
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(host));
+      if (url.pathname === "/ai/v1.0/sitemap-index.json") return sendJson(res, 200, buildSitemapIndex(host));
+      if (url.pathname === "/ai/v1.0/sitemaps/example.json") {
+        const items = ENTITIES.map((item) => buildSitemapItem(host, item));
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          type: "example",
+          generated_at: "2026-07-25T09:30:00Z",
+          checksum: checksumOf(items),
+          items,
+          cursor: { next: null },
+        });
+      }
+      const entityMatch = url.pathname.match(/^\/ai\/v1\.0\/entities\/example\/(.+)\.json$/);
+      if (entityMatch) {
+        const item = ENTITIES.find((e) => e.id === `example:${entityMatch[1]}`)!;
+        return sendJson(res, 200, buildEntity(host, item));
+      }
+      sendJson(res, 404, {});
+    });
+
+    // Small enough that the manifest + sitemap-index + sitemap responses
+    // alone exceed it, well before any entity is fetched.
+    await expect(
+      (async () => {
+        for await (const _e of discoverAllEntities(server.baseUrl, { ...PERMISSIVE, maxTotalBytes: 10 })) {
+          // consume
+        }
+      })()
+    ).rejects.toThrow(AadpDiscoveryBudgetExceededError);
+  });
+
+  it("does not enforce any total-byte cap when maxTotalBytes is omitted (default, matches every release before 1.1.0)", async () => {
+    server = await startServer((req, res, url) => {
+      const host = req.headers.host!;
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(host));
+      if (url.pathname === "/ai/v1.0/sitemap-index.json") return sendJson(res, 200, buildSitemapIndex(host));
+      if (url.pathname === "/ai/v1.0/sitemaps/example.json") {
+        const items = ENTITIES.map((item) => buildSitemapItem(host, item));
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          type: "example",
+          generated_at: "2026-07-25T09:30:00Z",
+          checksum: checksumOf(items),
+          items,
+          cursor: { next: null },
+        });
+      }
+      const entityMatch = url.pathname.match(/^\/ai\/v1\.0\/entities\/example\/(.+)\.json$/);
+      if (entityMatch) {
+        const item = ENTITIES.find((e) => e.id === `example:${entityMatch[1]}`)!;
+        return sendJson(res, 200, buildEntity(host, item));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const entities = [];
+    for await (const entity of discoverAllEntities(server.baseUrl, PERMISSIVE)) {
+      entities.push(entity);
+    }
+    expect(entities.map((e) => e.id)).toEqual(["example:sample-1", "example:sample-2"]);
   });
 });
 

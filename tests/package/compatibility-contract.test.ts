@@ -57,6 +57,13 @@ describe("conformance: check IDs are a stable, published contract", () => {
   });
 });
 
+describe("conformance: CONFORMANCE_PROFILES is a stable, published contract (ADR-0006)", () => {
+  it("is exactly core, public-web, full-traversal, authenticated, in order", async () => {
+    const { CONFORMANCE_PROFILES } = await importFromTarball("conformance");
+    expect(CONFORMANCE_PROFILES).toEqual(["core", "public-web", "full-traversal", "authenticated"]);
+  });
+});
+
 describe("conformance: exitCodeFor status/fatal -> exit code mapping", () => {
   it.each([
     [{ status: "passed", fatal: undefined }, 0],
@@ -205,5 +212,15 @@ describe("validator: UnsupportedAadpVersionError.code is a stable string", () =>
     const { UnsupportedAadpVersionError } = await importFromTarball("validator");
     const error = new UnsupportedAadpVersionError("9.9");
     expect(error.code).toBe("unsupported_version");
+  });
+});
+
+describe("client: AbortedError.code is a stable string, distinct from TimeoutError (ADR-0006)", () => {
+  it("is \"aborted\", not \"timeout\"", async () => {
+    const client = await importFromTarball("client");
+    const aborted = new client.v1.AbortedError("https://example.com", "caller reason");
+    expect(aborted.code).toBe("aborted");
+    const timeout = new client.v1.TimeoutError("https://example.com", 10_000);
+    expect(timeout.code).toBe("timeout");
   });
 });

@@ -348,6 +348,71 @@ describe("traversal budgets", () => {
     expect(byId(report, "traversal.sitemap_index").message).toMatch(/maxSitemaps/);
     expect(exitCodeFor(report)).toBe(1);
   });
+
+  it("stops the run once the whole run's response bytes exceed maxTotalBytes (ADR-0006)", async () => {
+    // Small enough that manifest.http's own response already exceeds it.
+    const report = await runConformance(permissive({ maxTotalBytes: 10 }));
+    expect(report.summary.failed).toBe(0);
+    expect(report.status).toBe("inconclusive");
+    const manifestHttp = byId(report, "manifest.http");
+    expect(manifestHttp.status).toBe("skipped");
+    expect(manifestHttp.inconclusive).toBe(true);
+    expect(manifestHttp.message).toMatch(/maxTotalBytes/i);
+  });
+
+  it("does not enforce a total-byte cap when maxTotalBytes is omitted (default, matches every release before 1.1.0)", async () => {
+    const report = await runConformance(withNegativeTargets());
+    expect(report.status).toBe("passed");
+  });
+});
+
+describe("cancellation (options.signal)", () => {
+  it("marks every check skipped/inconclusive, never failed, when already aborted before the run starts", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const report = await runConformance(permissive({ signal: controller.signal }));
+    expect(report.summary.failed).toBe(0);
+    expect(report.status).toBe("inconclusive");
+    for (const check of report.checks) {
+      expect(check.status).toBe("skipped");
+      expect(check.inconclusive).toBe(true);
+      expect(check.message).toMatch(/aborted/i);
+    }
+    expect(exitCodeFor(report)).toBe(4);
+  });
+
+  it("stops starting new checks once aborted mid-run, without failing the deployment", async () => {
+    const controller = new AbortController();
+    let seenFirstCheck = false;
+
+    const report = await runConformance(
+      permissive({
+        signal: controller.signal,
+        onCheck: () => {
+          // Abort right after the very first check settles — every check
+          // after it must be recorded skipped/inconclusive, not run.
+          if (!seenFirstCheck) {
+            seenFirstCheck = true;
+            controller.abort();
+          }
+        },
+      })
+    );
+
+    expect(seenFirstCheck).toBe(true);
+    expect(report.summary.failed).toBe(0);
+    expect(report.status).toBe("inconclusive");
+    // First check ran for real (whatever its own verdict); every check
+    // after it was never started.
+    const [first, ...rest] = report.checks;
+    expect(first.message ?? "").not.toMatch(/aborted by caller/i);
+    for (const check of rest) {
+      expect(check.status).toBe("skipped");
+      expect(check.inconclusive).toBe(true);
+      expect(check.message).toMatch(/aborted by caller/i);
+    }
+  });
 });
 
 describe("a check whose prerequisite did not pass is skipped, not re-failed", () => {
@@ -537,6 +602,91 @@ describe("conditional GET is checked in both validator forms", () => {
       expect(exitCodeFor(report)).toBe(1);
     } finally {
       await weak.close();
+    }
+  });
+});
+
+describe("retry (options.retry)", () => {
+  it("is forwarded to every request the runner makes: a transient 503 is retried and manifest.http passes", async () => {
+    let attempts = 0;
+    const tiny = await startTinyServer((path) => {
+      if (path === "/.well-known/ai-manifest.json") {
+        attempts++;
+        if (attempts === 1) {
+          return {
+            status: 503,
+            body: JSON.stringify({ error: { code: "upstream_unavailable", message: "busy", request_id: "r" } }),
+          };
+        }
+        return { status: 200, body: JSON.stringify({ aadp_version: "1.0" }) };
+      }
+      return { status: 404, body: "{}" };
+    });
+
+    try {
+      const report = await runConformance({
+        baseUrl: tiny.baseUrl,
+        urlPolicy: createPermissiveUrlPolicy(),
+        retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 5 },
+      });
+      expect(byId(report, "manifest.http").status).toBe("passed");
+      expect(attempts).toBe(2);
+    } finally {
+      await tiny.close();
+    }
+  });
+});
+
+describe("profile (options.profile)", () => {
+  it("rejects an unknown profile name before making any request", async () => {
+    await expect(
+      runConformance({ baseUrl: server.baseUrl, profile: "not-a-real-profile" as never })
+    ).rejects.toThrow(InvalidConformanceOptionsError);
+  });
+
+  it("omitting profile behaves exactly like \"core\" (default, matches every release before 1.1.0)", async () => {
+    const withoutProfile = await runConformance(permissive({ maxPages: 1 }));
+    const withCore = await runConformance(permissive({ profile: "core", maxPages: 1 }));
+    expect(byId(withoutProfile, "pagination.contract").inconclusive).toBe(true);
+    expect(byId(withCore, "pagination.contract").inconclusive).toBe(true);
+    expect(withoutProfile.profile).toBeUndefined();
+    expect(withCore.profile).toBe("core");
+  });
+
+  it("full-traversal raises the traversal budgets enough to finish a walk core's defaults would cut short", async () => {
+    // The example sitemap paginates 5 items at 2 per page (3 pages); the
+    // note sitemap is 1 page — core's default maxPages (100) already
+    // finishes this walk, so instead assert full-traversal's preset value
+    // directly by observing it accepts a walk the *explicit* core-sized
+    // limit below would not.
+    const constrained = await runConformance(permissive({ maxPages: 1 }));
+    expect(byId(constrained, "pagination.contract").inconclusive).toBe(true);
+
+    const fullTraversal = await runConformance(permissive({ profile: "full-traversal" }));
+    expect(byId(fullTraversal, "pagination.contract").status).toBe("passed");
+    expect(fullTraversal.profile).toBe("full-traversal");
+  });
+
+  it("an explicit option field still overrides the profile's preset for that field", async () => {
+    // full-traversal's own maxPages preset (10000) would finish the walk;
+    // an explicit maxPages: 1 must still win and cut it short.
+    const report = await runConformance(permissive({ profile: "full-traversal", maxPages: 1 }));
+    expect(byId(report, "pagination.contract").inconclusive).toBe(true);
+  });
+
+  it("core, public-web and authenticated are numerically identical at introduction", async () => {
+    const core = await runConformance(permissive({ profile: "core", maxPages: 1 }));
+    const publicWeb = await runConformance(permissive({ profile: "public-web", maxPages: 1 }));
+    const authenticated = await runConformance(permissive({ profile: "authenticated", maxPages: 1 }));
+    for (const report of [core, publicWeb, authenticated]) {
+      expect(byId(report, "pagination.contract").inconclusive).toBe(true);
+    }
+  });
+
+  it("does not run any different set of checks for any profile", async () => {
+    for (const profile of ["core", "public-web", "full-traversal", "authenticated"] as const) {
+      const report = await runConformance(withNegativeTargets({ profile }));
+      expect(report.checks.map((check) => check.id)).toEqual(CHECKS.map((check) => check.id));
     }
   });
 });

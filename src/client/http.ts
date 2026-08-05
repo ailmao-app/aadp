@@ -17,6 +17,11 @@
  */
 import { createStrictUrlPolicy, assertAllowed, BlockedUrlError, type UrlPolicy } from "./url-policy.js";
 import { dispatcherFor } from "./dns-pin.js";
+import {
+  chargeDiscoveryBudgetBytes,
+  AadpDiscoveryBudgetExceededError,
+  type DiscoveryBudgetState,
+} from "./discovery-budget.js";
 
 export interface FetchJsonOptions {
   /** Defaults to a shared strict policy singleton (see `dispatcherFor`). */
@@ -39,6 +44,37 @@ export interface FetchJsonOptions {
    * this must be an explicit opt-in per header.
    */
   crossOriginSafeHeaders?: string[];
+  /**
+   * Caller-driven cancellation (ADR-0006). Combined with this module's own
+   * per-hop timeout via `AbortSignal.any()` — aborting stops the in-flight
+   * request (headers and body) and rejects with `AbortedError` instead of
+   * `TimeoutError`. Omitting this is a no-op: internal timeout handling is
+   * unchanged, so behavior matches every release before 1.1.0.
+   */
+  signal?: AbortSignal;
+  /**
+   * Opt-in retry/backoff (ADR-0006). Omitting `retry` entirely disables it
+   * — identical to every release before 1.1.0, which never retries
+   * anything. Retries only a fixed, defined set of transient outcomes: a
+   * network/connect-level error, this module's own per-hop `timeoutMs`, and
+   * HTTP `429`/`503`. Never retries any other 4xx, a `BlockedUrlError`, an
+   * `AbortedError`, or a request that would exceed a shared traversal
+   * budget/deadline. See `RetryOptions`.
+   */
+  retry?: RetryOptions;
+}
+
+export interface RetryOptions {
+  /** Maximum attempts, including the first. Default 3 when `retry` is present but this is omitted. Must be >= 1. */
+  maxAttempts?: number;
+  /** Base delay for exponential-backoff-with-full-jitter, in ms. Default 500. */
+  baseDelayMs?: number;
+  /**
+   * Upper bound on any single backoff delay, in ms — including one derived
+   * from a `Retry-After` response header, so a publisher-supplied value
+   * cannot stall a run indefinitely. Default 10000.
+   */
+  maxDelayMs?: number;
 }
 
 export interface FetchJsonResult {
@@ -69,6 +105,10 @@ export interface ProbeResult {
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_REDIRECTS = 5;
 const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const DEFAULT_RETRY_MAX_ATTEMPTS = 3;
+const DEFAULT_RETRY_BASE_DELAY_MS = 500;
+const DEFAULT_RETRY_MAX_DELAY_MS = 10_000;
+const RETRYABLE_STATUS_CODES = new Set([429, 503]);
 
 /**
  * Shared default strict policy: `fetchJson` uses this whenever a caller
@@ -92,6 +132,13 @@ export class AadpClientError extends Error {
 export class TimeoutError extends AadpClientError {
   constructor(url: string, timeoutMs: number) {
     super(`Request to ${url} timed out after ${timeoutMs}ms`, "timeout");
+  }
+}
+
+/** Thrown when `options.signal` aborts a request/body-read — distinct from an internal `TimeoutError`. */
+export class AbortedError extends AadpClientError {
+  constructor(url: string, reason?: unknown) {
+    super(`Request to ${url} was aborted${reason !== undefined && reason !== null ? `: ${String(reason)}` : ""}`, "aborted");
   }
 }
 
@@ -157,6 +204,113 @@ function isAbortError(err: unknown): boolean {
   return (err as Error)?.name === "AbortError";
 }
 
+function callerAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted ?? false;
+}
+
+/**
+ * Whitelist, not a blacklist (ADR-0006): retry only fires for a fixed,
+ * defined set of transient outcomes. `TimeoutError` is this module's own
+ * per-hop timeout; anything that is not one of this module's named
+ * `AadpClientError` subclasses and not a `BlockedUrlError` is presumed a
+ * raw, unclassified network/connect-level failure (e.g. `ECONNREFUSED`/
+ * `ECONNRESET` surfacing from `fetch()`) — also transient. Every other
+ * named error (a real client error like `MalformedJsonError`, or a
+ * security-relevant block like `BlockedUrlError`/`AbortedError`) is never
+ * retried: retrying would not fix a malformed response, and retrying a
+ * security block or a caller's own cancellation is never correct.
+ */
+function isRetryableError(err: unknown): boolean {
+  if (err instanceof TimeoutError) return true;
+  if (err instanceof AbortedError) return false;
+  if (err instanceof BlockedUrlError) return false;
+  // A deadline/budget-exceeded signal is not a transient condition to
+  // retry through — it's the run stopping itself. Without this exclusion,
+  // `assertRetryFitsDeadline`/`assertWithinDeadline` throwing from inside
+  // the status-retry branch would be caught by the outer (error-based)
+  // retry branch and misread as "retryable", which computes its own
+  // smaller backoff delay and can let one more real request through before
+  // the deadline check finally catches up — see ERROR_LOG.md 2026-08-03.
+  if (err instanceof AadpDiscoveryBudgetExceededError) return false;
+  if (err instanceof AadpClientError) return false;
+  return true;
+}
+
+function isRetryableStatus(status: number): boolean {
+  return RETRYABLE_STATUS_CODES.has(status);
+}
+
+/** Exponential backoff with full jitter: a uniform random delay in `[0, cappedDelay]`. */
+function computeBackoffDelayMs(attempt: number, baseDelayMs: number, maxDelayMs: number): number {
+  const capped = Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs);
+  return Math.random() * capped;
+}
+
+/**
+ * A `Retry-After` value (seconds, or an HTTP-date per RFC 9110 §10.2.3),
+ * capped at `maxDelayMs` so a publisher-supplied value cannot stall a run
+ * indefinitely. Returns `undefined` for a missing or unparseable header —
+ * the caller falls back to the computed exponential backoff instead.
+ */
+function parseRetryAfterMs(value: string | null, maxDelayMs: number): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, maxDelayMs);
+  const dateMs = Date.parse(value);
+  if (!Number.isNaN(dateMs)) return Math.min(Math.max(dateMs - Date.now(), 0), maxDelayMs);
+  return undefined;
+}
+
+/**
+ * Test-only instrumentation, fired the instant a retry backoff `setTimeout`
+ * is actually armed and its `abort` listener attached — i.e. the moment a
+ * caller's abort would hit *this* pending timer rather than some earlier
+ * point in the retry loop (in-flight `fetch()`, body drain, ...). Exists
+ * because a test synchronizing only on "the server responded to attempt 1"
+ * cannot tell whether its subsequent `controller.abort()` actually landed
+ * on the backoff wait or raced ahead of it — see `ERROR_LOG.md` 2026-08-05
+ * and the "Testability" section of ADR-0006. Not part of the public
+ * package surface: `http.ts` is not one of `package.json`'s `exports`
+ * subpaths, so `tests/package/compatibility-contract.test.ts` (which only
+ * imports from the packed tarball's `dist/client/v1.0` etc.) can never
+ * observe or lock this hook. Defaults to a no-op; install/clear via
+ * `setOnRetryBackoffTimerArmedForTests`.
+ */
+let onRetryBackoffTimerArmedForTests: (() => void) | undefined;
+
+/** Test-only: see `onRetryBackoffTimerArmedForTests` above. */
+export function setOnRetryBackoffTimerArmedForTests(hook: (() => void) | undefined): void {
+  onRetryBackoffTimerArmedForTests = hook;
+}
+
+/**
+ * Waits `ms`, rejecting early (with a plain `AbortError`-named `Error`, left
+ * for the caller to map to `AbortedError`) if `signal` aborts first — a
+ * pending retry backoff timer is itself cancellable, per ADR-0006.
+ */
+function sleepRespectingAbort(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const onAbort = () => {
+      clearTimeout(timer);
+      const abortErr = new Error("Retry backoff aborted");
+      abortErr.name = "AbortError";
+      reject(abortErr);
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort);
+    onRetryBackoffTimerArmedForTests?.();
+  });
+}
+
 /**
  * `pinnedLookup()` (`./dns-pin.js`) rejects a DNS-rebound connection by
  * throwing `BlockedUrlError` from its `dns.lookup` callback, but `fetch()`
@@ -219,17 +373,43 @@ export function scopeHeadersToOrigin<T extends FetchJsonOptions>(
   };
 }
 
+/**
+ * Charges `bytes` to the shared whole-run budget, if one was given, as soon
+ * as they're read — never after the fact. This is what makes `maxTotalBytes`
+ * (ADR-0006) an actual streaming stop, not just a check performed once a
+ * response already read up to its own `maxResponseBytes` cap: a run with 1
+ * byte of remaining budget stops after 1 byte of this response, not after
+ * the full ~2 MiB default per-response cap.
+ *
+ * Charging happens per chunk rather than once for the whole body, and each
+ * charge is a single synchronous call — under Node's single-threaded event
+ * loop, two concurrent reads (`concurrency > 1`) can never charge the same
+ * shared counter "at the same instant"; every synchronous increment-then-
+ * compare fully completes before any other chunk's callback runs, so no
+ * separate locking/reservation scheme is needed for this to be race-free.
+ */
+function chargeBytesOrThrow(budget: DiscoveryBudgetState | undefined, bytes: number, context: string): void {
+  if (budget) chargeDiscoveryBudgetBytes(budget, bytes, context);
+}
+
 async function readBodyCapped(
   res: Response,
   url: string,
   maxBytes: number,
-  signal: AbortSignal
+  signal: AbortSignal,
+  budget?: DiscoveryBudgetState,
+  budgetContext?: string
 ): Promise<string> {
   if (!res.body) {
     const text = await res.text();
     if (Buffer.byteLength(text, "utf8") > maxBytes) {
       throw new ResponseTooLargeError(url, maxBytes);
     }
+    // No stream to charge incrementally against here — the whole (small)
+    // body is already in memory by the time `res.text()` resolves. Still
+    // charged so the shared budget accounts for it, just not able to stop
+    // mid-read the way the streamed path below can.
+    chargeBytesOrThrow(budget, Buffer.byteLength(text, "utf8"), budgetContext ?? url);
     return text;
   }
 
@@ -260,6 +440,12 @@ async function readBodyCapped(
           await reader.cancel().catch(() => {});
           throw new ResponseTooLargeError(url, maxBytes);
         }
+        try {
+          chargeBytesOrThrow(budget, value.byteLength, budgetContext ?? url);
+        } catch (err) {
+          await reader.cancel().catch(() => {});
+          throw err;
+        }
         chunks.push(value);
       }
     }
@@ -277,8 +463,10 @@ interface FinalResponse {
   res: Response;
   finalUrl: string;
   signal: AbortSignal;
+  callerSignal: AbortSignal | undefined;
   maxResponseBytes: number;
   timeoutMs: number;
+  budget: DiscoveryBudgetState | undefined;
 }
 
 /**
@@ -290,10 +478,48 @@ interface FinalResponse {
  * one place where the safety properties documented at the top of this
  * file are enforced.
  */
+/**
+ * Milliseconds left before `budget`'s deadline, or `undefined` if there is
+ * no budget. May be negative (deadline already passed).
+ */
+function remainingDeadlineMs(budget: DiscoveryBudgetState | undefined): number | undefined {
+  if (!budget) return undefined;
+  return budget.deadlineMs - (Date.now() - budget.startedAt);
+}
+
+/**
+ * Throws `AadpDiscoveryBudgetExceededError` if `budget`'s deadline has
+ * already passed. A no-op when there's no budget.
+ */
+function assertWithinDeadline(budget: DiscoveryBudgetState | undefined, context: string): void {
+  const remaining = remainingDeadlineMs(budget);
+  if (remaining !== undefined && remaining <= 0) {
+    throw new AadpDiscoveryBudgetExceededError(`${context} exceeded its deadline of ${budget!.deadlineMs}ms`);
+  }
+}
+
+/**
+ * A retry's backoff delay must not, by itself, push the run past its shared
+ * deadline (ADR-0006: "a retry that would exceed the remaining budget/
+ * deadline fails immediately ... instead of attempting the request"). This
+ * throws instead of sleeping when `delayMs` alone would exceed however much
+ * deadline is left — the retry never even starts a new attempt, let alone
+ * sends a request, once that's true.
+ */
+function assertRetryFitsDeadline(budget: DiscoveryBudgetState | undefined, delayMs: number, context: string): void {
+  const remaining = remainingDeadlineMs(budget);
+  if (remaining !== undefined && (remaining <= 0 || delayMs >= remaining)) {
+    throw new AadpDiscoveryBudgetExceededError(
+      `${context} would exceed its deadline of ${budget!.deadlineMs}ms if it retried again`
+    );
+  }
+}
+
 async function requestWithPolicy<T>(
   url: string,
   options: FetchJsonOptions,
-  handle: (final: FinalResponse) => Promise<T>
+  handle: (final: FinalResponse) => Promise<T>,
+  budget?: DiscoveryBudgetState
 ): Promise<T> {
   const policy = options.urlPolicy ?? DEFAULT_STRICT_POLICY;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -304,59 +530,136 @@ async function requestWithPolicy<T>(
   assertValidNumberOption("maxResponseBytes", maxResponseBytes, 1);
   const safeNames = crossOriginSafeNameSet(options.crossOriginSafeHeaders);
   const dispatcher = dispatcherFor(policy);
+  const callerSignal = options.signal;
 
-  let current = new URL(url);
-  const originalUrl = url;
-  let headers = options.headers;
+  // Retry disabled (the default) is exactly `maxAttempts: 1` — one attempt,
+  // no backoff — so the loop below has no special-cased "no retry" branch.
+  // The raw caller-supplied value (not a `Math.max`-clamped one) is what
+  // gets validated, so an invalid `maxAttempts: 0` throws instead of being
+  // silently clamped up to a valid `1`.
+  const retry = options.retry;
+  const maxAttempts = retry ? (retry.maxAttempts ?? DEFAULT_RETRY_MAX_ATTEMPTS) : 1;
+  const baseDelayMs = retry?.baseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+  const maxDelayMs = retry?.maxDelayMs ?? DEFAULT_RETRY_MAX_DELAY_MS;
+  if (retry) {
+    assertValidNumberOption("retry.maxAttempts", maxAttempts, 1);
+    assertValidNumberOption("retry.baseDelayMs", baseDelayMs, 0);
+    assertValidNumberOption("retry.maxDelayMs", maxDelayMs, 0);
+  }
 
-  for (let hop = 0; ; hop++) {
-    assertAllowed(current, policy);
+  attempts: for (let attempt = 1; ; attempt++) {
+    // Every attempt restarts from the original URL/headers — a retry is a
+    // brand new request, not a resumed one; a redirect chain from a
+    // previous attempt has no bearing on this one.
+    let current = new URL(url);
+    const originalUrl = url;
+    let headers = options.headers;
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      let res: Response;
-      try {
-        res = await fetch(current.toString(), {
-          redirect: "manual",
-          headers,
-          signal: controller.signal,
-          ...(dispatcher ? { dispatcher } : {}),
-        } as RequestInit);
-      } catch (err) {
-        if (isAbortError(err)) {
-          throw new TimeoutError(current.toString(), timeoutMs);
+      for (let hop = 0; ; hop++) {
+        if (callerAborted(callerSignal)) {
+          throw new AbortedError(current.toString(), callerSignal!.reason);
         }
-        throw unwrapBlockedUrlError(err);
-      }
+        // Checked on every hop, not just before a retry's backoff sleep: an
+        // attempt that itself runs long (close to `timeoutMs`) can still
+        // exhaust the shared deadline between hops, and a retry must never
+        // start a fresh attempt once the deadline is already gone even if
+        // no backoff delay is involved (attempt 1 of a fresh retry cycle).
+        assertWithinDeadline(budget, `request to ${current.toString()}`);
+        assertAllowed(current, policy);
 
-      const isRedirect = res.status >= 300 && res.status < 400 && res.headers.has("location");
-      if (isRedirect) {
-        // Drain the (typically empty) redirect body to release the socket.
-        await res.body?.cancel().catch(() => {});
-        // `hop` counts redirects already followed, so this one is number
-        // `hop + 1`: `maxRedirects: 1` follows exactly one redirect and
-        // rejects the second, and only `0` refuses the first.
-        if (hop + 1 > maxRedirects) {
-          throw new TooManyRedirectsError(originalUrl, maxRedirects);
-        }
-        const next = new URL(res.headers.get("location")!, current);
-        if (next.origin !== current.origin) {
-          headers = restrictToCrossOriginSafe(headers, safeNames);
-        }
-        current = next;
-        continue;
-      }
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        // Caller cancellation and this hop's own timeout share one signal:
+        // whichever fires first aborts `fetch()`/the body read, and the
+        // catch below tells them apart by re-checking `callerSignal.aborted`.
+        const combinedSignal = callerSignal ? AbortSignal.any([callerSignal, controller.signal]) : controller.signal;
+        try {
+          let res: Response;
+          try {
+            res = await fetch(current.toString(), {
+              redirect: "manual",
+              headers,
+              signal: combinedSignal,
+              ...(dispatcher ? { dispatcher } : {}),
+            } as RequestInit);
+          } catch (err) {
+            // Checked before `isAbortError(err)`: when `AbortController.abort(reason)`
+            // is called with a non-undefined `reason`, a spec-compliant `fetch()`
+            // rejects with that `reason` value directly — which may not even be
+            // an `Error` (a caller can pass any value, e.g. a plain string) — not
+            // a generic named `AbortError`. Checking the signal's own `.aborted`
+            // flag first catches that case regardless of what shape the
+            // rejection took.
+            if (callerAborted(callerSignal)) throw new AbortedError(current.toString(), callerSignal!.reason);
+            if (isAbortError(err)) {
+              throw new TimeoutError(current.toString(), timeoutMs);
+            }
+            throw unwrapBlockedUrlError(err);
+          }
 
-      return await handle({
-        res,
-        finalUrl: current.toString(),
-        signal: controller.signal,
-        maxResponseBytes,
-        timeoutMs,
-      });
-    } finally {
-      clearTimeout(timer);
+          const isRedirect = res.status >= 300 && res.status < 400 && res.headers.has("location");
+          if (isRedirect) {
+            // Drain the (typically empty) redirect body to release the socket.
+            await res.body?.cancel().catch(() => {});
+            // `hop` counts redirects already followed, so this one is number
+            // `hop + 1`: `maxRedirects: 1` follows exactly one redirect and
+            // rejects the second, and only `0` refuses the first.
+            if (hop + 1 > maxRedirects) {
+              throw new TooManyRedirectsError(originalUrl, maxRedirects);
+            }
+            const next = new URL(res.headers.get("location")!, current);
+            if (next.origin !== current.origin) {
+              headers = restrictToCrossOriginSafe(headers, safeNames);
+            }
+            current = next;
+            continue;
+          }
+
+          if (retry && attempt < maxAttempts && isRetryableStatus(res.status)) {
+            const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"), maxDelayMs);
+            const delayMs = retryAfterMs ?? computeBackoffDelayMs(attempt, baseDelayMs, maxDelayMs);
+            // Checked BEFORE draining/sleeping: a retry whose delay alone
+            // would exceed the remaining deadline fails immediately instead
+            // of sleeping and then attempting anyway.
+            assertRetryFitsDeadline(budget, delayMs, `request to ${current.toString()}`);
+            await res.body?.cancel().catch(() => {});
+            clearTimeout(timer);
+            try {
+              await sleepRespectingAbort(delayMs, callerSignal);
+            } catch (err) {
+              if (callerAborted(callerSignal)) throw new AbortedError(current.toString(), callerSignal!.reason);
+              throw err;
+            }
+            continue attempts;
+          }
+
+          return await handle({
+            res,
+            finalUrl: current.toString(),
+            signal: combinedSignal,
+            callerSignal,
+            maxResponseBytes,
+            timeoutMs,
+            budget,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+    } catch (err) {
+      if (retry && attempt < maxAttempts && isRetryableError(err)) {
+        const delayMs = computeBackoffDelayMs(attempt, baseDelayMs, maxDelayMs);
+        assertRetryFitsDeadline(budget, delayMs, `request to ${current.toString()}`);
+        try {
+          await sleepRespectingAbort(delayMs, callerSignal);
+        } catch (sleepErr) {
+          if (callerAborted(callerSignal)) throw new AbortedError(current.toString(), callerSignal!.reason);
+          throw sleepErr;
+        }
+        continue attempts;
+      }
+      throw err;
     }
   }
 }
@@ -364,8 +667,16 @@ async function requestWithPolicy<T>(
 /** Reads the body with the size cap, mapping an abort to `TimeoutError`. */
 async function readBodyOrTimeout(final: FinalResponse): Promise<string> {
   try {
-    return await readBodyCapped(final.res, final.finalUrl, final.maxResponseBytes, final.signal);
+    return await readBodyCapped(
+      final.res,
+      final.finalUrl,
+      final.maxResponseBytes,
+      final.signal,
+      final.budget,
+      `request to ${final.finalUrl}`
+    );
   } catch (err) {
+    if (callerAborted(final.callerSignal)) throw new AbortedError(final.finalUrl, final.callerSignal!.reason);
     if (isAbortError(err)) {
       throw new TimeoutError(final.finalUrl, final.timeoutMs);
     }
@@ -385,36 +696,52 @@ async function readBodyOrTimeout(final: FinalResponse): Promise<string> {
  * under the size cap so `bodyBytes` can prove the response really was
  * empty, as RFC 9110 §15.4.5 requires.
  */
-export async function fetchJson(url: string, options: FetchJsonOptions = {}): Promise<FetchJsonResult> {
-  return requestWithPolicy(url, options, async (final) => {
-    const contentType = final.res.headers.get("content-type");
-    const raw = await readBodyOrTimeout(final);
-    const bodyBytes = Buffer.byteLength(raw, "utf8");
+export async function fetchJson(
+  url: string,
+  options: FetchJsonOptions = {},
+  budget?: DiscoveryBudgetState
+): Promise<FetchJsonResult> {
+  return requestWithPolicy(
+    url,
+    options,
+    async (final) => {
+      const contentType = final.res.headers.get("content-type");
+      const raw = await readBodyOrTimeout(final);
+      const bodyBytes = Buffer.byteLength(raw, "utf8");
 
-    if (final.res.status === 304) {
+      if (final.res.status === 304) {
+        return {
+          status: 304,
+          contentType,
+          data: undefined,
+          headers: final.res.headers,
+          bodyBytes,
+          url: final.finalUrl,
+        };
+      }
+
+      if (!isJsonContentType(contentType)) {
+        throw new InvalidContentTypeError(final.finalUrl, contentType);
+      }
+
+      let data: unknown;
+      try {
+        data = JSON.parse(raw);
+      } catch (err) {
+        throw new MalformedJsonError(final.finalUrl, err);
+      }
+
       return {
-        status: 304,
+        status: final.res.status,
         contentType,
-        data: undefined,
+        data,
         headers: final.res.headers,
         bodyBytes,
         url: final.finalUrl,
       };
-    }
-
-    if (!isJsonContentType(contentType)) {
-      throw new InvalidContentTypeError(final.finalUrl, contentType);
-    }
-
-    let data: unknown;
-    try {
-      data = JSON.parse(raw);
-    } catch (err) {
-      throw new MalformedJsonError(final.finalUrl, err);
-    }
-
-    return { status: final.res.status, contentType, data, headers: final.res.headers, bodyBytes, url: final.finalUrl };
-  });
+    },
+    budget
+  );
 }
 
 /**
@@ -426,19 +753,28 @@ export async function fetchJson(url: string, options: FetchJsonOptions = {}): Pr
  * AADP documents — a dead-link check must not report `text/html` as a
  * failure.
  */
-export async function probeUrl(url: string, options: FetchJsonOptions = {}): Promise<ProbeResult> {
-  return requestWithPolicy(url, options, async (final) => {
-    // Read (and discard) under the cap rather than leaving the socket
-    // holding an unbounded body: same resource bound as fetchJson.
-    await readBodyOrTimeout(final).catch((err) => {
-      if (err instanceof ResponseTooLargeError) return "";
-      throw err;
-    });
-    return {
-      status: final.res.status,
-      contentType: final.res.headers.get("content-type"),
-      headers: final.res.headers,
-      url: final.finalUrl,
-    };
-  });
+export async function probeUrl(
+  url: string,
+  options: FetchJsonOptions = {},
+  budget?: DiscoveryBudgetState
+): Promise<ProbeResult> {
+  return requestWithPolicy(
+    url,
+    options,
+    async (final) => {
+      // Read (and discard) under the cap rather than leaving the socket
+      // holding an unbounded body: same resource bound as fetchJson.
+      await readBodyOrTimeout(final).catch((err) => {
+        if (err instanceof ResponseTooLargeError) return "";
+        throw err;
+      });
+      return {
+        status: final.res.status,
+        contentType: final.res.headers.get("content-type"),
+        headers: final.res.headers,
+        url: final.finalUrl,
+      };
+    },
+    budget
+  );
 }
