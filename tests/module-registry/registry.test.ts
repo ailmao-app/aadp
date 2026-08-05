@@ -71,6 +71,41 @@ describe("registerModule / getModuleEntry", () => {
     ).not.toThrow();
   });
 
+  it("resolves $ref against a schemaDependencies entry, and tolerates the same dependency $id being passed again by another kind", () => {
+    const moduleId = freshModuleId();
+    const componentSchema = {
+      $id: `https://example.com/schemas/${moduleId.replace(":", "-")}/component.schema.json`,
+      type: "object",
+      required: ["value"],
+      properties: { value: { type: "string" } },
+      additionalProperties: false,
+    };
+    const documentSchema = {
+      type: "object",
+      required: ["item"],
+      properties: { item: { $ref: componentSchema.$id } },
+      additionalProperties: false,
+    };
+
+    registerModule(
+      { moduleId, moduleVersion: "1.0", kind: "widget" },
+      { schema: documentSchema, schemaDependencies: [componentSchema] }
+    );
+    // Same dependency $id registered again via a second kind must not
+    // throw (e.g. ajv "schema already exists" for the shared $id).
+    expect(() =>
+      registerModule(
+        { moduleId, moduleVersion: "1.0", kind: "gadget" },
+        { schema: documentSchema, schemaDependencies: [componentSchema] }
+      )
+    ).not.toThrow();
+
+    expect(validateModuleDocument({ moduleId, moduleVersion: "1.0", kind: "widget" }, { item: { value: "ok" } }).valid).toBe(
+      true
+    );
+    expect(validateModuleDocument({ moduleId, moduleVersion: "1.0", kind: "widget" }, { item: {} }).valid).toBe(false);
+  });
+
   it("snapshots the schema at registration: mutating the caller's original object afterwards does not affect validation", () => {
     const moduleId = freshModuleId();
     const mutableSchema: { type: string; properties: Record<string, unknown>; required: string[] } = {

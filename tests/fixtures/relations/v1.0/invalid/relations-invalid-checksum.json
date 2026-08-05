@@ -1,0 +1,19 @@
+{
+  "aadp_version": "1.0",
+  "module": "aadp:relations",
+  "module_version": "1.0",
+  "kind": "relation-collection",
+  "source": { "id": "character:alice", "type": "character" },
+  "rel": "posts",
+  "target_type": "post",
+  "ordered": true,
+  "generated_at": "2026-08-05T00:00:00Z",
+  "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "items": [
+    {
+      "id": "post:abc",
+      "url": "https://example.com/ai/v1.0/entities/post/abc.json"
+    }
+  ],
+  "cursor": { "next": null }
+}

@@ -51,6 +51,14 @@ export interface ModuleRegistryEntry {
   schema: object;
   /** Optional pure semantic validator; omitted means schema-only validation. */
   validateSemantics?: ModuleSemanticValidator;
+  /**
+   * Additional schemas `schema` references by `$id` via `$ref` (e.g. a
+   * document schema that `$ref`s out to shared component schemas shipped
+   * as their own files). Each MUST declare its own `$id`. Registered into
+   * the shared AJV instance once per `$id` — safe to pass the same
+   * dependency for multiple document kinds that share a component.
+   */
+  schemaDependencies?: object[];
 }
 
 /** True if any issue in the list is `error`-level (as opposed to `warning`). */

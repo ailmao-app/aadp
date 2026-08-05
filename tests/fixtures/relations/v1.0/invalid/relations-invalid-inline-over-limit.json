@@ -1,0 +1,418 @@
+{
+  "module": "aadp:relations",
+  "version": "1.0",
+  "kind": "relation-set",
+  "items": [
+    {
+      "rel": "series",
+      "target_type": "series",
+      "cardinality": "many",
+      "targets": [
+        {
+          "id": "series:example-0",
+          "url": "https://example.com/ai/v1.0/entities/series/example-0.json"
+        },
+        {
+          "id": "series:example-1",
+          "url": "https://example.com/ai/v1.0/entities/series/example-1.json"
+        },
+        {
+          "id": "series:example-2",
+          "url": "https://example.com/ai/v1.0/entities/series/example-2.json"
+        },
+        {
+          "id": "series:example-3",
+          "url": "https://example.com/ai/v1.0/entities/series/example-3.json"
+        },
+        {
+          "id": "series:example-4",
+          "url": "https://example.com/ai/v1.0/entities/series/example-4.json"
+        },
+        {
+          "id": "series:example-5",
+          "url": "https://example.com/ai/v1.0/entities/series/example-5.json"
+        },
+        {
+          "id": "series:example-6",
+          "url": "https://example.com/ai/v1.0/entities/series/example-6.json"
+        },
+        {
+          "id": "series:example-7",
+          "url": "https://example.com/ai/v1.0/entities/series/example-7.json"
+        },
+        {
+          "id": "series:example-8",
+          "url": "https://example.com/ai/v1.0/entities/series/example-8.json"
+        },
+        {
+          "id": "series:example-9",
+          "url": "https://example.com/ai/v1.0/entities/series/example-9.json"
+        },
+        {
+          "id": "series:example-10",
+          "url": "https://example.com/ai/v1.0/entities/series/example-10.json"
+        },
+        {
+          "id": "series:example-11",
+          "url": "https://example.com/ai/v1.0/entities/series/example-11.json"
+        },
+        {
+          "id": "series:example-12",
+          "url": "https://example.com/ai/v1.0/entities/series/example-12.json"
+        },
+        {
+          "id": "series:example-13",
+          "url": "https://example.com/ai/v1.0/entities/series/example-13.json"
+        },
+        {
+          "id": "series:example-14",
+          "url": "https://example.com/ai/v1.0/entities/series/example-14.json"
+        },
+        {
+          "id": "series:example-15",
+          "url": "https://example.com/ai/v1.0/entities/series/example-15.json"
+        },
+        {
+          "id": "series:example-16",
+          "url": "https://example.com/ai/v1.0/entities/series/example-16.json"
+        },
+        {
+          "id": "series:example-17",
+          "url": "https://example.com/ai/v1.0/entities/series/example-17.json"
+        },
+        {
+          "id": "series:example-18",
+          "url": "https://example.com/ai/v1.0/entities/series/example-18.json"
+        },
+        {
+          "id": "series:example-19",
+          "url": "https://example.com/ai/v1.0/entities/series/example-19.json"
+        },
+        {
+          "id": "series:example-20",
+          "url": "https://example.com/ai/v1.0/entities/series/example-20.json"
+        },
+        {
+          "id": "series:example-21",
+          "url": "https://example.com/ai/v1.0/entities/series/example-21.json"
+        },
+        {
+          "id": "series:example-22",
+          "url": "https://example.com/ai/v1.0/entities/series/example-22.json"
+        },
+        {
+          "id": "series:example-23",
+          "url": "https://example.com/ai/v1.0/entities/series/example-23.json"
+        },
+        {
+          "id": "series:example-24",
+          "url": "https://example.com/ai/v1.0/entities/series/example-24.json"
+        },
+        {
+          "id": "series:example-25",
+          "url": "https://example.com/ai/v1.0/entities/series/example-25.json"
+        },
+        {
+          "id": "series:example-26",
+          "url": "https://example.com/ai/v1.0/entities/series/example-26.json"
+        },
+        {
+          "id": "series:example-27",
+          "url": "https://example.com/ai/v1.0/entities/series/example-27.json"
+        },
+        {
+          "id": "series:example-28",
+          "url": "https://example.com/ai/v1.0/entities/series/example-28.json"
+        },
+        {
+          "id": "series:example-29",
+          "url": "https://example.com/ai/v1.0/entities/series/example-29.json"
+        },
+        {
+          "id": "series:example-30",
+          "url": "https://example.com/ai/v1.0/entities/series/example-30.json"
+        },
+        {
+          "id": "series:example-31",
+          "url": "https://example.com/ai/v1.0/entities/series/example-31.json"
+        },
+        {
+          "id": "series:example-32",
+          "url": "https://example.com/ai/v1.0/entities/series/example-32.json"
+        },
+        {
+          "id": "series:example-33",
+          "url": "https://example.com/ai/v1.0/entities/series/example-33.json"
+        },
+        {
+          "id": "series:example-34",
+          "url": "https://example.com/ai/v1.0/entities/series/example-34.json"
+        },
+        {
+          "id": "series:example-35",
+          "url": "https://example.com/ai/v1.0/entities/series/example-35.json"
+        },
+        {
+          "id": "series:example-36",
+          "url": "https://example.com/ai/v1.0/entities/series/example-36.json"
+        },
+        {
+          "id": "series:example-37",
+          "url": "https://example.com/ai/v1.0/entities/series/example-37.json"
+        },
+        {
+          "id": "series:example-38",
+          "url": "https://example.com/ai/v1.0/entities/series/example-38.json"
+        },
+        {
+          "id": "series:example-39",
+          "url": "https://example.com/ai/v1.0/entities/series/example-39.json"
+        },
+        {
+          "id": "series:example-40",
+          "url": "https://example.com/ai/v1.0/entities/series/example-40.json"
+        },
+        {
+          "id": "series:example-41",
+          "url": "https://example.com/ai/v1.0/entities/series/example-41.json"
+        },
+        {
+          "id": "series:example-42",
+          "url": "https://example.com/ai/v1.0/entities/series/example-42.json"
+        },
+        {
+          "id": "series:example-43",
+          "url": "https://example.com/ai/v1.0/entities/series/example-43.json"
+        },
+        {
+          "id": "series:example-44",
+          "url": "https://example.com/ai/v1.0/entities/series/example-44.json"
+        },
+        {
+          "id": "series:example-45",
+          "url": "https://example.com/ai/v1.0/entities/series/example-45.json"
+        },
+        {
+          "id": "series:example-46",
+          "url": "https://example.com/ai/v1.0/entities/series/example-46.json"
+        },
+        {
+          "id": "series:example-47",
+          "url": "https://example.com/ai/v1.0/entities/series/example-47.json"
+        },
+        {
+          "id": "series:example-48",
+          "url": "https://example.com/ai/v1.0/entities/series/example-48.json"
+        },
+        {
+          "id": "series:example-49",
+          "url": "https://example.com/ai/v1.0/entities/series/example-49.json"
+        },
+        {
+          "id": "series:example-50",
+          "url": "https://example.com/ai/v1.0/entities/series/example-50.json"
+        },
+        {
+          "id": "series:example-51",
+          "url": "https://example.com/ai/v1.0/entities/series/example-51.json"
+        },
+        {
+          "id": "series:example-52",
+          "url": "https://example.com/ai/v1.0/entities/series/example-52.json"
+        },
+        {
+          "id": "series:example-53",
+          "url": "https://example.com/ai/v1.0/entities/series/example-53.json"
+        },
+        {
+          "id": "series:example-54",
+          "url": "https://example.com/ai/v1.0/entities/series/example-54.json"
+        },
+        {
+          "id": "series:example-55",
+          "url": "https://example.com/ai/v1.0/entities/series/example-55.json"
+        },
+        {
+          "id": "series:example-56",
+          "url": "https://example.com/ai/v1.0/entities/series/example-56.json"
+        },
+        {
+          "id": "series:example-57",
+          "url": "https://example.com/ai/v1.0/entities/series/example-57.json"
+        },
+        {
+          "id": "series:example-58",
+          "url": "https://example.com/ai/v1.0/entities/series/example-58.json"
+        },
+        {
+          "id": "series:example-59",
+          "url": "https://example.com/ai/v1.0/entities/series/example-59.json"
+        },
+        {
+          "id": "series:example-60",
+          "url": "https://example.com/ai/v1.0/entities/series/example-60.json"
+        },
+        {
+          "id": "series:example-61",
+          "url": "https://example.com/ai/v1.0/entities/series/example-61.json"
+        },
+        {
+          "id": "series:example-62",
+          "url": "https://example.com/ai/v1.0/entities/series/example-62.json"
+        },
+        {
+          "id": "series:example-63",
+          "url": "https://example.com/ai/v1.0/entities/series/example-63.json"
+        },
+        {
+          "id": "series:example-64",
+          "url": "https://example.com/ai/v1.0/entities/series/example-64.json"
+        },
+        {
+          "id": "series:example-65",
+          "url": "https://example.com/ai/v1.0/entities/series/example-65.json"
+        },
+        {
+          "id": "series:example-66",
+          "url": "https://example.com/ai/v1.0/entities/series/example-66.json"
+        },
+        {
+          "id": "series:example-67",
+          "url": "https://example.com/ai/v1.0/entities/series/example-67.json"
+        },
+        {
+          "id": "series:example-68",
+          "url": "https://example.com/ai/v1.0/entities/series/example-68.json"
+        },
+        {
+          "id": "series:example-69",
+          "url": "https://example.com/ai/v1.0/entities/series/example-69.json"
+        },
+        {
+          "id": "series:example-70",
+          "url": "https://example.com/ai/v1.0/entities/series/example-70.json"
+        },
+        {
+          "id": "series:example-71",
+          "url": "https://example.com/ai/v1.0/entities/series/example-71.json"
+        },
+        {
+          "id": "series:example-72",
+          "url": "https://example.com/ai/v1.0/entities/series/example-72.json"
+        },
+        {
+          "id": "series:example-73",
+          "url": "https://example.com/ai/v1.0/entities/series/example-73.json"
+        },
+        {
+          "id": "series:example-74",
+          "url": "https://example.com/ai/v1.0/entities/series/example-74.json"
+        },
+        {
+          "id": "series:example-75",
+          "url": "https://example.com/ai/v1.0/entities/series/example-75.json"
+        },
+        {
+          "id": "series:example-76",
+          "url": "https://example.com/ai/v1.0/entities/series/example-76.json"
+        },
+        {
+          "id": "series:example-77",
+          "url": "https://example.com/ai/v1.0/entities/series/example-77.json"
+        },
+        {
+          "id": "series:example-78",
+          "url": "https://example.com/ai/v1.0/entities/series/example-78.json"
+        },
+        {
+          "id": "series:example-79",
+          "url": "https://example.com/ai/v1.0/entities/series/example-79.json"
+        },
+        {
+          "id": "series:example-80",
+          "url": "https://example.com/ai/v1.0/entities/series/example-80.json"
+        },
+        {
+          "id": "series:example-81",
+          "url": "https://example.com/ai/v1.0/entities/series/example-81.json"
+        },
+        {
+          "id": "series:example-82",
+          "url": "https://example.com/ai/v1.0/entities/series/example-82.json"
+        },
+        {
+          "id": "series:example-83",
+          "url": "https://example.com/ai/v1.0/entities/series/example-83.json"
+        },
+        {
+          "id": "series:example-84",
+          "url": "https://example.com/ai/v1.0/entities/series/example-84.json"
+        },
+        {
+          "id": "series:example-85",
+          "url": "https://example.com/ai/v1.0/entities/series/example-85.json"
+        },
+        {
+          "id": "series:example-86",
+          "url": "https://example.com/ai/v1.0/entities/series/example-86.json"
+        },
+        {
+          "id": "series:example-87",
+          "url": "https://example.com/ai/v1.0/entities/series/example-87.json"
+        },
+        {
+          "id": "series:example-88",
+          "url": "https://example.com/ai/v1.0/entities/series/example-88.json"
+        },
+        {
+          "id": "series:example-89",
+          "url": "https://example.com/ai/v1.0/entities/series/example-89.json"
+        },
+        {
+          "id": "series:example-90",
+          "url": "https://example.com/ai/v1.0/entities/series/example-90.json"
+        },
+        {
+          "id": "series:example-91",
+          "url": "https://example.com/ai/v1.0/entities/series/example-91.json"
+        },
+        {
+          "id": "series:example-92",
+          "url": "https://example.com/ai/v1.0/entities/series/example-92.json"
+        },
+        {
+          "id": "series:example-93",
+          "url": "https://example.com/ai/v1.0/entities/series/example-93.json"
+        },
+        {
+          "id": "series:example-94",
+          "url": "https://example.com/ai/v1.0/entities/series/example-94.json"
+        },
+        {
+          "id": "series:example-95",
+          "url": "https://example.com/ai/v1.0/entities/series/example-95.json"
+        },
+        {
+          "id": "series:example-96",
+          "url": "https://example.com/ai/v1.0/entities/series/example-96.json"
+        },
+        {
+          "id": "series:example-97",
+          "url": "https://example.com/ai/v1.0/entities/series/example-97.json"
+        },
+        {
+          "id": "series:example-98",
+          "url": "https://example.com/ai/v1.0/entities/series/example-98.json"
+        },
+        {
+          "id": "series:example-99",
+          "url": "https://example.com/ai/v1.0/entities/series/example-99.json"
+        },
+        {
+          "id": "series:example-100",
+          "url": "https://example.com/ai/v1.0/entities/series/example-100.json"
+        }
+      ]
+    }
+  ]
+}

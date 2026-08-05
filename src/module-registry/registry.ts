@@ -58,6 +58,19 @@ function deepFreeze<T>(value: T): T {
 const registry = new Map<string, Map<string, Map<string, CompiledEntry>>>();
 
 /**
+ * Adds `dependency` to the shared AJV instance so a document schema's
+ * internal `$ref` to it resolves, unless a schema with the same `$id` is
+ * already registered (safe for two document kinds that share a component
+ * schema, e.g. Relations' `relation-set` and `relation-collection` both
+ * depending on `target.schema.json`).
+ */
+function addSchemaDependency(dependency: object): void {
+  const id = (dependency as { $id?: string }).$id;
+  if (id && ajv.getSchema(id)) return;
+  ajv.addSchema(deepFreeze(structuredClone(dependency)));
+}
+
+/**
  * Registers the schema (and optional pure semantic validator) for one
  * exact `{moduleId, moduleVersion, kind}`. Registration is additive only:
  * re-registering an already-registered key throws, matching the "released
@@ -76,6 +89,9 @@ export function registerModule(key: ModuleRegistryKey, entry: ModuleRegistryEntr
     throw new Error(
       `Module "${key.moduleId}@${key.moduleVersion}" kind "${key.kind}" is already registered; registered module entries are immutable.`
     );
+  }
+  for (const dependency of entry.schemaDependencies ?? []) {
+    addSchemaDependency(dependency);
   }
   // Snapshot the schema before compiling: a deep clone, frozen, so neither
   // the caller's original object nor the entry `getModuleEntry` later

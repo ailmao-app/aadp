@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/modules/relations/v1.0/relation-collection.schema.json",
+  "title": "AADP Relations Module v1.0 — Relation collection",
+  "description": "Top-level module document kind `relation-collection`: one page of a relation's paginated collection endpoint (specification.md §7). A standalone document (not nested in an entity), so it self-describes `aadp_version`, `module`, `module_version` and `kind` per ADR-0007. `checksum`/duplicate-target/context consistency with `source`/`rel`/`target_type` are pure semantic checks, not expressed here.",
+  "type": "object",
+  "required": [
+    "aadp_version",
+    "module",
+    "module_version",
+    "kind",
+    "source",
+    "rel",
+    "target_type",
+    "generated_at",
+    "checksum",
+    "items",
+    "cursor"
+  ],
+  "properties": {
+    "aadp_version": { "const": "1.0" },
+    "module": { "const": "aadp:relations" },
+    "module_version": { "const": "1.0" },
+    "kind": { "const": "relation-collection" },
+    "source": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$" },
+        "type": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" }
+      },
+      "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+      "additionalProperties": false
+    },
+    "rel": {
+      "type": "string",
+      "pattern": "^(x_[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*|[a-z][a-z0-9_-]*)$"
+    },
+    "target_type": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+    "ordered": { "type": "boolean", "default": false },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "checksum": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "items": {
+      "type": "array",
+      "items": { "$ref": "target.schema.json" }
+    },
+    "cursor": {
+      "type": "object",
+      "required": ["next"],
+      "properties": {
+        "next": { "type": ["string", "null"] }
+      },
+      "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+      "additionalProperties": false
+    }
+  },
+  "patternProperties": {
+    "^x_[a-zA-Z0-9_]*$": {}
+  },
+  "additionalProperties": false
+}

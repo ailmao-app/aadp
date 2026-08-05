@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/modules/relations/v1.0/relation-item.schema.json",
+  "title": "AADP Relations Module v1.0 — Relation item",
+  "description": "Component schema (not a top-level module document kind); one entry of a relation-set's `items` array (specification.md §5). This schema only enforces field shape — cardinality/container consistency (`one` must carry exactly `target`; `many` must carry exactly one of `targets`/`collection`; inline `targets` capped at 100) is a pure semantic check (`relations.semantic.cardinality`), deliberately not expressed here, so a structurally well-formed but cardinality-inconsistent document still reaches that check instead of failing generic schema validation.",
+  "type": "object",
+  "required": ["rel", "target_type", "cardinality"],
+  "properties": {
+    "rel": {
+      "type": "string",
+      "pattern": "^(x_[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*|[a-z][a-z0-9_-]*)$"
+    },
+    "target_type": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+    "cardinality": { "enum": ["one", "many"] },
+    "inverse": {
+      "type": "string",
+      "pattern": "^(x_[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*|[a-z][a-z0-9_-]*)$"
+    },
+    "ordered": { "type": "boolean", "default": false },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "target": { "$ref": "target.schema.json" },
+    "targets": {
+      "type": "array",
+      "items": { "$ref": "target.schema.json" }
+    },
+    "collection": { "$ref": "collection-link.schema.json" }
+  },
+  "patternProperties": {
+    "^x_[a-zA-Z0-9_]*$": {}
+  },
+  "additionalProperties": false
+}
