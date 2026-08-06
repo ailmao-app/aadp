@@ -194,13 +194,26 @@ export function isCrossOrigin(url: string, rootOrigin: string): boolean {
  * same-origin request that retries into a cross-origin redirect target
  * still gets charged on that hop, and a request that starts cross-origin
  * is charged on attempt 1 even before any retry/redirect.
+ *
+ * `existing`, when given, is a caller-supplied `onBeforeAttempt` (e.g. for
+ * the caller's own auditing/metrics/policy) that every Relations client
+ * entry point (`resolveRelationTarget`, `iterateRelationCollection`,
+ * `traverseRelations`) MUST preserve rather than silently replace — every
+ * one of those call sites passes its incoming `options.onBeforeAttempt`
+ * here as `existing` for exactly that reason. `existing` runs first, on
+ * every hop, before this function's own cross-origin charge; if it
+ * throws, this function's charge never runs and the hop's network
+ * attempt never happens either (same short-circuit `http.ts` already
+ * gives any `onBeforeAttempt` that throws).
  */
 export function crossOriginAttemptHook(
   budget: RelationsTraversalBudgetState,
   rootOrigin: string,
-  context: string
+  context: string,
+  existing?: (url: URL) => void
 ): (url: URL) => void {
   return (url: URL) => {
+    existing?.(url);
     if (isCrossOrigin(url.toString(), rootOrigin)) {
       chargeCrossOrigin(budget, context);
     }

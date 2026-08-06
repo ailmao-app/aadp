@@ -115,7 +115,11 @@ export async function traverseRelations(
   // so only a mid-request redirect could make this fire, but ADR-0008's
   // per-hop guarantee applies here too, not just to resolved targets.
   const rootFetchOptions = rootOrigin
-    ? { ...resolvedOptions, onBeforeAttempt: crossOriginAttemptHook(budget, rootOrigin, "traverseRelations root") }
+    ? {
+        ...resolvedOptions,
+        // Composes with (never replaces) a caller-supplied `onBeforeAttempt`.
+        onBeforeAttempt: crossOriginAttemptHook(budget, rootOrigin, "traverseRelations root", options.onBeforeAttempt),
+      }
     : resolvedOptions;
   const root = await fetchEntity(rootEntityUrl, rootFetchOptions, budget);
   // Root counts as a node exactly like any resolved target, charged under

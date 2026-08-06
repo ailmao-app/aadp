@@ -483,4 +483,85 @@ describe("per-hop cross-origin charging (ADR-0008): every attempt, retry, and re
     ).rejects.toThrow(/maxCrossOriginRequests/);
     expect(attempts).toBe(1);
   });
+
+  it("resolveRelationTarget preserves (never replaces) a caller-supplied onBeforeAttempt, calling it once per attempt", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/entities/post/hello.json") {
+        attempts++;
+        if (attempts < 2) return sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
+        return sendJson(res, 200, buildEntity("post:hello", "post", {}));
+      }
+      sendJson(res, 404, {});
+    });
+    const seenUrls: string[] = [];
+    const budget = createRelationsTraversalBudget();
+    const hint = { id: "post:hello", url: `${server.baseUrl}/entities/post/hello.json` };
+    const options = {
+      ...PERMISSIVE,
+      rootOrigin: server.baseUrl,
+      retry: { maxAttempts: 5, baseDelayMs: 1, maxDelayMs: 5 },
+      onBeforeAttempt: (url: URL) => seenUrls.push(url.toString()),
+    };
+    const result = await resolveRelationTarget(hint, "post", options, budget, "test");
+    expect(result.status).toBe("resolved");
+    // Called once per attempt (2 attempts: one 503, one success) — not
+    // silently dropped by the internal cross-origin hook this client adds.
+    expect(seenUrls).toEqual([hint.url, hint.url]);
+  });
+
+  it("iterateRelationCollection preserves a caller-supplied onBeforeAttempt across pages", async () => {
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/relations/alice/posts.json") {
+        const cursor = url.searchParams.get("cursor");
+        if (!cursor) return sendJson(res, 200, buildCollectionPage({ id: "character:alice", type: "character" }, "posts", "post", [], "p2"));
+        return sendJson(res, 200, buildCollectionPage({ id: "character:alice", type: "character" }, "posts", "post", [], null));
+      }
+      sendJson(res, 404, {});
+    });
+    const seenCount = { n: 0 };
+    const budget = createRelationsTraversalBudget();
+    const expected = { sourceId: "character:alice", sourceType: "character", rel: "posts", targetType: "post" };
+    const options = { ...PERMISSIVE, rootOrigin: server.baseUrl, onBeforeAttempt: () => seenCount.n++ };
+    const items = [];
+    for await (const item of iterateRelationCollection(`${server.baseUrl}/relations/alice/posts.json`, expected, options, budget)) {
+      items.push(item);
+    }
+    expect(seenCount.n).toBe(2); // one call per page fetched
+  });
+
+  it("a caller's onBeforeAttempt that throws blocks the network call, same as the internal cross-origin charge", async () => {
+    server = await startServer((_req, res) => sendJson(res, 200, buildEntity("post:hello", "post", {})));
+    const budget = createRelationsTraversalBudget();
+    const hint = { id: "post:hello", url: `${server.baseUrl}/entities/post/hello.json` };
+    const options = {
+      ...PERMISSIVE,
+      rootOrigin: server.baseUrl,
+      onBeforeAttempt: () => {
+        throw new Error("caller policy rejected this hop");
+      },
+    };
+    // A plain Error from the caller's own hook is a per-target issue here
+    // (resolveRelationTarget never throws for those — see `issueFromError`),
+    // not a global-stop rejection like a budget/abort error would be. What
+    // matters for this test is that the network call never happened.
+    const result = await resolveRelationTarget(hint, "post", options, budget, "test");
+    expect(result.status).toBe("issue");
+    if (result.status === "issue") {
+      expect(result.issue.message).toMatch(/caller policy rejected/);
+    }
+    expect(server.requestLog).toEqual([]);
+  });
+
+  it("maxCrossOriginRequests: 0 blocks the request before the network call, leaving requestsMade at 0", async () => {
+    server = await startServer((_req, res) => sendJson(res, 200, buildEntity("post:hello", "post", {})));
+    const budget = createRelationsTraversalBudget({ maxCrossOriginRequests: 0 });
+    const hint = { id: "post:hello", url: `${server.baseUrl}/entities/post/hello.json` };
+    const options = { ...PERMISSIVE, rootOrigin: "https://root.example.com" };
+    await expect(resolveRelationTarget(hint, "post", options, budget, "test")).rejects.toThrow(/maxCrossOriginRequests/);
+    expect(server.requestLog).toEqual([]);
+    // The blocked hop must not have consumed a maxRequests slot either —
+    // onBeforeAttempt (which threw) runs before that charge.
+    expect(budget.requestsMade).toBe(0);
+  });
 });

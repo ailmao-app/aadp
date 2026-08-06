@@ -97,7 +97,9 @@ export async function resolveRelationTarget(
   if (options.rootOrigin) {
     fetchOptions = {
       ...scopeHeadersToOrigin(options, hint.url, options.rootOrigin),
-      onBeforeAttempt: crossOriginAttemptHook(budget, options.rootOrigin, context),
+      // Composes with (never replaces) a caller-supplied `onBeforeAttempt`
+      // — see `crossOriginAttemptHook`'s docstring.
+      onBeforeAttempt: crossOriginAttemptHook(budget, options.rootOrigin, context, options.onBeforeAttempt),
     };
   }
 
@@ -178,7 +180,13 @@ export async function* iterateRelationCollection(
     const pageOptions = options.rootOrigin
       ? {
           ...scopeHeadersToOrigin(options, targetUrl, options.rootOrigin),
-          onBeforeAttempt: crossOriginAttemptHook(budget, options.rootOrigin, `iterateRelationCollection(${collectionUrl})`),
+          // Composes with (never replaces) a caller-supplied `onBeforeAttempt`.
+          onBeforeAttempt: crossOriginAttemptHook(
+            budget,
+            options.rootOrigin,
+            `iterateRelationCollection(${collectionUrl})`,
+            options.onBeforeAttempt
+          ),
         }
       : options;
     const page = await fetchAndValidateRelationsDocument<RelationCollectionV1>(

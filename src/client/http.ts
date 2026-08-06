@@ -582,15 +582,20 @@ async function requestWithPolicy<T>(
         // no backoff delay is involved (attempt 1 of a fresh retry cycle).
         assertWithinDeadline(budget, `request to ${current.toString()}`);
         assertAllowed(current, policy);
+        // `onBeforeAttempt` runs BEFORE `maxRequests` is charged: if it
+        // throws (a caller's own budget/policy hook rejecting this hop),
+        // `requestsMade` must stay untouched — it counts requests that
+        // were actually going to be attempted, not ones a different check
+        // already vetoed. Reordering these would let a blocked hop still
+        // consume a `maxRequests` slot for a request that was never sent.
+        options.onBeforeAttempt?.(current);
         // Charged for the original request, every retry attempt, and every
         // redirect hop alike — each re-enters this loop and reaches this
         // line before its own `fetch()` call below (AADP-REL-005). Never
-        // charged for a hop that `assertAllowed` already rejected: a
-        // blocked URL was never actually sent over the network.
+        // charged for a hop that `assertAllowed` already rejected (or
+        // `onBeforeAttempt` already vetoed): a blocked URL was never
+        // actually sent over the network.
         if (budget) chargeDiscoveryBudgetRequest(budget, `request to ${current.toString()}`);
-        // Same per-hop guarantee as the `maxRequests` charge just above,
-        // for whatever dimension the caller's hook charges.
-        options.onBeforeAttempt?.(current);
 
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);

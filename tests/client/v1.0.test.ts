@@ -1331,4 +1331,41 @@ describe("maxRequests — whole-run HTTP request budget (AADP-REL-005)", () => {
     await expect(discover(server.baseUrl, PERMISSIVE, budget)).rejects.toThrow(AadpDiscoveryBudgetExceededError);
     expect(server.requestLog).toEqual(["/.well-known/ai-manifest.json"]);
   });
+
+  it("calls onBeforeAttempt once per hop, before maxRequests is charged for that hop", async () => {
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(req.headers.host!));
+      sendJson(res, 404, {});
+    });
+    const seenUrls: string[] = [];
+    const budget = createDiscoveryBudget();
+    await discover(server.baseUrl, { ...PERMISSIVE, onBeforeAttempt: (url) => seenUrls.push(url.toString()) }, budget);
+    expect(seenUrls).toEqual([`${server.baseUrl}/.well-known/ai-manifest.json`]);
+    expect(budget.requestsMade).toBe(1);
+  });
+
+  it("when onBeforeAttempt throws, the request is never sent and requestsMade is left untouched", async () => {
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(req.headers.host!));
+      sendJson(res, 404, {});
+    });
+    const budget = createDiscoveryBudget();
+    const boom = new Error("caller policy rejected this hop");
+    await expect(
+      discover(
+        server.baseUrl,
+        {
+          ...PERMISSIVE,
+          onBeforeAttempt: () => {
+            throw boom;
+          },
+        },
+        budget
+      )
+    ).rejects.toThrow(boom);
+    expect(server.requestLog).toEqual([]);
+    // The hook ran (and threw) before maxRequests was charged for this hop
+    // — a request `onBeforeAttempt` vetoed was never "made".
+    expect(budget.requestsMade).toBe(0);
+  });
 });
