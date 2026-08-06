@@ -182,3 +182,27 @@ export function isCrossOrigin(url: string, rootOrigin: string): boolean {
     return true;
   }
 }
+
+/**
+ * Builds a `FetchJsonOptions.onBeforeAttempt` hook (`../../../../client/http.js`)
+ * that charges `chargeCrossOrigin` for every hop whose URL is cross-origin
+ * relative to `rootOrigin` — the original request, every retry, and every
+ * redirect hop, since `http.ts`'s per-hop loop calls this at the same
+ * point it charges `maxRequests`. This is what makes
+ * `maxCrossOriginRequests` bound the whole per-attempt cost of resolving
+ * one target/collection page, not just its first logical request — a
+ * same-origin request that retries into a cross-origin redirect target
+ * still gets charged on that hop, and a request that starts cross-origin
+ * is charged on attempt 1 even before any retry/redirect.
+ */
+export function crossOriginAttemptHook(
+  budget: RelationsTraversalBudgetState,
+  rootOrigin: string,
+  context: string
+): (url: URL) => void {
+  return (url: URL) => {
+    if (isCrossOrigin(url.toString(), rootOrigin)) {
+      chargeCrossOrigin(budget, context);
+    }
+  };
+}

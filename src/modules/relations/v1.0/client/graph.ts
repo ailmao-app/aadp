@@ -12,7 +12,14 @@ import type { EntityV1 } from "../../../../client/v1.0/types.js";
 import type { RelationSetV1 } from "../types.js";
 import { validateRelationsKind } from "./fetch.js";
 import { resolveRelationItem, type ResolveRelationItemOptions } from "./resolve.js";
-import { chargeNode, createRelationsTraversalBudget, markExpanded, type RelationsTraversalBudgetState, type RelationsTraversalLimits } from "./budget.js";
+import {
+  chargeNode,
+  createRelationsTraversalBudget,
+  crossOriginAttemptHook,
+  markExpanded,
+  type RelationsTraversalBudgetState,
+  type RelationsTraversalLimits,
+} from "./budget.js";
 import type { RelationsResolutionResult, RelationsTraversalIssue, TraversedRelationEdge } from "./types.js";
 
 export interface TraverseRelationsOptions extends ResolveRelationItemOptions, RelationsTraversalLimits {
@@ -103,7 +110,14 @@ export async function traverseRelations(
     }
   }
 
-  const root = await fetchEntity(rootEntityUrl, resolvedOptions, budget);
+  // Charges a retry/redirect hop that leaves `rootOrigin` even for the
+  // root fetch itself — the root URL's own origin defines `rootOrigin`,
+  // so only a mid-request redirect could make this fire, but ADR-0008's
+  // per-hop guarantee applies here too, not just to resolved targets.
+  const rootFetchOptions = rootOrigin
+    ? { ...resolvedOptions, onBeforeAttempt: crossOriginAttemptHook(budget, rootOrigin, "traverseRelations root") }
+    : resolvedOptions;
+  const root = await fetchEntity(rootEntityUrl, rootFetchOptions, budget);
   // Root counts as a node exactly like any resolved target, charged under
   // its real id/url now that both are known — there's no relation item
   // pointing at the root to have charged it via `resolveRelationTarget`.

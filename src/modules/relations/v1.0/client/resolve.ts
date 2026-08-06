@@ -32,10 +32,9 @@ import type { RelationCollectionV1, RelationItemV1, RelationTargetV1 } from "../
 import { fetchAndValidateRelationsDocument } from "./fetch.js";
 import { RelationsCursorCycleError, RelationsIntegrityMismatchError, RelationsSchemaValidationError } from "./errors.js";
 import {
-  chargeCrossOrigin,
   chargeDepth,
   chargeNode,
-  isCrossOrigin,
+  crossOriginAttemptHook,
   type RelationsTraversalBudgetState,
 } from "./budget.js";
 import type { RelationsResolutionResult, RelationsTraversalIssue, ResolvedRelationTarget } from "./types.js";
@@ -86,12 +85,20 @@ export async function resolveRelationTarget(
   // unless explicitly allow-listed via `crossOriginSafeHeaders` — the same
   // opt-in-only allow-list `scopeHeadersToOrigin` already enforces for the
   // core client's own document-supplied URLs.
+  //
+  // `onBeforeAttempt` charges `maxCrossOriginRequests` at the same
+  // per-hop granularity `http.ts` charges `maxRequests` — the original
+  // request, every retry, and every redirect hop, including one that
+  // crosses from same-origin into cross-origin mid-request — rather than
+  // once per call here (ADR-0008). May throw
+  // `AadpDiscoveryBudgetExceededError` from inside `fetchEntity` — global
+  // stop, propagates.
   let fetchOptions = options;
   if (options.rootOrigin) {
-    if (isCrossOrigin(hint.url, options.rootOrigin)) {
-      chargeCrossOrigin(budget, context); // may throw AadpDiscoveryBudgetExceededError — global stop, propagates
-    }
-    fetchOptions = scopeHeadersToOrigin(options, hint.url, options.rootOrigin);
+    fetchOptions = {
+      ...scopeHeadersToOrigin(options, hint.url, options.rootOrigin),
+      onBeforeAttempt: crossOriginAttemptHook(budget, options.rootOrigin, context),
+    };
   }
 
   try {
@@ -148,16 +155,12 @@ export interface RelationCollectionExpectation {
  * `cursor.next` repeats — the same cycle-detection idiom as
  * `../../../../client/v1.0/index.ts`'s `iterateSitemap`.
  *
- * Charges `budget.crossOriginRequestsMade` once per page fetched whose URL
- * is cross-origin relative to `options.rootOrigin` — the same dimension
- * `resolveRelationTarget` charges once per target, so `maxCrossOriginRequests`
- * bounds a cross-origin collection's page count too, not just single-target
- * resolutions. This charges at page granularity (not per retry/redirect hop
- * within a single page fetch, unlike `maxRequests` in `http.ts`) because
- * "cross-origin relative to the walk's root" is a Relations-traversal
- * concept `http.ts` has no notion of; a page whose first attempt would
- * already exceed the limit is charged (and can throw) before that
- * attempt's `fetchAndValidateRelationsDocument` call.
+ * Charges `budget.crossOriginRequestsMade` for every hop (original
+ * attempt, retry, redirect — via `onBeforeAttempt`, ADR-0008) of every
+ * page fetched whose URL is cross-origin relative to `options.rootOrigin`
+ * — the same per-hop granularity `resolveRelationTarget` charges, so
+ * `maxCrossOriginRequests` bounds a cross-origin collection's total
+ * request cost, not just its page count.
  */
 export async function* iterateRelationCollection(
   collectionUrl: string,
@@ -172,10 +175,12 @@ export async function* iterateRelationCollection(
     const target = new URL(collectionUrl);
     if (cursor) target.searchParams.set("cursor", cursor);
     const targetUrl = target.toString();
-    if (options.rootOrigin && isCrossOrigin(targetUrl, options.rootOrigin)) {
-      chargeCrossOrigin(budget, `iterateRelationCollection(${collectionUrl})`); // may throw AadpDiscoveryBudgetExceededError — global stop, propagates
-    }
-    const pageOptions = options.rootOrigin ? scopeHeadersToOrigin(options, targetUrl, options.rootOrigin) : options;
+    const pageOptions = options.rootOrigin
+      ? {
+          ...scopeHeadersToOrigin(options, targetUrl, options.rootOrigin),
+          onBeforeAttempt: crossOriginAttemptHook(budget, options.rootOrigin, `iterateRelationCollection(${collectionUrl})`),
+        }
+      : options;
     const page = await fetchAndValidateRelationsDocument<RelationCollectionV1>(
       targetUrl,
       "relation-collection",

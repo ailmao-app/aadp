@@ -63,6 +63,20 @@ export interface FetchJsonOptions {
    * budget/deadline. See `RetryOptions`.
    */
   retry?: RetryOptions;
+  /**
+   * Called with the current hop's URL immediately before that hop's own
+   * `maxRequests` charge and network attempt — the exact same point in
+   * the per-hop loop below, for the original request, every retry, and
+   * every redirect hop alike (ADR-0008). Lets a caller charge a budget
+   * dimension this module has no concept of (e.g. Relations traversal's
+   * "is this cross-origin relative to the walk's root", ADR-0008
+   * `maxCrossOriginRequests`) at the same per-attempt granularity as
+   * `maxRequests`, without duplicating this hop loop. Throwing here
+   * aborts the request before any network I/O for that hop — same effect
+   * as `maxRequests` being exceeded. Never called for a hop `assertAllowed`
+   * already rejected.
+   */
+  onBeforeAttempt?: (url: URL) => void;
 }
 
 export interface RetryOptions {
@@ -574,6 +588,9 @@ async function requestWithPolicy<T>(
         // charged for a hop that `assertAllowed` already rejected: a
         // blocked URL was never actually sent over the network.
         if (budget) chargeDiscoveryBudgetRequest(budget, `request to ${current.toString()}`);
+        // Same per-hop guarantee as the `maxRequests` charge just above,
+        // for whatever dimension the caller's hook charges.
+        options.onBeforeAttempt?.(current);
 
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);

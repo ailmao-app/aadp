@@ -403,3 +403,84 @@ describe("iterateRelationCollection standalone", () => {
     expect(budget.crossOriginRequestsMade).toBe(0);
   });
 });
+
+function errorEnvelope(code: string, message: string) {
+  return { error: { code, message, request_id: "req_test" } };
+}
+
+describe("per-hop cross-origin charging (ADR-0008): every attempt, retry, and redirect hop", () => {
+  it("resolveRelationTarget charges a retried cross-origin target on every attempt, not just the first", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/entities/post/hello.json") {
+        attempts++;
+        if (attempts < 2) return sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
+        return sendJson(res, 200, buildEntity("post:hello", "post", {}));
+      }
+      sendJson(res, 404, {});
+    });
+    const budget = createRelationsTraversalBudget({ maxCrossOriginRequests: 1 });
+    const hint = { id: "post:hello", url: `${server.baseUrl}/entities/post/hello.json` };
+    // rootOrigin deliberately different from the server itself, so every
+    // attempt (including the retry) is cross-origin from the first hop.
+    const options = { ...PERMISSIVE, rootOrigin: "https://root.example.com", retry: { maxAttempts: 5, baseDelayMs: 1, maxDelayMs: 5 } };
+    await expect(resolveRelationTarget(hint, "post", options, budget, "test")).rejects.toThrow(/maxCrossOriginRequests/);
+    // Charged (and rejected) on attempt 2, before that attempt's network
+    // call — so the server only ever received the first attempt.
+    expect(attempts).toBe(1);
+  });
+
+  it("resolveRelationTarget charges a redirect hop that leaves rootOrigin, even though the initial request was same-origin", async () => {
+    const target = await startServer((_req, res, url) => {
+      if (url.pathname === "/entities/post/hello.json") return sendJson(res, 200, buildEntity("post:hello", "post", {}));
+      sendJson(res, 404, {});
+    });
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/redirect-to-hello.json") {
+        res.writeHead(302, { Location: `${target.baseUrl}/entities/post/hello.json` });
+        return res.end();
+      }
+      sendJson(res, 404, {});
+    });
+    try {
+      const budget = createRelationsTraversalBudget({ maxCrossOriginRequests: 0 });
+      const hint = { id: "post:hello", url: `${server.baseUrl}/redirect-to-hello.json` };
+      // rootOrigin matches the FIRST hop's origin (server), so only the
+      // redirect hop (landing on `target`, a different origin) is
+      // cross-origin.
+      const options = { ...PERMISSIVE, rootOrigin: server.baseUrl };
+      const result = await resolveRelationTarget(hint, "post", options, budget, "test").catch((e) => e);
+      expect(result).toBeInstanceOf(Error);
+      expect((result as Error).message).toMatch(/maxCrossOriginRequests/);
+    } finally {
+      await target.close();
+    }
+  });
+
+  it("iterateRelationCollection charges a retried cross-origin page on every attempt", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/relations/alice/posts.json") {
+        attempts++;
+        if (attempts < 2) return sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
+        return sendJson(res, 200, buildCollectionPage({ id: "character:alice", type: "character" }, "posts", "post", [], null));
+      }
+      sendJson(res, 404, {});
+    });
+    const budget = createRelationsTraversalBudget({ maxCrossOriginRequests: 1 });
+    const expected = { sourceId: "character:alice", sourceType: "character", rel: "posts", targetType: "post" };
+    const options = {
+      ...PERMISSIVE,
+      rootOrigin: "https://root.example.com",
+      retry: { maxAttempts: 5, baseDelayMs: 1, maxDelayMs: 5 },
+    };
+    await expect(
+      (async () => {
+        for await (const _item of iterateRelationCollection(`${server.baseUrl}/relations/alice/posts.json`, expected, options, budget)) {
+          // consume
+        }
+      })()
+    ).rejects.toThrow(/maxCrossOriginRequests/);
+    expect(attempts).toBe(1);
+  });
+});
