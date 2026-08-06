@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document type | Design memo |
-| Status | Draft |
+| Status | Superseded |
 | Audience | Module designers and reviewers |
 | Normative authority | None until accepted by ADR and versioned module specification |
 | Decision owner | AADP maintainers |
@@ -11,6 +11,11 @@
 | Vietnamese internal edition | [`../vi/design/relations-module-design.md`](../vi/design/relations-module-design.md) |
 
 ## Abstract
+
+This memo is retained as design history. Implementers use the
+[Relations Module v1.0 specification](../../spec/modules/relations/v1.0/specification.md),
+[ADR-0007](../adr/0007-module-versioning-and-discovery.md), and
+[ADR-0008](../adr/0008-module-traversal-and-authorization.md).
 
 This memo proposes typed relationships between AADP entities. All identifiers,
 versions, shapes, and URLs in this draft are non-normative until the module

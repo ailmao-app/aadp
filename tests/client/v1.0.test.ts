@@ -1274,3 +1274,98 @@ describe("iterateSitemap — standalone traversal budget", () => {
     ).rejects.toThrow(AadpDiscoveryBudgetExceededError);
   });
 });
+
+describe("maxRequests — whole-run HTTP request budget (AADP-REL-005)", () => {
+  it("does not enforce any request cap when maxRequests is omitted (default, matches every release before this field)", async () => {
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(req.headers.host!));
+      sendJson(res, 404, {});
+    });
+    const budget = createDiscoveryBudget();
+    await discover(server.baseUrl, PERMISSIVE, budget);
+    expect(budget.requestsMade).toBe(1);
+  });
+
+  it("throws AadpDiscoveryBudgetExceededError once retries push total requests past maxRequests, charging before each attempt", async () => {
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        attempts++;
+        return sendJson(res, 503, errorEnvelope("upstream_unavailable", "busy"));
+      }
+      sendJson(res, 404, {});
+    });
+
+    const budget = createDiscoveryBudget({ maxRequests: 2 });
+    await expect(
+      discover(
+        server.baseUrl,
+        { ...PERMISSIVE, retry: { maxAttempts: 5, baseDelayMs: 1, maxDelayMs: 5 } },
+        budget
+      )
+    ).rejects.toThrow(AadpDiscoveryBudgetExceededError);
+    // Charged (and capped) before the network call: exactly 2 requests were
+    // actually sent to the server — the 3rd charge is what trips the limit
+    // and throws (mirroring chargeDiscoveryBudget's increment-then-throw
+    // pattern), so `requestsMade` reflects that rejected 3rd charge while
+    // the server itself only ever saw 2.
+    expect(attempts).toBe(2);
+    expect(budget.requestsMade).toBe(3);
+  });
+
+  it("counts each redirect hop toward maxRequests, not just the original request", async () => {
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") {
+        res.writeHead(302, { Location: "/redirected-manifest.json" });
+        return res.end();
+      }
+      if (url.pathname === "/redirected-manifest.json") {
+        return sendJson(res, 200, buildManifest("host"));
+      }
+      sendJson(res, 404, {});
+    });
+
+    // 1 for the original request + 1 for the redirect hop = 2; a cap of 1
+    // must reject before the redirect target is ever fetched.
+    const budget = createDiscoveryBudget({ maxRequests: 1 });
+    await expect(discover(server.baseUrl, PERMISSIVE, budget)).rejects.toThrow(AadpDiscoveryBudgetExceededError);
+    expect(server.requestLog).toEqual(["/.well-known/ai-manifest.json"]);
+  });
+
+  it("calls onBeforeAttempt once per hop, before maxRequests is charged for that hop", async () => {
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(req.headers.host!));
+      sendJson(res, 404, {});
+    });
+    const seenUrls: string[] = [];
+    const budget = createDiscoveryBudget();
+    await discover(server.baseUrl, { ...PERMISSIVE, onBeforeAttempt: (url) => seenUrls.push(url.toString()) }, budget);
+    expect(seenUrls).toEqual([`${server.baseUrl}/.well-known/ai-manifest.json`]);
+    expect(budget.requestsMade).toBe(1);
+  });
+
+  it("when onBeforeAttempt throws, the request is never sent and requestsMade is left untouched", async () => {
+    server = await startServer((req, res, url) => {
+      if (url.pathname === "/.well-known/ai-manifest.json") return sendJson(res, 200, buildManifest(req.headers.host!));
+      sendJson(res, 404, {});
+    });
+    const budget = createDiscoveryBudget();
+    const boom = new Error("caller policy rejected this hop");
+    await expect(
+      discover(
+        server.baseUrl,
+        {
+          ...PERMISSIVE,
+          onBeforeAttempt: () => {
+            throw boom;
+          },
+        },
+        budget
+      )
+    ).rejects.toThrow(boom);
+    expect(server.requestLog).toEqual([]);
+    // The hook ran (and threw) before maxRequests was charged for this hop
+    // — a request `onBeforeAttempt` vetoed was never "made".
+    expect(budget.requestsMade).toBe(0);
+  });
+});

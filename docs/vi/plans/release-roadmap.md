@@ -4,11 +4,12 @@
 
 | Thuộc tính | Giá trị |
 |---|---|
-| Trạng thái | Planning Draft |
+| Trạng thái | Active Planning Record |
 | Phạm vi | npm package từ `1.0.8` đến `2.0.0` |
 | Owner quyết định | AADP maintainers |
 | Wire contract hiện hành | AADP `1.0` |
-| Plan chi tiết gần nhất | [`implementation-plan-v1.0.9.md`](implementation-plan-v1.0.9.md) |
+| Release hiện hành | `ail-aadp@1.1.0`, AADP wire `1.0` |
+| Plan đang chuẩn bị | [`implementation-plan-v1.2.0.md`](implementation-plan-v1.2.0.md) |
 
 ## 1. Quy tắc versioning
 
@@ -40,13 +41,13 @@ Không tạo release rỗng chỉ để đạt số version trong roadmap. Patch
 
 | Package version | Chủ đề | Trạng thái dự kiến | Wire impact |
 |---|---|---|---|
-| `1.0.8` | JUnit report và CI example | Release hiện tại | Không |
-| `1.0.9` | Compatibility và interoperability hardening | Đã có implementation plan | Không |
-| `1.0.10` | Robustness fixes từ corpus/consumer feedback | Có điều kiện | Không |
-| `1.0.11` | Production certification và release operations | Có điều kiện | Không |
-| `1.1.0` | Bounded traversal controls và conformance profiles | Planned minor | Không đổi core schema |
+| `1.0.8` | JUnit report và CI example | Đã phát hành | Không |
+| `1.0.9` | Compatibility và interoperability hardening | Đã phát hành | Không |
+| `1.0.10` | Robustness fixes từ corpus/consumer feedback | Đã phát hành | Không |
+| `1.0.11` | Production certification và release operations | Đã phát hành | Không |
+| `1.1.0` | Bounded traversal controls và conformance profiles | Đã phát hành | Không đổi core schema |
 | `1.1.x` | Stabilization cho public API 1.1 | Có điều kiện | Không |
-| `1.2.0` | Module infrastructure và Relations pilot | Chờ ADR | Extension/module riêng |
+| `1.2.0` | Module infrastructure và Relations pilot | Implementation Ready | Extension/module riêng |
 | `1.3.0` | Answer Module | Chờ Relations ổn định | Module riêng |
 | `1.4.0` | Evidence & Provenance Module | Chờ Answer/Relations | Module riêng |
 | `1.5.0` | Cross-module graph traversal và composition | Chờ ba module ổn định | Không đổi core schema |
@@ -58,7 +59,7 @@ Không tạo release rỗng chỉ để đạt số version trong roadmap. Patch
 
 ## 3. Release 1.0.8 — JUnit và CI integration
 
-Trạng thái: release candidate/release hiện tại.
+Trạng thái: đã phát hành ngày 2026-07-30.
 
 Đã triển khai:
 
@@ -76,6 +77,8 @@ Gate trước release:
 
 ## 4. Release 1.0.9 — Compatibility và interoperability
 
+Trạng thái: đã phát hành ngày 2026-08-01.
+
 Plan chi tiết:
 [`implementation-plan-v1.0.9.md`](implementation-plan-v1.0.9.md).
 
@@ -91,7 +94,8 @@ Không thêm retry, concurrency hoặc module mới.
 
 ## 5. Release 1.0.10 — Robustness fixes
 
-Trạng thái: conditional patch.
+Trạng thái: đã phát hành ngày 2026-08-02. Phần candidate scope bên dưới được giữ
+làm implementation record của release.
 
 Chỉ mở milestone khi corpus `1.0.9`, reference consumer hoặc production feedback
 phát hiện bug tương thích patch. Candidate scope:
@@ -116,7 +120,8 @@ Nếu không có bug phù hợp, bỏ qua `1.0.10` và chuyển thẳng sang `1.
 
 ## 6. Release 1.0.11 — Production certification
 
-Trạng thái: conditional patch; có thể gộp vào `1.0.10` hoặc bỏ qua.
+Trạng thái: đã phát hành riêng ngày 2026-08-03. Quyết định lịch sử về khả năng gộp
+hoặc bỏ qua không còn áp dụng.
 
 Candidate scope không đổi runtime contract:
 
@@ -132,7 +137,7 @@ workflow mới vào patch này. Nếu cần public API/config mới, chuyển sa
 
 ## 7. Release 1.1.0 — Bounded traversal controls
 
-Trạng thái: planned minor.
+Trạng thái: đã phát hành ngày 2026-08-05.
 
 Mục tiêu: bổ sung capability opt-in cho consumer vận hành crawler/reference
 client an toàn hơn mà không thay đổi AADP wire v1.0.
@@ -141,7 +146,8 @@ Candidate scope:
 
 - Public cancellation bằng `AbortSignal` xuyên suốt request và traversal.
 - Configurable concurrency limit; default bảo toàn behavior 1.0.x.
-- Retry/backoff/`Retry-After` policy opt-in, có request budget chung.
+- Retry/backoff/`Retry-After` policy opt-in, bị chặn bởi deadline và traversal
+  caps hiện có; `1.1.0` chưa phát hành `maxRequests` tổng quát.
 - Tổng response-byte budget cho toàn traversal.
 - Conformance profiles được định nghĩa rõ: `core`, `public-web`,
   `full-traversal`, `authenticated`.
@@ -155,7 +161,7 @@ CLI/options boundary
        ▼
 Traversal policy/service
        │
-       ├── request budget
+       ├── page/entity traversal caps
        ├── byte/deadline budget
        ├── concurrency scheduler
        ├── retry policy
@@ -166,8 +172,9 @@ HTTP client + URL/DNS policy
 ```
 
 CLI chỉ parse/render. Policy, scheduler và budget nằm trong module độc lập để test
-không cần HTTP server. Retry MUST không vượt request budget và MUST không gửi lại
-credential sang origin khác.
+không cần HTTP server. Retry MUST không vượt shared traversal caps/deadline và
+MUST không gửi lại credential sang origin khác. Release này không có
+`maxRequests` tổng quát.
 
 Release gate:
 
@@ -193,16 +200,20 @@ Không dùng `1.1.x` để thêm module wire mới.
 
 ## 9. Release 1.2.0 — Module infrastructure và Relations pilot
 
-Trạng thái: blocked bởi ADR module versioning.
+Trạng thái: Implementation Ready sau khi ADR-0007, ADR-0008, Relations Module
+v1.0 specification và conformance contract được chấp nhận. Plan authoritative:
+[`implementation-plan-v1.2.0.md`](implementation-plan-v1.2.0.md).
 
-Dependency bắt buộc:
+Dependency đã chốt:
 
-1. ADR quan hệ giữa core protocol version và module version.
-2. Module discovery/compatibility/export-path rules.
-3. Extension/document envelope boundary.
-4. Authorization, traversal budget và cycle semantics.
+1. [ADR-0007](../../adr/0007-module-versioning-and-discovery.md): core/module
+   version, discovery, envelope, registry và export paths.
+2. [ADR-0008](../../adr/0008-module-traversal-and-authorization.md): authorization,
+   shared traversal budget, cursor và cycle semantics.
+3. [Relations Module v1.0 specification](../../../spec/modules/relations/v1.0/specification.md).
+4. [Relations conformance contract](../../../spec/modules/relations/v1.0/conformance.md).
 
-Candidate scope sau khi ADR Accepted:
+Scope implementation đã chốt:
 
 - Module registry theo `{moduleId, moduleVersion, kind}`.
 - Version-aware module schema/validator registry.
@@ -218,18 +229,24 @@ sau.
 
 Wire/version rule:
 
-- Package MAY là `ail-aadp@1.2.0` trong khi core vẫn `aadp_version: "1.0"`.
-- Relations phải có module ID/version riêng.
+- Package là `ail-aadp@1.2.0`, core vẫn `aadp_version: "1.0"` và Relations là
+  `aadp:relations@1.0`.
+- Inline relation set dùng `entity.x_relations`; collection dùng module envelope
+  đã chốt trong plan chi tiết.
+- Document kinds là `relation-set`, `relation-collection` và
+  `relation-registry`.
+- Public API nằm tại `ail-aadp/modules/relations/v1.0`; schema nằm tại
+  `ail-aadp/schemas/modules/relations/v1.0/*`.
 - Không thêm field core chuẩn mới vào schema AADP v1.0.
-- Experimental metadata chỉ dùng extension point đã được schema cho phép và phải
-  được ghi rõ non-normative.
+- Không re-export Relations API từ package root.
 
 Release gate:
 
 - ADR module versioning Accepted.
 - Module schema, types, validator, client và conformance cùng version.
 - Unknown module safely ignorable.
-- Traversal có depth/request/byte budget và cycle guard.
+- Traversal có shared depth/node/request/response-byte/deadline budget,
+  cross-origin limit và cycle guard.
 - Cross-module/core compatibility tests xanh.
 - External reference implementation đạt module conformance.
 
@@ -282,7 +299,8 @@ sửa artifact đã công bố.
 
 ## 12. Release 1.4.0 — Evidence & Provenance Module
 
-Trạng thái: blocked bởi citation/claim ADR và stable Relations target model.
+Trạng thái: blocked bởi citation/claim ADR, stable Relations target model và
+Answer Module stable để khóa integration contract.
 
 Issue coverage:
 
@@ -418,7 +436,9 @@ Blocked bởi security ADR chốt:
 Candidate scope an toàn:
 
 - Injectable credential provider theo security scheme ID.
-- Request decoration sau schema/semantic validation.
+- Request decoration sau khi manifest/security metadata đã qua schema/semantic
+  validation, nhưng trước khi fetch protected resource; resource document được
+  validate sau fetch và trước khi client tin URL/nội dung của nó.
 - Credential chỉ gửi tới allowed origin/path và bị loại khi cross-origin redirect.
 - Secret redaction trong errors, JSON/JUnit report và debug hooks.
 - Explicit unauthenticated/authenticated conformance profile.
@@ -455,6 +475,9 @@ Candidate scope:
 - Scheduled conformance reference workflow.
 - Badge/status endpoint example chỉ phản ánh lần chạy và scope cụ thể.
 - Revocation/expiry semantics cho attestation cũ.
+- Verification helper chỉ xác minh schema/digest/scope/time/revocation. Digest
+  không chứng minh issuer identity; unsigned issuer phải là `unverified` cho tới
+  khi signing ADR và trust policy được chấp nhận.
 
 Không làm:
 
@@ -556,12 +579,12 @@ Release gate:
 
 | Feature/issue family | Release đích | Trạng thái coverage |
 |---|---|---|
-| JUnit/CI conformance | `1.0.8` | Đã triển khai |
-| Compatibility/neutral reference server | `1.0.9` | Đã có plan chi tiết |
-| Robustness/production operations | `1.0.10–1.0.11` | Conditional patch |
-| `AADP-ACCESS-001` explicit `none` cache semantics | `1.0.10` hoặc patch phù hợp gần nhất | Chờ reproduction test |
-| Abort/concurrency/retry/byte budget/profiles | `1.1.0` | Planned |
-| `AADP-MODULE-001`, `AADP-REL-001..006` | `1.2.0` | Chờ ADR |
+| JUnit/CI conformance | `1.0.8` | Đã phát hành |
+| Compatibility/neutral reference server | `1.0.9` | Đã phát hành |
+| Robustness/production operations | `1.0.10–1.0.11` | Đã phát hành |
+| `AADP-ACCESS-001` explicit `none` cache semantics | `1.0.10` | Đã triển khai |
+| Abort/concurrency/retry/byte budget/profiles | `1.1.0` | Đã phát hành |
+| `AADP-MODULE-001`, `AADP-REL-001..006` | `1.2.0` | Implementation Ready |
 | `AADP-MODULE-002` Answer | `1.3.0` | Chờ Relations |
 | `AADP-MODULE-003` Evidence & Provenance | `1.4.0` | Chờ citation/claim ADR |
 | `AADP-MODULE-004..006` cross-module completion | `1.3.0–1.5.0` | Chia theo module/orchestration |

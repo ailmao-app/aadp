@@ -1,0 +1,12 @@
+{
+  "module": "aadp:relations",
+  "version": "1.0",
+  "kind": "relation-set",
+  "items": [
+    {
+      "rel": "posts",
+      "target_type": "post",
+      "cardinality": "many"
+    }
+  ]
+}

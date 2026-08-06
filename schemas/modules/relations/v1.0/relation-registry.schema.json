@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/modules/relations/v1.0/relation-registry.schema.json",
+  "title": "AADP Relations Module v1.0 — Standard relation registry",
+  "description": "Top-level module document kind `relation-registry`: the machine-readable standard relation token registry (specification.md §8). Token uniqueness, `symmetric` requiring `inverse === token`, and `checksum` over canonical `relations` are pure semantic checks, not expressed here.",
+  "type": "object",
+  "required": ["aadp_version", "module", "module_version", "kind", "generated_at", "checksum", "relations"],
+  "properties": {
+    "aadp_version": { "const": "1.0" },
+    "module": { "const": "aadp:relations" },
+    "module_version": { "const": "1.0" },
+    "kind": { "const": "relation-registry" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "checksum": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["token"],
+        "properties": {
+          "token": {
+            "type": "string",
+            "pattern": "^(x_[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*|[a-z][a-z0-9_-]*)$"
+          },
+          "inverse": {
+            "type": "string",
+            "pattern": "^(x_[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*|[a-z][a-z0-9_-]*)$"
+          },
+          "symmetric": { "type": "boolean" },
+          "description": { "type": "string", "minLength": 1 }
+        },
+        "patternProperties": { "^x_[a-zA-Z0-9_]*$": {} },
+        "additionalProperties": false
+      }
+    }
+  },
+  "patternProperties": {
+    "^x_[a-zA-Z0-9_]*$": {}
+  },
+  "additionalProperties": false
+}

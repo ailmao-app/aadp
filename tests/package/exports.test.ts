@@ -54,6 +54,57 @@ describe("published package: every public entry point resolves from the tarball"
     "client/v0.1": ["discover", "fetchSitemapIndex", "fetchSitemap", "iterateSitemap", "fetchEntity", "discoverAllEntities"],
     "client/v1.0": ["discover", "fetchSitemapIndex", "fetchSitemap", "iterateSitemap", "fetchEntity", "discoverAllEntities", "AadpSemanticValidationError"],
     "validator": ["validateDocument", "validate", "validateManifest", "UnsupportedAadpVersionError", "SUPPORTED_VERSIONS", "KINDS", "checkManifestSemantics", "hasSemanticErrors"],
+    "module-registry": [
+      "registerModule",
+      "getModuleEntry",
+      "validateModuleDocument",
+      "assertValidModuleDocument",
+      "isModuleRegistered",
+      "isValidModuleId",
+      "MODULE_ID_PATTERN",
+      "hasModuleSemanticErrors",
+      "UnsupportedModuleError",
+      "UnsupportedModuleVersionError",
+      "UnsupportedModuleKindError",
+      "InvalidModuleDocumentError",
+    ],
+    "modules/relations/v1.0": [
+      "validateRelationsDocument",
+      "registerRelationsModule",
+      "checkRelationSetSemantics",
+      "checkRelationCollectionSemantics",
+      "checkRelationRegistrySemantics",
+      "isValidRelationToken",
+      "STANDARD_RELATION_TOKENS",
+      "relationSetSchema",
+      "relationCollectionSchema",
+      "relationRegistrySchema",
+      "relationItemSchema",
+      "targetSchema",
+      "collectionLinkSchema",
+      "moduleDispatchSchema",
+      "relationsSchemasByKind",
+      "RELATIONS_DOCUMENT_KINDS",
+      // Client/traversal (AADP-REL-005)
+      "createRelationsTraversalBudget",
+      "resolveRelationTarget",
+      "resolveRelationItem",
+      "iterateRelationCollection",
+      "traverseRelations",
+      "fetchAndValidateRelationsDocument",
+      "RelationsSchemaValidationError",
+      "RelationsIntegrityMismatchError",
+      "RelationsCursorCycleError",
+      // Conformance (AADP-REL-006)
+      "runRelationsConformance",
+      "renderRelationsTextReport",
+      "renderRelationsJsonReport",
+      "renderRelationsJUnitReport",
+      "relationsExitCodeFor",
+      "RELATIONS_CHECKS",
+      "RELATIONS_CONFORMANCE_PROFILES",
+      "InvalidRelationsConformanceOptionsError",
+    ],
     "conformance": ["runConformance", "renderTextReport", "renderJsonReport", "renderJUnitReport", "exitCodeFor", "CHECKS", "collectAdvertisedUrls", "InvalidConformanceOptionsError", "UnsupportedConformanceVersionError", "SUPPORTED_CONFORMANCE_VERSIONS"],
     "server": ["defineAADP", "defineResource", "AadpServerError", "notFound", "invalidRequest", "unsupportedType", "upstreamUnavailable", "rateLimited", "unauthorized", "forbidden"],
     "scaffold": ["scaffoldInit", "scaffoldAddResource", "ScaffoldFileExistsError", "initTemplate", "resourceTemplate", "toCamelCase"],
@@ -72,6 +123,23 @@ describe("published package: every public entry point resolves from the tarball"
     expect(mod).not.toHaveProperty("scaffoldInit");
   });
 
+  it("does not re-export Relations-specific names from the root entry point (ADR-0007 'Package exports')", async () => {
+    const mod = await importFromTarball(".");
+    for (const name of [
+      "validateRelationsDocument",
+      "registerRelationsModule",
+      "checkRelationSetSemantics",
+      "relationSetSchema",
+      "traverseRelations",
+      "runRelationsConformance",
+    ]) {
+      expect(mod, `"${name}" must not be re-exported from the package root`).not.toHaveProperty(name);
+    }
+    // The generic registry engine itself IS a root export (it is
+    // infrastructure, not a concrete module's API) — see src/index.ts.
+    expect(mod).toHaveProperty("registerModule");
+  });
+
   it("ships every schema path exports declares", () => {
     for (const version of ["v0.1", "v1.0"]) {
       for (const kind of ["manifest", "sitemap-index", "sitemap", "entity", "error"]) {
@@ -79,6 +147,71 @@ describe("published package: every public entry point resolves from the tarball"
         expect(existsSync(schemaFile), schemaFile).toBe(true);
       }
     }
+    for (const file of [
+      "module.schema.json",
+      "relation-set.schema.json",
+      "relation-item.schema.json",
+      "target.schema.json",
+      "collection-link.schema.json",
+      "relation-collection.schema.json",
+      "relation-registry.schema.json",
+    ]) {
+      const schemaFile = path.join(tarball.packageDir, "schemas", "modules", "relations", "v1.0", file);
+      expect(existsSync(schemaFile), schemaFile).toBe(true);
+    }
+  });
+
+  it("resolves ail-aadp/modules/relations/v1.0 from a clean tarball install and validates all three document kinds", async () => {
+    const mod = await importFromTarball("modules/relations/v1.0");
+    const relationSet = { module: "aadp:relations", version: "1.0", kind: "relation-set", items: [] };
+    const relationCollection = {
+      aadp_version: "1.0",
+      module: "aadp:relations",
+      module_version: "1.0",
+      kind: "relation-collection",
+      source: { id: "character:alice", type: "character" },
+      rel: "posts",
+      target_type: "post",
+      generated_at: "2026-08-05T00:00:00Z",
+      checksum: "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      items: [],
+      cursor: { next: null },
+    };
+    const relationRegistry = {
+      aadp_version: "1.0",
+      module: "aadp:relations",
+      module_version: "1.0",
+      kind: "relation-registry",
+      generated_at: "2026-08-05T00:00:00Z",
+      checksum: "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      relations: [],
+    };
+    const validateRelationsDocument = mod.validateRelationsDocument as (
+      kind: string,
+      data: unknown
+    ) => { valid: boolean };
+    expect(validateRelationsDocument("relation-set", relationSet).valid).toBe(true);
+    expect(validateRelationsDocument("relation-collection", relationCollection).valid).toBe(true);
+    expect(validateRelationsDocument("relation-registry", relationRegistry).valid).toBe(true);
+  });
+
+  it("runs runRelationsConformance from a clean tarball install (AADP-REL-006 neutral implementation gate)", async () => {
+    const mod = await importFromTarball("modules/relations/v1.0");
+    const runRelationsConformance = mod.runRelationsConformance as (options: unknown) => Promise<{
+      module: unknown;
+      status: string;
+      checks: unknown[];
+    }>;
+    // No baseUrl/sample URLs supplied, and profile: relations-full so the
+    // packaged runner schedules its full check set (default profile is
+    // the narrower relations-core): every check must reach a verdict of
+    // its own (skipped/inconclusive), not throw — proving the packaged
+    // runner is self-contained and distinguishes skipped/inconclusive from
+    // passed, per the conformance.md "Neutral implementation gate".
+    const report = await runRelationsConformance({ profile: "relations-full" });
+    expect(report.module).toEqual({ id: "aadp:relations", version: "1.0" });
+    expect(report.status).toBe("inconclusive");
+    expect(report.checks.length).toBeGreaterThan(15);
   });
 
   it("resolves package.json itself as a subpath export", () => {

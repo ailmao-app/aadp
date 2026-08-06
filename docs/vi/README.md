@@ -20,6 +20,8 @@ thay đổi wire contract đã release.
 
 - [Thiết kế Manifest v1.0](design/manifest-v1.0-design.md)
 - [Thiết kế Relations Module](design/relations-module-design.md)
+- [Relations Module v1.0 specification](../../spec/modules/relations/v1.0/specification.md)
+- [Relations Module v1.0 conformance contract](../../spec/modules/relations/v1.0/conformance.md)
 - [Kế hoạch tích hợp AEO/GEO](design/aeo-geo-integration-plan.md)
 - [Đề xuất khai báo Content Site và truy cập công khai](design/content-site-access-discovery-proposal.md)
 - [Kế hoạch và hồ sơ triển khai v1.0](plans/implementation-plan.md)
@@ -44,6 +46,8 @@ thay đổi wire contract đã release.
 - [Review Socket.dev cho 1.0.5](archive/socket-dev-review-1.0.5.md)
 - [ADR-0005 bằng tiếng Việt](adr/0005-manifest-v1-discovery.md)
 - [ADR-0006: Bounded traversal controls (tiếng Anh)](../adr/0006-bounded-traversal-controls.md)
+- [ADR-0007: Module versioning và discovery](../adr/0007-module-versioning-and-discovery.md)
+- [ADR-0008: Module traversal và authorization](../adr/0008-module-traversal-and-authorization.md)
 
 ## 3. Tài liệu làm việc và lưu trữ
 

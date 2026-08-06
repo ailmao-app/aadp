@@ -1,0 +1,16 @@
+{
+  "module": "aadp:relations",
+  "version": "1.0",
+  "kind": "relation-set",
+  "items": [
+    {
+      "rel": "x_ailmao:fan_of",
+      "target_type": "character",
+      "cardinality": "one",
+      "target": {
+        "id": "character:phu_diep",
+        "url": "https://example.com/ai/v1.0/entities/character/phu_diep.json"
+      }
+    }
+  ]
+}
