@@ -1,0 +1,7 @@
+{
+  "module": "aadp:relations",
+  "version": "1.0",
+  "kind": "relation-set",
+  "items": [],
+  "unexpected_field": true
+}

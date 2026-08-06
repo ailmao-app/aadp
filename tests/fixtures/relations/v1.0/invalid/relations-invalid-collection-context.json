@@ -1,0 +1,19 @@
+{
+  "aadp_version": "1.0",
+  "module": "aadp:relations",
+  "module_version": "1.0",
+  "kind": "relation-collection",
+  "source": { "id": "character:alice", "type": "character" },
+  "rel": "posts",
+  "target_type": "post",
+  "ordered": true,
+  "generated_at": "2026-08-05T00:00:00Z",
+  "checksum": "sha256:66b82eea66545e289e7a1de7b53118f692379967a2380f4e4aae8e9b29c3cf9f",
+  "items": [
+    {
+      "id": "character:not-a-post",
+      "url": "https://example.com/ai/v1.0/entities/character/not-a-post.json"
+    }
+  ],
+  "cursor": { "next": null }
+}
