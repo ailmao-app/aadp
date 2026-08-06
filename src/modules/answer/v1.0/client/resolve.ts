@@ -34,6 +34,8 @@ import {
   UnsupportedAadpVersionError,
   BlockedUrlError,
 } from "../../../../client/v1.0/index.js";
+import { canonicalTargetKey } from "../../../relations/v1.0/client/budget.js";
+import type { EntityV1 } from "../../../../client/v1.0/types.js";
 import type { AnswerDocumentV1, AnswerEntityReferenceV1 } from "../types.js";
 import type { AnswerResolvedTargetEntry, AnswerResolvedTargets, AnswerReferenceGroup, AnswerTargetResolutionStatus } from "./types.js";
 
@@ -112,6 +114,12 @@ function collectReferences(answer: AnswerDocumentV1): ReferenceEntry[] {
   return entries;
 }
 
+interface CachedOutcome {
+  status: AnswerTargetResolutionStatus;
+  entity?: EntityV1;
+  message?: string;
+}
+
 /**
  * Resolves every `related_entities` and (for a generated summary)
  * `authorship.source_targets` reference — see module docstring for
@@ -121,6 +129,21 @@ function collectReferences(answer: AnswerDocumentV1): ReferenceEntry[] {
  * contract shared with Relations traversal. Every reference past the
  * stopping point is still present with `status: "budget-exhausted"`
  * rather than silently omitted.
+ *
+ * `related_entities` and `source_targets` can name the same canonical
+ * target — Relations' shared budget (`options.budget`) dedupes it so the
+ * second occurrence is not re-fetched. That dedup ("duplicate") happens in
+ * `chargeNode()` before the fetch/validation outcome is known, so it does
+ * NOT by itself imply the target actually resolved successfully. This
+ * function keeps its own `outcomes` cache (keyed by the same canonical
+ * `{id, normalizedUrl}` Relations uses) of every outcome it has already
+ * produced in THIS call, and replays that exact outcome — status, entity,
+ * message — for a later "duplicate" occurrence instead of assuming
+ * `resolved`. A "duplicate" for a target this call has not itself resolved
+ * (visited earlier via the same caller-owned budget, outside this call) has
+ * no known outcome to replay; that case is reported `resolved` with no
+ * `entity`, consistent with how Relations' own traversal treats a
+ * previously-visited node elsewhere in a walk.
  */
 export async function resolveAnswerTargets(
   answer: AnswerDocumentV1,
@@ -128,6 +151,7 @@ export async function resolveAnswerTargets(
 ): Promise<AnswerResolvedTargets> {
   const references = collectReferences(answer);
   const items: AnswerResolvedTargetEntry[] = [];
+  const outcomes = new Map<string, CachedOutcome>();
   let partial = false;
 
   for (const { group, index, reference } of references) {
@@ -141,6 +165,7 @@ export async function resolveAnswerTargets(
       });
       continue;
     }
+    const key = canonicalTargetKey(reference.target.id, reference.target.url);
     try {
       const result = await resolveRelationTarget(
         reference.target,
@@ -150,22 +175,42 @@ export async function resolveAnswerTargets(
         `answer.${group}[${index}]`
       );
       if (result.status === "resolved") {
-        items.push({ group, index, reference, status: "resolved", entity: result.target.entity });
+        const outcome: CachedOutcome = { status: "resolved", entity: result.target.entity };
+        outcomes.set(key, outcome);
+        items.push({ group, index, reference, ...outcome });
       } else if (result.status === "duplicate") {
-        // Already resolved elsewhere in the same traversal (including
-        // across groups — related_entities and source_targets share the
-        // same caller-owned budget/visited-target set) — not re-fetched,
-        // reported as resolved without its own entity payload (mirrors
-        // Relations' hint-only duplicate edges).
-        items.push({
-          group,
-          index,
-          reference,
-          status: "resolved",
-          message: "Already resolved elsewhere in this traversal (duplicate canonical target).",
-        });
+        const cached = outcomes.get(key);
+        if (cached) {
+          // Replay the exact outcome this call already produced for the
+          // same canonical target earlier (e.g. related_entities[0] failed
+          // 404 -> source_targets[0] for the same target must also report
+          // not-found, not a bare "resolved").
+          items.push({
+            group,
+            index,
+            reference,
+            ...cached,
+            message: cached.message
+              ? `${cached.message} (duplicate of an earlier occurrence in this resolution.)`
+              : "Duplicate of an earlier occurrence in this resolution.",
+          });
+        } else {
+          // Visited before this call (same caller-owned budget reused
+          // across an earlier resolveAnswerTargets/traversal step) — no
+          // outcome of our own to replay; mirrors Relations' own
+          // already-visited-elsewhere semantics.
+          items.push({
+            group,
+            index,
+            reference,
+            status: "resolved",
+            message: "Already resolved elsewhere in this traversal (duplicate canonical target).",
+          });
+        }
       } else {
-        items.push({ group, index, reference, status: statusFromIssue(result.issue), message: result.issue.message });
+        const outcome: CachedOutcome = { status: statusFromIssue(result.issue), message: result.issue.message };
+        outcomes.set(key, outcome);
+        items.push({ group, index, reference, ...outcome });
       }
     } catch (err) {
       if (isGlobalStop(err)) {

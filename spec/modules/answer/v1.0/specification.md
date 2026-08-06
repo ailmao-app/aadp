@@ -362,8 +362,19 @@ vì nằm trong `authorship`. Mỗi entry kết quả gắn `{group: "related_en
 "source_targets", index}` để giữ provenance; thứ tự kết quả là toàn bộ
 `related_entities` (theo input order) rồi tới toàn bộ `source_targets` (theo
 input order). Một target trùng nhau giữa hai group (cùng canonical `{id,
-normalizedUrl}`) chỉ bị fetch một lần — lần thứ hai trả `resolved` không kèm
-`entity` (duplicate, dùng chung caller-owned budget).
+normalizedUrl}`) chỉ bị fetch một lần: Relations charge dedup (`chargeNode`)
+trước khi biết outcome fetch/validate, nên bản thân "duplicate" KHÔNG suy ra
+được occurrence đầu đã resolve thành công. `resolveAnswerTargets` tự giữ cache
+outcome (status/entity/message) theo canonical key trong đúng một lần gọi, và
+replay outcome đó cho occurrence trùng thay vì mặc định `resolved` — occurrence
+thứ hai của một target 404/forbidden/invalid ở lần đầu PHẢI mang đúng status đó,
+không được báo `resolved`; occurrence thứ hai của một target resolve thành
+công được replay cùng `entity` object (không fetch lại qua network, nhưng
+entity đã có sẵn trong bộ nhớ nên không cần giấu). Một duplicate ứng với target
+đã visit từ TRƯỚC lần gọi này (share budget với một traversal khác ngoài phạm
+vi hàm) không có outcome để replay — trường hợp đó vẫn báo `resolved` không
+kèm `entity`, nhất quán với cách Relations tự xử lý node đã visit ở nơi khác
+trong cùng traversal.
 
 Trạng thái mỗi entry: `resolved | forbidden | not-found | invalid |
 budget-exhausted`; không trả partial result như thể complete. Phân loại dựa
