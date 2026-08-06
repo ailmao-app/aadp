@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/modules/answer/v1.0/freshness.schema.json",
+  "title": "AADP Answer Module v1.0 — Freshness",
+  "description": "Component schema (not a top-level module document kind). Shape only — cross-field ordering (`published_at <= updated_at`, etc.) and the `updated_at` == core entity `updated_at` invariant are pure/entity-context semantic rules, not expressible here (specification.md \"Freshness contract\").",
+  "type": "object",
+  "required": ["published_at", "updated_at"],
+  "properties": {
+    "published_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "reviewed_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

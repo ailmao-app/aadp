@@ -523,8 +523,12 @@ AADP_BASE_URL=https://example.com \
 | `ail-aadp/server` | Declarative `defineAADP()`/`defineResource()` server runtime |
 | `ail-aadp/scaffold` | Programmatic API behind the `aadp` scaffold CLI |
 | `ail-aadp/canonical-json` | Canonicalization and checksum utilities |
+| `ail-aadp/modules/relations/v1.0` | Relations Module v1.0 — types, schema/semantic validation, client/traversal, conformance |
+| `ail-aadp/modules/answer/v1.0` | Answer Module v1.0 — types, schema/semantic validation, entity-context validator, client, conformance |
 | `ail-aadp/schemas/v1.0/*` | v1.0 JSON Schemas |
 | `ail-aadp/schemas/v0.1/*` | v0.1 JSON Schemas |
+| `ail-aadp/schemas/modules/relations/v1.0/*` | Relations Module v1.0 JSON Schemas |
+| `ail-aadp/schemas/modules/answer/v1.0/*` | Answer Module v1.0 JSON Schemas |
 
 Binaries: `aadp-validate`, `aadp-conformance`, `aadp` (`aadp init` / `aadp add-resource`).
 

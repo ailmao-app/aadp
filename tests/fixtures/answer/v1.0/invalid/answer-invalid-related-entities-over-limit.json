@@ -1,0 +1,383 @@
+{
+  "module": "aadp:answer",
+  "version": "1.0",
+  "kind": "answer",
+  "question": "What is Orbit?",
+  "concise_answer": "Orbit is a neutral example service.",
+  "locale": "en",
+  "authorship": {
+    "kind": "source-authored",
+    "author": {
+      "name": "Example Editorial Team"
+    }
+  },
+  "freshness": {
+    "published_at": "2026-08-01T00:00:00Z",
+    "updated_at": "2026-08-06T00:00:00Z"
+  },
+  "applicability": {
+    "audiences": [
+      "general"
+    ]
+  },
+  "related_entities": [
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-0",
+        "url": "https://example.com/ai/v1.0/entities/service/item-0.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-1",
+        "url": "https://example.com/ai/v1.0/entities/service/item-1.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-2",
+        "url": "https://example.com/ai/v1.0/entities/service/item-2.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-3",
+        "url": "https://example.com/ai/v1.0/entities/service/item-3.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-4",
+        "url": "https://example.com/ai/v1.0/entities/service/item-4.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-5",
+        "url": "https://example.com/ai/v1.0/entities/service/item-5.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-6",
+        "url": "https://example.com/ai/v1.0/entities/service/item-6.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-7",
+        "url": "https://example.com/ai/v1.0/entities/service/item-7.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-8",
+        "url": "https://example.com/ai/v1.0/entities/service/item-8.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-9",
+        "url": "https://example.com/ai/v1.0/entities/service/item-9.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-10",
+        "url": "https://example.com/ai/v1.0/entities/service/item-10.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-11",
+        "url": "https://example.com/ai/v1.0/entities/service/item-11.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-12",
+        "url": "https://example.com/ai/v1.0/entities/service/item-12.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-13",
+        "url": "https://example.com/ai/v1.0/entities/service/item-13.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-14",
+        "url": "https://example.com/ai/v1.0/entities/service/item-14.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-15",
+        "url": "https://example.com/ai/v1.0/entities/service/item-15.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-16",
+        "url": "https://example.com/ai/v1.0/entities/service/item-16.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-17",
+        "url": "https://example.com/ai/v1.0/entities/service/item-17.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-18",
+        "url": "https://example.com/ai/v1.0/entities/service/item-18.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-19",
+        "url": "https://example.com/ai/v1.0/entities/service/item-19.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-20",
+        "url": "https://example.com/ai/v1.0/entities/service/item-20.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-21",
+        "url": "https://example.com/ai/v1.0/entities/service/item-21.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-22",
+        "url": "https://example.com/ai/v1.0/entities/service/item-22.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-23",
+        "url": "https://example.com/ai/v1.0/entities/service/item-23.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-24",
+        "url": "https://example.com/ai/v1.0/entities/service/item-24.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-25",
+        "url": "https://example.com/ai/v1.0/entities/service/item-25.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-26",
+        "url": "https://example.com/ai/v1.0/entities/service/item-26.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-27",
+        "url": "https://example.com/ai/v1.0/entities/service/item-27.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-28",
+        "url": "https://example.com/ai/v1.0/entities/service/item-28.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-29",
+        "url": "https://example.com/ai/v1.0/entities/service/item-29.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-30",
+        "url": "https://example.com/ai/v1.0/entities/service/item-30.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-31",
+        "url": "https://example.com/ai/v1.0/entities/service/item-31.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-32",
+        "url": "https://example.com/ai/v1.0/entities/service/item-32.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-33",
+        "url": "https://example.com/ai/v1.0/entities/service/item-33.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-34",
+        "url": "https://example.com/ai/v1.0/entities/service/item-34.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-35",
+        "url": "https://example.com/ai/v1.0/entities/service/item-35.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-36",
+        "url": "https://example.com/ai/v1.0/entities/service/item-36.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-37",
+        "url": "https://example.com/ai/v1.0/entities/service/item-37.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-38",
+        "url": "https://example.com/ai/v1.0/entities/service/item-38.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-39",
+        "url": "https://example.com/ai/v1.0/entities/service/item-39.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-40",
+        "url": "https://example.com/ai/v1.0/entities/service/item-40.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-41",
+        "url": "https://example.com/ai/v1.0/entities/service/item-41.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-42",
+        "url": "https://example.com/ai/v1.0/entities/service/item-42.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-43",
+        "url": "https://example.com/ai/v1.0/entities/service/item-43.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-44",
+        "url": "https://example.com/ai/v1.0/entities/service/item-44.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-45",
+        "url": "https://example.com/ai/v1.0/entities/service/item-45.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-46",
+        "url": "https://example.com/ai/v1.0/entities/service/item-46.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-47",
+        "url": "https://example.com/ai/v1.0/entities/service/item-47.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-48",
+        "url": "https://example.com/ai/v1.0/entities/service/item-48.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-49",
+        "url": "https://example.com/ai/v1.0/entities/service/item-49.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:item-50",
+        "url": "https://example.com/ai/v1.0/entities/service/item-50.json"
+      }
+    }
+  ],
+  "content_checksum": "sha256:4687b4c2fafd7df79453d9b70f639b73212594bde14b0d519155d403e8eaf6a6"
+}

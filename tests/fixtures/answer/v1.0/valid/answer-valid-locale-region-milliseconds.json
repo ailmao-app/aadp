@@ -1,0 +1,19 @@
+{
+  "module": "aadp:answer",
+  "version": "1.0",
+  "kind": "answer",
+  "question": "Orbit とは何ですか？",
+  "concise_answer": "Orbit は中立的なサンプルサービスです。",
+  "locale": "zh-Hant-TW",
+  "authorship": {
+    "kind": "source-authored",
+    "author": {
+      "name": "Example Editorial Team"
+    }
+  },
+  "freshness": {
+    "published_at": "2026-08-01T09:00:00.123Z",
+    "updated_at": "2026-08-06T09:00:00.456Z"
+  },
+  "content_checksum": "sha256:07fe2cbaad6c7a5031eaba394c595be0c89e29ecb2337888b3cd48334e06ded9"
+}

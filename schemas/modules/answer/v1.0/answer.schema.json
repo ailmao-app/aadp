@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/modules/answer/v1.0/answer.schema.json",
+  "title": "AADP Answer Module v1.0 — Answer",
+  "description": "Top-level module document kind `answer`: the value of an AADP v1.0 entity's `x_answer` field, on an entity with `type: \"answer\"` (specification.md \"Wire boundary\"). Nested inside an already-versioned entity, so it self-describes `module`/`version`/`kind` but not `aadp_version` (mirrors ADR-0007 \"Envelope boundary\" for Relations). Unlike Relations, Answer `1.0` wrapper objects do not accept an `x_*` vendor extension point (specification.md \"Field contract\").",
+  "type": "object",
+  "required": [
+    "module",
+    "version",
+    "kind",
+    "question",
+    "concise_answer",
+    "locale",
+    "authorship",
+    "freshness",
+    "content_checksum"
+  ],
+  "properties": {
+    "module": { "const": "aadp:answer" },
+    "version": { "const": "1.0" },
+    "kind": { "const": "answer" },
+    "question": { "type": "string", "minLength": 1 },
+    "concise_answer": { "type": "string", "minLength": 1 },
+    "answer": { "type": "string", "minLength": 1 },
+    "locale": {
+      "type": "string",
+      "maxLength": 63,
+      "pattern": "^[a-z]{2,3}(-[A-Z][a-z]{3})?(-(?:[A-Z]{2}|[0-9]{3}))?(-(?:[a-z0-9]{5,8}|[0-9][a-z0-9]{3}))*$"
+    },
+    "authorship": { "$ref": "authorship.schema.json" },
+    "freshness": { "$ref": "freshness.schema.json" },
+    "content_checksum": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "applicability": { "$ref": "applicability.schema.json" },
+    "related_entities": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "$ref": "answer-reference.schema.json" }
+    }
+  },
+  "additionalProperties": false
+}

@@ -4,6 +4,28 @@ All notable changes to `ail-aadp` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Protocol compatibility follows [ADR-0004](docs/adr/0004-backward-compatibility.md); released schemas are immutable and wire-breaking changes require a new protocol version.
 
+## 1.3.0 - 2026-08-06
+
+Answer Module `1.0` (`docs/adr/0009-answer-module-terminology-and-security.md`, `spec/modules/answer/v1.0/specification.md`, `docs/vi/plans/implementation-plan-v1.3.0.md`). Does not change AADP wire version `1.0`, the core entity schemas, or the Relations Module `1.0` schemas. Does not change the package public API for any consumer that does not opt into the `ail-aadp/modules/answer/v1.0` subpath.
+
+### Added
+
+- Added the Answer Module v1.0 wire contract (`ail-aadp/modules/answer/v1.0`, `src/modules/answer/v1.0/`): schema (`schemas/modules/answer/v1.0/*.schema.json`), types, a pure wrapper semantic validator (`validateAnswerV1`), and an entity-context validator (`validateAnswerEntityV1`/`parseAnswerEntityV1`) for describing a question, concise answer, optional full answer, applicability, freshness, and related entities on an entity of `type: "answer"` via `entity.x_answer`.
+- Added `authorship` as a tagged union of `source-authored` and `generated-summary`, distinguishing source-authored content from an automatically generated summary purely by data — never inferred from free text (ADR-0009).
+- Added `x_answer.content_checksum`, an integrity digest over `x_answer` (minus itself) computed with the already-released `ail-aadp/canonical-json` `checksumOf()` — separate from, and in addition to, the core entity `checksum` (which only covers `data`). See ADR-0009.
+- Added a deterministic, restricted BCP 47 locale profile for Answer `1.0` (`isValidAnswerLocale`, `ANSWER_LOCALE_PATTERN`), enforced identically by schema and by the pure semantic validator.
+- Added an Answer client (`src/modules/answer/v1.0/client/`): `fetchAnswerEntityV1` (core `fetchEntity` + Answer parse/validation), `classifyAnswerFreshness` (injected-clock `fresh`/`stale` classifier), and `resolveAnswerTargets` (resolves `related_entities` via the Relations `1.0` resolver, reusing its URL/DNS policy, authorization behavior, scheduler, and the caller-owned `RelationsTraversalBudgetState` of the parent traversal — no child budget, no type inference from `target.id`).
+- Added an Answer conformance profile (`src/modules/answer/v1.0/conformance/`, check IDs `answer.discovery`/`answer.resource`/`answer.schema`/`answer.semantic`/`answer.context`/`answer.authorship`/`answer.references`/`answer.freshness`/`answer.security`) and fixture suite (`tests/fixtures/answer/v1.0/`) per `spec/modules/answer/v1.0/conformance.md`.
+- Added ADR-0009 (Answer Module terminology and security boundary), formalizing `concise_answer` as the sole term for the short answer (no `short_answer` alias), the `content_checksum` contract, reuse of `entity.canonical_url` as the sole human-facing URL (no separate `x_answer.canonical_url`), and the Answer/Evidence Module boundary.
+- Added package export paths `./modules/answer/v1.0` and `./schemas/modules/answer/v1.0/*`.
+
+### Scope notes
+
+- No content generation, ranking/search score, AEO/GEO score, or factual-truth evaluation in this release.
+- No `evidence`, `claims`, or `citations` field on Answer `1.0`; deferred to the Evidence & Provenance Module `1.4.0`.
+- No change to the core entity/manifest schema v1.0 or the Relations Module `1.0` schemas.
+- No cross-module graph composition; deferred to `1.5.0`.
+
 ## 1.2.0 - 2026-08-06
 
 Module infrastructure and Relations Module pilot (`docs/adr/0007-module-versioning-and-discovery.md`, `docs/adr/0008-module-traversal-and-authorization.md`, `spec/modules/relations/v1.0/specification.md`, `docs/vi/plans/implementation-plan-v1.2.0.md`). Does not change AADP wire version `1.0`, the core entity schemas, or the package public API for any consumer that does not opt into a module subpath.

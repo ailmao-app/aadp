@@ -1,0 +1,32 @@
+{
+  "module": "aadp:answer",
+  "version": "1.0",
+  "kind": "answer",
+  "question": "What is Nimbus queue depth?",
+  "concise_answer": "Nimbus queue depth is a neutral example metric.",
+  "locale": "en",
+  "authorship": {
+    "kind": "source-authored",
+    "author": {
+      "name": "Example Editorial Team"
+    }
+  },
+  "freshness": {
+    "published_at": "2026-08-01T00:00:00Z",
+    "updated_at": "2026-08-06T00:00:00Z"
+  },
+  "related_entities": [
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:nimbus",
+        "url": "https://example.com/ai/v1.0/entities/service/nimbus.json",
+        "x_ext": {
+          "": "bmp-private-use",
+          "𐀀": "supplementary-plane"
+        }
+      }
+    }
+  ],
+  "content_checksum": "sha256:dcead6f2263e5984af374ecdef1deaad33f35d75f9a00d5bd19a32c99b1b40c4"
+}
