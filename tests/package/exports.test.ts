@@ -202,11 +202,13 @@ describe("published package: every public entry point resolves from the tarball"
       status: string;
       checks: unknown[];
     }>;
-    // No baseUrl/sample URLs supplied: every check must reach a verdict of
+    // No baseUrl/sample URLs supplied, and profile: relations-full so the
+    // packaged runner schedules its full check set (default profile is
+    // the narrower relations-core): every check must reach a verdict of
     // its own (skipped/inconclusive), not throw — proving the packaged
     // runner is self-contained and distinguishes skipped/inconclusive from
     // passed, per the conformance.md "Neutral implementation gate".
-    const report = await runRelationsConformance({});
+    const report = await runRelationsConformance({ profile: "relations-full" });
     expect(report.module).toEqual({ id: "aadp:relations", version: "1.0" });
     expect(report.status).toBe("inconclusive");
     expect(report.checks.length).toBeGreaterThan(15);

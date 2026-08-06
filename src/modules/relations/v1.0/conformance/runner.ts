@@ -150,6 +150,22 @@ async function runCheck(
  */
 export async function runRelationsConformance(options: RelationsConformanceOptions = {}): Promise<RelationsConformanceReport> {
   if (options.profile !== undefined) assertSupportedProfile(options.profile);
+  // Omitting `profile` defaults to the most conservative one: no
+  // resolution/traversal/network beyond discovery and a single sample
+  // document, mirroring core `ConformanceOptions`' "omitting profile is
+  // exactly core" (`../../../../conformance/types.js`).
+  const profile: RelationsConformanceProfile = options.profile ?? "relations-core";
+  // "relations-authenticated: full với explicit test credential provider"
+  // (spec/modules/relations/v1.0/conformance.md §"Profiles") — without
+  // `headers`, this profile has nothing distinguishing it from
+  // `relations-full`, so treat it as a configuration error rather than
+  // silently running unauthenticated checks under an "authenticated" label.
+  if (profile === "relations-authenticated" && !options.headers) {
+    throw new InvalidRelationsConformanceOptionsError(
+      "profile",
+      `"relations-authenticated" requires options.headers (an explicit test credential) to be set`
+    );
+  }
 
   let origin: string | undefined;
   if (options.baseUrl) {
@@ -235,7 +251,13 @@ export async function runRelationsConformance(options: RelationsConformanceOptio
     }
   };
 
-  for (const check of RELATIONS_CHECKS) {
+  // The core P1 fix: only checks whose `profiles` include the effective
+  // profile are even scheduled — a `relations-core` run must never reach a
+  // collection/traversal/negative-target/credential-probe check's `run()`,
+  // not just never intend to (see `RelationsCheck.profiles` in `./checks.js`).
+  const scheduled = RELATIONS_CHECKS.filter((check) => check.profiles.includes(profile));
+
+  for (const check of scheduled) {
     if (options.signal?.aborted) {
       record({
         id: check.id,
@@ -279,7 +301,11 @@ export async function runRelationsConformance(options: RelationsConformanceOptio
     duration_ms: Date.now() - startedMs,
     status,
     summary,
-    ...(options.profile ? { profile: options.profile } : {}),
+    // Always the EFFECTIVE profile (defaulted to "relations-core" when
+    // `options.profile` was omitted) — same reasoning as `effective_limits`
+    // below: a report must say what actually ran, not just echo back what
+    // the caller explicitly typed.
+    profile,
     effective_limits: effectiveLimits,
     checks: results,
   };

@@ -24,19 +24,117 @@ describe("runRelationsConformance — options validation", () => {
   it("throws a TypeError for an unparseable baseUrl", async () => {
     await expect(runRelationsConformance({ baseUrl: "not a url" })).rejects.toThrow(TypeError);
   });
+
+  it("throws InvalidRelationsConformanceOptionsError for relations-authenticated without headers", async () => {
+    await expect(runRelationsConformance({ profile: "relations-authenticated" })).rejects.toThrow(
+      InvalidRelationsConformanceOptionsError
+    );
+  });
+
+  it("accepts relations-authenticated once headers are supplied, and schedules the full check set", async () => {
+    const report = await runRelationsConformance({ profile: "relations-authenticated", headers: { Authorization: "Bearer x" } });
+    expect(report.profile).toBe("relations-authenticated");
+    expect(report.checks.length).toBeGreaterThan(15);
+  });
+});
+
+describe("runRelationsConformance — profile scopes which checks are even scheduled", () => {
+  it("relations-core (the default) never fetches a collection, negative-target, or credential-probe URL, even when those options are supplied", async () => {
+    let collectionRequested = false;
+    let negativeTargetRequested = false;
+    let probeRequested = false;
+
+    const negativeAndProbe = await startServer((_req, res, url) => {
+      if (url.pathname === "/negative") {
+        negativeTargetRequested = true;
+        return sendJson(res, 404, { error: { code: "not_found", message: "gone", request_id: "r1" } });
+      }
+      if (url.pathname === "/probe") {
+        probeRequested = true;
+        return sendJson(res, 200, { received_headers: {} });
+      }
+      sendJson(res, 404, {});
+    });
+
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/entities/character/alice.json") {
+        return sendJson(
+          res,
+          200,
+          buildEntity("character:alice", "character", {}, {
+            x_relations: buildRelationSet([
+              {
+                rel: "posts",
+                target_type: "post",
+                cardinality: "many",
+                collection: { url: `${negativeAndProbe.baseUrl}/collection.json`, pagination: "cursor" },
+              },
+            ]),
+          })
+        );
+      }
+      if (url.pathname === "/collection.json") {
+        collectionRequested = true;
+        return sendJson(res, 200, buildCollectionPage({ id: "character:alice", type: "character" }, "posts", "post", [], null));
+      }
+      sendJson(res, 404, {});
+    });
+
+    try {
+      const report = await runRelationsConformance({
+        // Deliberately relations-core (the default) even though every
+        // full-only input is supplied.
+        sampleEntityUrl: `${server.baseUrl}/entities/character/alice.json`,
+        negativeTargetUrl: `${negativeAndProbe.baseUrl}/negative`,
+        crossOriginProbeUrl: `${negativeAndProbe.baseUrl}/probe`,
+        headers: { Authorization: "Bearer secret" },
+        urlPolicy: createPermissiveUrlPolicy(),
+      });
+
+      expect(collectionRequested).toBe(false);
+      expect(negativeTargetRequested).toBe(false);
+      expect(probeRequested).toBe(false);
+
+      const ids = report.checks.map((c) => c.id);
+      for (const fullOnlyId of [
+        "relations.schema.collection",
+        "relations.collection.context",
+        "relations.collection.pagination",
+        "relations.collection.checksum",
+        "relations.http.errors",
+        "relations.http.cache",
+        "relations.traversal.budget",
+        "relations.traversal.cycle",
+        "relations.traversal.partial",
+        "relations.security.credentials",
+      ]) {
+        expect(ids, `${fullOnlyId} must not be scheduled under relations-core`).not.toContain(fullOnlyId);
+      }
+    } finally {
+      await negativeAndProbe.close();
+    }
+  });
 });
 
 describe("runRelationsConformance — report envelope", () => {
-  it("with no options at all, every check is inconclusive and the run is reported inconclusive, never passed", async () => {
+  it("with no options at all, defaults to relations-core and reports every core check inconclusive, never passed", async () => {
     const report = await runRelationsConformance({});
     expect(report.module).toEqual({ id: "aadp:relations", version: "1.0" });
     expect(report.aadp_version).toBe("1.0");
     expect(report.report_version).toBe("1");
     expect(report.package_version).toMatch(/^\d+\.\d+\.\d+/);
-    expect(report.checks.length).toBeGreaterThan(15);
+    expect(report.profile).toBe("relations-core");
+    expect(report.checks.length).toBeGreaterThan(5);
     expect(report.status).toBe("inconclusive");
     expect(report.summary.failed).toBe(0);
     expect(report.summary.inconclusive).toBeGreaterThan(0);
+  });
+
+  it("with profile: relations-full and no sample/probe URLs, schedules every check and every one is inconclusive", async () => {
+    const report = await runRelationsConformance({ profile: "relations-full" });
+    expect(report.checks.length).toBeGreaterThan(15);
+    expect(report.status).toBe("inconclusive");
+    expect(report.summary.failed).toBe(0);
   });
 
   it("records effective_limits", async () => {
@@ -178,6 +276,7 @@ describe("runRelationsConformance — traversal.partial provenance", () => {
     const report = await runRelationsConformance({
       sampleEntityUrl: `${server.baseUrl}/entities/character/root.json`,
       urlPolicy: createPermissiveUrlPolicy(),
+      profile: "relations-full",
     });
     const byId = Object.fromEntries(report.checks.map((c) => [c.id, c]));
     expect(byId["relations.traversal.partial"].status).toBe("passed");
@@ -233,6 +332,7 @@ describe("runRelationsConformance — collection.pagination does not certify an 
     const report = await runRelationsConformance({
       sampleEntityUrl: `${server.baseUrl}/entities/character/alice.json`,
       urlPolicy: createPermissiveUrlPolicy(),
+      profile: "relations-full",
     });
     const byId = Object.fromEntries(report.checks.map((c) => [c.id, c]));
     expect(byId["relations.collection.pagination"].status).toBe("skipped");
@@ -255,7 +355,11 @@ describe("runRelationsConformance — security.credentials actually observes cro
   }
 
   it("is inconclusive without crossOriginProbeUrl, even though headers were configured", async () => {
-    const report = await runRelationsConformance({ baseUrl: "https://example.com", headers: { Authorization: "Bearer secret" } });
+    const report = await runRelationsConformance({
+      baseUrl: "https://example.com",
+      headers: { Authorization: "Bearer secret" },
+      profile: "relations-full",
+    });
     const byId = Object.fromEntries(report.checks.map((c) => [c.id, c]));
     expect(byId["relations.security.credentials"].status).toBe("skipped");
     expect(byId["relations.security.credentials"].inconclusive).toBe(true);
@@ -278,6 +382,7 @@ describe("runRelationsConformance — security.credentials actually observes cro
         crossOriginProbeUrl: `${dishonestProbe.baseUrl}/probe`,
         headers: { Authorization: "Bearer secret" },
         urlPolicy: createPermissiveUrlPolicy(),
+        profile: "relations-full",
       });
       const byId = Object.fromEntries(report.checks.map((c) => [c.id, c]));
       expect(byId["relations.security.credentials"].status).toBe("failed");
@@ -296,6 +401,7 @@ describe("runRelationsConformance — security.credentials actually observes cro
         crossOriginProbeUrl: `${probe.baseUrl}/probe`,
         headers: { "X-Api-Key": "secret" },
         urlPolicy: createPermissiveUrlPolicy(),
+        profile: "relations-full",
       });
       const strippedById = Object.fromEntries(strippedReport.checks.map((c) => [c.id, c]));
       expect(strippedById["relations.security.credentials"].status).toBe("passed");
@@ -307,6 +413,7 @@ describe("runRelationsConformance — security.credentials actually observes cro
         headers: { "X-Api-Key": "secret" },
         crossOriginSafeHeaders: ["X-Api-Key"],
         urlPolicy: createPermissiveUrlPolicy(),
+        profile: "relations-full",
       });
       const allowListedById = Object.fromEntries(allowListedReport.checks.map((c) => [c.id, c]));
       expect(allowListedById["relations.security.credentials"].status).toBe("passed");

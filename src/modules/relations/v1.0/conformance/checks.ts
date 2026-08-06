@@ -26,7 +26,7 @@ import { validateModuleDocument, type ModuleValidationResult } from "../../../..
 import { iterateRelationCollection, traverseRelations } from "../client/index.js";
 import { createRelationsTraversalBudget, type RelationsTraversalBudgetState } from "../client/budget.js";
 import type { RelationCollectionV1, RelationRegistryV1, RelationSetV1 } from "../types.js";
-import type { CheckResult, CheckStatus, RelationsConformanceOptions } from "./types.js";
+import type { CheckResult, CheckStatus, RelationsConformanceOptions, RelationsConformanceProfile } from "./types.js";
 
 const MODULE_ID = "aadp:relations" as const;
 const MODULE_VERSION = "1.0" as const;
@@ -81,8 +81,21 @@ export interface RelationsCheck {
   group: string;
   title: string;
   requires?: string[];
+  /**
+   * Which profiles schedule this check (spec/modules/relations/v1.0/conformance.md
+   * §"Profiles"). `relations-core` never resolves/traverses/paginates —
+   * only discovery, a single sample document's schema/semantics, and
+   * already-fetched-document scans belong there. Collection resolution,
+   * HTTP cache/negative-target probing, bounded traversal, and the
+   * cross-origin credential probe are `relations-full`/`-authenticated`
+   * only.
+   */
+  profiles: readonly RelationsConformanceProfile[];
   run: (ctx: RelationsCheckContext) => Promise<RelationsCheckOutcome | void>;
 }
+
+const CORE_AND_UP: readonly RelationsConformanceProfile[] = ["relations-core", "relations-full", "relations-authenticated"];
+const FULL_AND_UP: readonly RelationsConformanceProfile[] = ["relations-full", "relations-authenticated"];
 
 function validateRelations<T>(kind: "relation-set" | "relation-collection" | "relation-registry", data: unknown) {
   return validateModuleDocument({ moduleId: MODULE_ID, moduleVersion: MODULE_VERSION, kind }, data) as ModuleValidationResult & {
@@ -182,6 +195,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.discovery.declared",
     group: "discovery",
     title: "Manifest declares aadp:relations@1.0 exactly",
+    profiles: CORE_AND_UP,
     async run(ctx) {
       if (!ctx.options.baseUrl) return ctx.inconclusive("options.baseUrl was not supplied.");
       const manifest = await discover(ctx.options.baseUrl, ctx.client, ctx.budget);
@@ -197,6 +211,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.schema.reachable",
     group: "discovery",
     title: "Module schema dispatch URL is reachable and JSON",
+    profiles: CORE_AND_UP,
     requires: ["relations.discovery.declared"],
     async run(ctx) {
       const declared = ctx.state.moduleDeclaration!;
@@ -214,6 +229,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.schema.relation_set",
     group: "schema",
     title: "Sample x_relations passes the relation-set schema",
+    profiles: CORE_AND_UP,
     async run(ctx) {
       const { validation } = await ensureSampleRelationSet(ctx);
       if (!schemaPassed(validation)) {
@@ -225,6 +241,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.schema.collection",
     group: "schema",
     title: "Sample relation-collection page passes its schema",
+    profiles: FULL_AND_UP,
     requires: ["relations.schema.relation_set"],
     async run(ctx) {
       const { validation } = await ensureSampleCollectionPage(ctx);
@@ -237,6 +254,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.schema.registry",
     group: "schema",
     title: "Sample relation-registry passes its schema",
+    profiles: CORE_AND_UP,
     async run(ctx) {
       const { validation } = await ensureSampleRegistry(ctx);
       if (!schemaPassed(validation)) {
@@ -248,6 +266,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.semantic.cardinality",
     group: "semantic",
     title: "Cardinality/container consistency (invalid_cardinality_container)",
+    profiles: CORE_AND_UP,
     requires: ["relations.schema.relation_set"],
     async run(ctx) {
       const { validation } = await ensureSampleRelationSet(ctx);
@@ -260,6 +279,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.semantic.tokens",
     group: "semantic",
     title: "Standard/vendor relation tokens (invalid_relation_token)",
+    profiles: CORE_AND_UP,
     requires: ["relations.schema.relation_set"],
     async run(ctx) {
       const { validation } = await ensureSampleRelationSet(ctx);
@@ -272,6 +292,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.semantic.target_identity",
     group: "semantic",
     title: "Target ID prefix matches target_type (target_identity_mismatch)",
+    profiles: CORE_AND_UP,
     requires: ["relations.schema.relation_set"],
     async run(ctx) {
       const { validation } = await ensureSampleRelationSet(ctx);
@@ -284,6 +305,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.semantic.duplicate_target",
     group: "semantic",
     title: "No duplicate target IDs within a relation item (duplicate_target)",
+    profiles: CORE_AND_UP,
     requires: ["relations.schema.relation_set"],
     async run(ctx) {
       const { validation } = await ensureSampleRelationSet(ctx);
@@ -296,6 +318,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.collection.context",
     group: "collection",
     title: "Collection page source/rel/target_type matches its relation item (collection_context_mismatch)",
+    profiles: FULL_AND_UP,
     requires: ["relations.schema.collection"],
     async run(ctx) {
       const { validation } = await ensureSampleCollectionPage(ctx);
@@ -308,6 +331,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.collection.pagination",
     group: "collection",
     title: "Collection pagination terminates without a cursor cycle",
+    profiles: FULL_AND_UP,
     requires: ["relations.schema.collection"],
     async run(ctx) {
       await ensureSampleCollectionPage(ctx);
@@ -342,6 +366,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.collection.checksum",
     group: "collection",
     title: "Collection page checksum matches canonical items (collection_checksum_mismatch)",
+    profiles: FULL_AND_UP,
     requires: ["relations.schema.collection"],
     async run(ctx) {
       const { validation } = await ensureSampleCollectionPage(ctx);
@@ -354,6 +379,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.registry.unique_token",
     group: "registry",
     title: "Registry token uniqueness (duplicate_registry_token)",
+    profiles: CORE_AND_UP,
     requires: ["relations.schema.registry"],
     async run(ctx) {
       const { validation } = await ensureSampleRegistry(ctx);
@@ -366,6 +392,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.registry.checksum",
     group: "registry",
     title: "Registry checksum matches canonical relations (registry_checksum_mismatch)",
+    profiles: CORE_AND_UP,
     requires: ["relations.schema.registry"],
     async run(ctx) {
       const { validation } = await ensureSampleRegistry(ctx);
@@ -378,6 +405,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.http.errors",
     group: "http",
     title: "Negative target answers an AADP error envelope",
+    profiles: FULL_AND_UP,
     async run(ctx) {
       const url = ctx.options.negativeTargetUrl;
       if (!url) return ctx.inconclusive("options.negativeTargetUrl was not supplied.");
@@ -393,6 +421,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.http.cache",
     group: "http",
     title: "Collection/registry supports conditional GET (SHOULD, not MUST)",
+    profiles: FULL_AND_UP,
     async run(ctx) {
       const url = ctx.options.sampleRegistryUrl ?? ctx.state.sampleCollectionUrl;
       if (!url) return ctx.inconclusive("No sample collection/registry URL was available to probe caching on.");
@@ -416,6 +445,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.traversal.budget",
     group: "traversal",
     title: "Traversal respects the run's effective budget limits",
+    profiles: FULL_AND_UP,
     async run(ctx) {
       if (!ctx.options.sampleEntityUrl) return ctx.inconclusive("options.sampleEntityUrl was not supplied.");
       const result = await traverseRelations(ctx.options.sampleEntityUrl, {
@@ -438,6 +468,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.traversal.cycle",
     group: "traversal",
     title: "Graph/cursor cycles are contained, not an infinite walk",
+    profiles: FULL_AND_UP,
     requires: ["relations.traversal.budget"],
     async run(ctx) {
       if (!ctx.options.sampleEntityUrl) return ctx.inconclusive("options.sampleEntityUrl was not supplied.");
@@ -470,6 +501,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.traversal.partial",
     group: "traversal",
     title: "A partial result always carries issue provenance",
+    profiles: FULL_AND_UP,
     requires: ["relations.traversal.budget"],
     async run(ctx) {
       if (!ctx.options.sampleEntityUrl) return ctx.inconclusive("options.sampleEntityUrl was not supplied.");
@@ -488,6 +520,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.security.url_policy",
     group: "security",
     title: "This run enforced URL/DNS policy (no unacknowledged private-network access)",
+    profiles: CORE_AND_UP,
     async run(ctx) {
       if (ctx.options.allowPrivateNetwork || ctx.options.urlPolicy) {
         return ctx.warn("This run used a non-default URL policy (allowPrivateNetwork or a custom urlPolicy) — SSRF protection was intentionally relaxed for this run.");
@@ -498,6 +531,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.security.credentials",
     group: "security",
     title: "Credential headers are stripped cross-origin unless explicitly allow-listed",
+    profiles: FULL_AND_UP,
     async run(ctx) {
       if (!ctx.options.headers) return ctx.skip("No options.headers were configured for this run — nothing to scope.");
       const probeUrl = ctx.options.crossOriginProbeUrl;
@@ -552,6 +586,7 @@ export const RELATIONS_CHECKS: RelationsCheck[] = [
     id: "relations.privacy.social_graph",
     group: "privacy",
     title: "No public follows/followers relation token (specification.md §8)",
+    profiles: CORE_AND_UP,
     async run(ctx) {
       if (!ctx.options.sampleEntityUrl && !ctx.options.sampleRegistryUrl) {
         return ctx.inconclusive("No sample entity/registry was supplied to scan.");

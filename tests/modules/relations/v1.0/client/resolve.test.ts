@@ -329,4 +329,77 @@ describe("iterateRelationCollection standalone", () => {
       })()
     ).rejects.toThrow(RelationsIntegrityMismatchError);
   });
+
+  it("charges maxCrossOriginRequests once per page for a cross-origin collection, rejecting before the first page at limit 0", async () => {
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/relations/alice/posts.json") {
+        return sendJson(res, 200, buildCollectionPage({ id: "character:alice", type: "character" }, "posts", "post", [], null));
+      }
+      sendJson(res, 404, {});
+    });
+    const budget = createRelationsTraversalBudget({ maxCrossOriginRequests: 0 });
+    const expected = { sourceId: "character:alice", sourceType: "character", rel: "posts", targetType: "post" };
+    await expect(
+      (async () => {
+        for await (const _item of iterateRelationCollection(
+          `${server.baseUrl}/relations/alice/posts.json`,
+          expected,
+          { ...PERMISSIVE, rootOrigin: "https://root.example.com" },
+          budget
+        )) {
+          // consume
+        }
+      })()
+    ).rejects.toThrow(/maxCrossOriginRequests/);
+    expect(server.requestLog).toEqual([]); // rejected before the first page was ever fetched
+  });
+
+  it("counts every page of a cross-origin collection toward maxCrossOriginRequests, not just the first", async () => {
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/relations/alice/posts.json") {
+        const cursor = url.searchParams.get("cursor");
+        if (!cursor) return sendJson(res, 200, buildCollectionPage({ id: "character:alice", type: "character" }, "posts", "post", [], "p2"));
+        return sendJson(res, 200, buildCollectionPage({ id: "character:alice", type: "character" }, "posts", "post", [], null));
+      }
+      sendJson(res, 404, {});
+    });
+    const budget = createRelationsTraversalBudget({ maxCrossOriginRequests: 1 });
+    const expected = { sourceId: "character:alice", sourceType: "character", rel: "posts", targetType: "post" };
+    await expect(
+      (async () => {
+        for await (const _item of iterateRelationCollection(
+          `${server.baseUrl}/relations/alice/posts.json`,
+          expected,
+          { ...PERMISSIVE, rootOrigin: "https://root.example.com" },
+          budget
+        )) {
+          // consume
+        }
+      })()
+    ).rejects.toThrow(/maxCrossOriginRequests/);
+    // First page allowed (charge 1, at limit); second page's charge (2) exceeds the limit of 1.
+    expect(server.requestLog.filter((p) => p === "/relations/alice/posts.json")).toHaveLength(1);
+  });
+
+  it("does not charge maxCrossOriginRequests for a same-origin collection", async () => {
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/relations/alice/posts.json") {
+        return sendJson(res, 200, buildCollectionPage({ id: "character:alice", type: "character" }, "posts", "post", [], null));
+      }
+      sendJson(res, 404, {});
+    });
+    const budget = createRelationsTraversalBudget({ maxCrossOriginRequests: 0 });
+    const expected = { sourceId: "character:alice", sourceType: "character", rel: "posts", targetType: "post" };
+    const items = [];
+    for await (const item of iterateRelationCollection(
+      `${server.baseUrl}/relations/alice/posts.json`,
+      expected,
+      { ...PERMISSIVE, rootOrigin: server.baseUrl },
+      budget
+    )) {
+      items.push(item);
+    }
+    expect(items).toEqual([]);
+    expect(budget.crossOriginRequestsMade).toBe(0);
+  });
 });

@@ -168,6 +168,7 @@ describe("Relations conformance — collection fixtures via a relation-set that 
     const report = await runRelationsConformance({
       sampleEntityUrl: `${server.baseUrl}/entities/character/alice.json`,
       urlPolicy: createPermissiveUrlPolicy(),
+      profile: "relations-full",
     });
     const byId = Object.fromEntries(report.checks.map((c) => [c.id, c]));
     expect(byId["relations.schema.collection"].status).toBe("passed");
@@ -181,6 +182,7 @@ describe("Relations conformance — collection fixtures via a relation-set that 
     const report = await runRelationsConformance({
       sampleEntityUrl: `${server.baseUrl}/entities/character/alice.json`,
       urlPolicy: createPermissiveUrlPolicy(),
+      profile: "relations-full",
     });
     const byId = Object.fromEntries(report.checks.map((c) => [c.id, c]));
     expect(byId["relations.collection.checksum"].status).toBe("failed");
@@ -192,6 +194,7 @@ describe("Relations conformance — collection fixtures via a relation-set that 
     const report = await runRelationsConformance({
       sampleEntityUrl: `${server.baseUrl}/entities/character/alice.json`,
       urlPolicy: createPermissiveUrlPolicy(),
+      profile: "relations-full",
     });
     const byId = Object.fromEntries(report.checks.map((c) => [c.id, c]));
     expect(byId["relations.collection.context"].status).toBe("failed");

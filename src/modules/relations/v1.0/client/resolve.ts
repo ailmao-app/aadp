@@ -147,6 +147,17 @@ export interface RelationCollectionExpectation {
  * `RelationsCursorCycleError` (contained to this one collection) if
  * `cursor.next` repeats — the same cycle-detection idiom as
  * `../../../../client/v1.0/index.ts`'s `iterateSitemap`.
+ *
+ * Charges `budget.crossOriginRequestsMade` once per page fetched whose URL
+ * is cross-origin relative to `options.rootOrigin` — the same dimension
+ * `resolveRelationTarget` charges once per target, so `maxCrossOriginRequests`
+ * bounds a cross-origin collection's page count too, not just single-target
+ * resolutions. This charges at page granularity (not per retry/redirect hop
+ * within a single page fetch, unlike `maxRequests` in `http.ts`) because
+ * "cross-origin relative to the walk's root" is a Relations-traversal
+ * concept `http.ts` has no notion of; a page whose first attempt would
+ * already exceed the limit is charged (and can throw) before that
+ * attempt's `fetchAndValidateRelationsDocument` call.
  */
 export async function* iterateRelationCollection(
   collectionUrl: string,
@@ -160,9 +171,13 @@ export async function* iterateRelationCollection(
     chargeDiscoveryBudget(budget, "page", `iterateRelationCollection(${collectionUrl})`);
     const target = new URL(collectionUrl);
     if (cursor) target.searchParams.set("cursor", cursor);
-    const pageOptions = options.rootOrigin ? scopeHeadersToOrigin(options, target.toString(), options.rootOrigin) : options;
+    const targetUrl = target.toString();
+    if (options.rootOrigin && isCrossOrigin(targetUrl, options.rootOrigin)) {
+      chargeCrossOrigin(budget, `iterateRelationCollection(${collectionUrl})`); // may throw AadpDiscoveryBudgetExceededError — global stop, propagates
+    }
+    const pageOptions = options.rootOrigin ? scopeHeadersToOrigin(options, targetUrl, options.rootOrigin) : options;
     const page = await fetchAndValidateRelationsDocument<RelationCollectionV1>(
-      target.toString(),
+      targetUrl,
       "relation-collection",
       pageOptions,
       budget
