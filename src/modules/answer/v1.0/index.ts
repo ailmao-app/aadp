@@ -57,6 +57,7 @@ export {
   type AnswerResolveOptions,
   type AnswerFreshnessState,
   type AnswerTargetResolutionStatus,
+  type AnswerReferenceGroup,
   type AnswerResolvedTargetEntry,
   type AnswerResolvedTargets,
 } from "./client/index.js";

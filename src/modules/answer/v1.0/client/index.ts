@@ -5,6 +5,7 @@ export { resolveAnswerTargets, type AnswerResolveOptions } from "./resolve.js";
 export type {
   AnswerFreshnessState,
   AnswerTargetResolutionStatus,
+  AnswerReferenceGroup,
   AnswerResolvedTargetEntry,
   AnswerResolvedTargets,
 } from "./types.js";

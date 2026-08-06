@@ -51,15 +51,16 @@ function isGlobalStop(err: unknown): boolean {
 
 /** Maps a caught resolution error to a stable issue code from the taxonomy in `spec/modules/relations/v1.0/conformance.md`. */
 function issueFromError(err: unknown, rel: string | undefined, targetId: string | undefined, url: string): RelationsTraversalIssue {
+  const cause = err instanceof Error ? err : undefined;
   if (err instanceof BlockedUrlError) {
-    return { level: "error", code: "blocked_url", message: err.message, rel, targetId, url };
+    return { level: "error", code: "blocked_url", message: err.message, rel, targetId, url, cause };
   }
   if (err instanceof AadpRequestError) {
-    if (err.status === 401) return { level: "error", code: "unauthorized", message: err.message, rel, targetId, url };
-    if (err.status === 403) return { level: "error", code: "forbidden", message: err.message, rel, targetId, url };
+    if (err.status === 401) return { level: "error", code: "unauthorized", message: err.message, rel, targetId, url, cause };
+    if (err.status === 403) return { level: "error", code: "forbidden", message: err.message, rel, targetId, url, cause };
   }
   const message = err instanceof Error ? err.message : String(err);
-  return { level: "error", code: "target_unresolvable", message, rel, targetId, url };
+  return { level: "error", code: "target_unresolvable", message, rel, targetId, url, cause };
 }
 
 /**

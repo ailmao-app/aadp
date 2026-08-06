@@ -352,9 +352,29 @@ nhận implementation-private registry/network type không được export.
 
 `fetchAnswerEntityV1` dùng core `fetchEntity`, sau đó gọi `parseAnswerEntityV1`;
 không fetch hoặc trust target URL trước khi toàn bộ core entity và `x_answer`
-hợp lệ. `resolveAnswerTargets` nhận caller-owned `RelationsTraversalBudgetState`
-qua options; kết quả giữ thứ tự input, phân biệt resolved/forbidden/not-found/
-invalid/budget-exhausted; không trả partial result như thể complete.
+hợp lệ.
+
+`resolveAnswerTargets` nhận caller-owned `RelationsTraversalBudgetState` qua
+options và resolve CẢ HAI danh sách Answer entity reference: `related_entities`
+và — khi `authorship.kind === "generated-summary"` — `authorship.
+source_targets` bắt buộc; đây cùng là "Answer target", không được bỏ sót chỉ
+vì nằm trong `authorship`. Mỗi entry kết quả gắn `{group: "related_entities" |
+"source_targets", index}` để giữ provenance; thứ tự kết quả là toàn bộ
+`related_entities` (theo input order) rồi tới toàn bộ `source_targets` (theo
+input order). Một target trùng nhau giữa hai group (cùng canonical `{id,
+normalizedUrl}`) chỉ bị fetch một lần — lần thứ hai trả `resolved` không kèm
+`entity` (duplicate, dùng chung caller-owned budget).
+
+Trạng thái mỗi entry: `resolved | forbidden | not-found | invalid |
+budget-exhausted`; không trả partial result như thể complete. Phân loại dựa
+trên nguyên nhân lỗi thực tế (`RelationsTraversalIssue.cause`), không chỉ mã
+lỗi thô: HTTP 401/403 → `forbidden`; HTTP 404 → `not-found`; blocked URL,
+schema-invalid, checksum mismatch, id/type integrity mismatch, hoặc unsupported
+`aadp_version` → `invalid` (target tồn tại nhưng không dùng được); mọi lỗi
+transport khác (timeout, 5xx, quá nhiều redirect, response quá lớn) cũng mặc
+định `invalid` — một simplification có chủ đích vì taxonomy Answer không có
+bucket thứ sáu cho lỗi transport, và gán `not-found` cho lỗi tạm thời sẽ báo
+sai một target thực ra vẫn tồn tại.
 
 ## 18. Schema và artifact inventory
 

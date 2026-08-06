@@ -27,6 +27,21 @@ export interface RelationsTraversalIssue {
   targetId?: string;
   /** The URL being resolved when this issue occurred, when applicable. */
   url?: string;
+  /**
+   * The original error this issue was derived from, when the issue came
+   * from a caught exception (as opposed to a synthesized issue like
+   * `traversal_budget_exceeded`). `code`/`message` alone collapse several
+   * distinct causes into one coarse bucket (e.g. `target_unresolvable`
+   * covers a 404, a 5xx, a timeout, a schema-invalid response and a
+   * checksum mismatch alike); a caller that needs to distinguish them —
+   * e.g. Answer's `resolveAnswerTargets` telling a confirmed-absent target
+   * apart from a malformed one — can inspect `cause`'s type
+   * (`AadpRequestError.status`, `AadpSchemaValidationError`,
+   * `AadpChecksumMismatchError`, ...) instead of parsing `message`, which
+   * is not a stable API. Optional and additive: existing consumers that
+   * only read `code`/`message` are unaffected.
+   */
+  cause?: Error;
 }
 
 /**

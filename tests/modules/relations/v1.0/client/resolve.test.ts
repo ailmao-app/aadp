@@ -64,6 +64,12 @@ describe("resolveRelationTarget", () => {
     expect(result.status).toBe("issue");
     if (result.status === "issue") {
       expect(result.issue.code).toBe("target_unresolvable");
+      // `cause` preserves the original error (here an id/type integrity
+      // mismatch) so a caller (e.g. Answer's resolveAnswerTargets) can
+      // distinguish causes `code` alone collapses — see
+      // RelationsTraversalIssue.cause docstring.
+      expect(result.issue.cause).toBeInstanceOf(Error);
+      expect(result.issue.cause?.message).toMatch(/does not match/);
     }
   });
 
@@ -76,6 +82,7 @@ describe("resolveRelationTarget", () => {
     expect(result.status).toBe("issue");
     if (result.status === "issue") {
       expect(result.issue.code).toBe("blocked_url");
+      expect(result.issue.cause).toBeInstanceOf(Error);
     }
   });
 

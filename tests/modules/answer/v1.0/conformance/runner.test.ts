@@ -90,3 +90,36 @@ describe("runAnswerConformance — a nonconforming sample entity", () => {
     expect(answerExitCodeFor(report)).toBe(1);
   });
 });
+
+describe("runAnswerConformance — answer.references also exercises generated-summary source_targets", () => {
+  it("warns on answer.references when a generated summary's source_targets fails to resolve, even with no related_entities", async () => {
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/entities/answer/generated.json") {
+        return sendJson(
+          res,
+          200,
+          buildAnswerEntity("answer:generated", {
+            authorship: {
+              kind: "generated-summary",
+              generator: { name: "Example Summarizer" },
+              generated_at: "2026-08-06T08:55:00Z",
+              source_targets: [
+                { target_type: "document", target: { id: "document:missing", url: `http://127.0.0.1:1/entities/document/missing.json` } },
+              ],
+            },
+          })
+        );
+      }
+      sendJson(res, 404, {});
+    });
+
+    const report = await runAnswerConformance({
+      sampleEntityUrl: `${server.baseUrl}/entities/answer/generated.json`,
+      urlPolicy: createPermissiveUrlPolicy(),
+    });
+
+    const byId = Object.fromEntries(report.checks.map((c) => [c.id, c]));
+    expect(byId["answer.references"].status).toBe("warning");
+    expect(byId["answer.references"].details?.some((d) => d.includes("source_targets"))).toBe(true);
+  });
+});

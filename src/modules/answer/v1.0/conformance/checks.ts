@@ -183,7 +183,7 @@ export const ANSWER_CHECKS: AnswerCheck[] = [
   {
     id: "answer.references",
     group: "references",
-    title: "related_entities resolve via the Relations resolver/shared budget",
+    title: "related_entities and generated-summary source_targets resolve via the Relations resolver/shared budget",
     requires: ["answer.schema"],
     async run(ctx) {
       const wrapperValidation = await ensureWrapperValidation(ctx);
@@ -192,15 +192,17 @@ export const ANSWER_CHECKS: AnswerCheck[] = [
       }
       const entity = ctx.state.sampleEntity!;
       const answer = (entity as unknown as { x_answer: AnswerDocumentV1 }).x_answer;
-      if (!answer.related_entities || answer.related_entities.length === 0) {
-        return ctx.inconclusive("Sample x_answer has no related_entities to resolve.");
+      const hasSourceTargets = answer.authorship.kind === "generated-summary" && answer.authorship.source_targets.length > 0;
+      const hasRelatedEntities = (answer.related_entities?.length ?? 0) > 0;
+      if (!hasRelatedEntities && !hasSourceTargets) {
+        return ctx.inconclusive("Sample x_answer has no related_entities or generated-summary source_targets to resolve.");
       }
       const result = await resolveAnswerTargets(answer, { ...ctx.client, budget: ctx.budget });
       const bad = result.items.filter((item) => item.status !== "resolved");
       if (bad.length > 0) {
         return ctx.warn(
-          `${bad.length} of ${result.items.length} related_entities did not resolve.`,
-          bad.map((b) => `${b.reference.target.id}: ${b.status}${b.message ? ` (${b.message})` : ""}`)
+          `${bad.length} of ${result.items.length} reference(s) (related_entities + source_targets) did not resolve.`,
+          bad.map((b) => `${b.group}[${b.index}] ${b.reference.target.id}: ${b.status}${b.message ? ` (${b.message})` : ""}`)
         );
       }
     },

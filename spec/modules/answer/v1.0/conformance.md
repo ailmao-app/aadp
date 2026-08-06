@@ -25,7 +25,7 @@ Answer `1.0` conformance. Không thay đổi core `CHECKS`/check ID hay Relation
 | `answer.semantic` | semantic | Pure wrapper semantic invariants (bao gồm `content_checksum`) xanh | Required |
 | `answer.context` | context | Entity type, `x_answer` presence, `entity.canonical_url` presence/URL-policy, `updated_at` equality xanh | Required |
 | `answer.authorship` | authorship | Discriminator/provenance không mơ hồ (`author.url` policy) | Required |
-| `answer.references` | references | `related_entities` resolve bằng Relations resolver/shared budget | Required khi có sample |
+| `answer.references` | references | `related_entities` VÀ (khi generated-summary) `authorship.source_targets` resolve bằng Relations resolver/shared budget | Required khi có sample |
 | `answer.freshness` | freshness | Timestamp semantics và injected-clock classification đúng | Required |
 | `answer.security` | security | Free text inert; URL/target resolution không bypass policy | Required |
 
@@ -33,7 +33,11 @@ Mỗi check là async function thuần trên `AnswerCheckContext`, không baked-
 fixture. Check phụ thuộc sample document (`options.sampleEntityUrl`) là
 `skipped`/`inconclusive`, KHÔNG BAO GIỜ `failed`, khi không có sample — cùng lý
 do với core `ConformanceOptions.negativeTargets`. `answer.references` là
-`inconclusive` khi sample answer không có `related_entities`.
+`inconclusive` chỉ khi sample answer không có cả `related_entities` lẫn (với
+generated-summary) `authorship.source_targets` — một generated summary chỉ có
+`source_targets`, không có `related_entities`, vẫn phải được exercise, vì
+`source_targets` là provenance bắt buộc của generated-summary, không phải một
+field phụ.
 
 ## 3. Prerequisite chain
 
