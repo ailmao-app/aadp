@@ -1,0 +1,11 @@
+{
+  "aadp_version": "1.0",
+  "module": "aadp:relations",
+  "module_version": "1.0",
+  "kind": "relation-registry",
+  "generated_at": "2026-08-05T00:00:00Z",
+  "checksum": "sha256:823a9a889205d6a0218e78c71861db74e051a392d514534904d5b8dc4d294696",
+  "relations": [
+    { "token": "related", "symmetric": true, "description": "Symmetric but inverse is missing entirely." }
+  ]
+}

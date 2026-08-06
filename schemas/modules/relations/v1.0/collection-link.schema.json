@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/modules/relations/v1.0/collection-link.schema.json",
+  "title": "AADP Relations Module v1.0 — Collection link",
+  "description": "Component schema (not a top-level module document kind). Points a `cardinality: many` relation item at its paginated collection endpoint instead of an inline `targets` array (specification.md §5.3).",
+  "type": "object",
+  "required": ["url", "pagination"],
+  "properties": {
+    "url": { "type": "string", "format": "uri", "pattern": "^https?://" },
+    "pagination": { "const": "cursor" }
+  },
+  "patternProperties": {
+    "^x_[a-zA-Z0-9_]*$": {}
+  },
+  "additionalProperties": false
+}

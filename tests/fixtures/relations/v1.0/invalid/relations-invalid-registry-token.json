@@ -1,0 +1,11 @@
+{
+  "aadp_version": "1.0",
+  "module": "aadp:relations",
+  "module_version": "1.0",
+  "kind": "relation-registry",
+  "generated_at": "2026-08-05T00:00:00Z",
+  "checksum": "sha256:84d3733b912da409dfcddd7fba624932ff358a3d4b799ab1e9aa8c432552ba02",
+  "relations": [
+    { "token": "banana", "inverse": "related", "symmetric": false, "description": "Not a standard token." }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "aadp_version": "1.0",
+  "module": "aadp:relations",
+  "module_version": "1.0",
+  "kind": "relation-registry",
+  "generated_at": "2026-08-05T00:00:00Z",
+  "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "relations": [
+    { "token": "related", "inverse": "related", "symmetric": true, "description": "A general symmetric relationship." }
+  ]
+}

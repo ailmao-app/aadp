@@ -1,0 +1,22 @@
+{
+  "module": "aadp:relations",
+  "version": "1.0",
+  "kind": "relation-set",
+  "items": [
+    {
+      "rel": "posts",
+      "target_type": "post",
+      "cardinality": "many",
+      "targets": [
+        {
+          "id": "post:abc",
+          "url": "https://example.com/ai/v1.0/entities/post/abc.json"
+        }
+      ],
+      "collection": {
+        "url": "https://example.com/ai/v1.0/relations/character/alice/posts.json",
+        "pagination": "cursor"
+      }
+    }
+  ]
+}

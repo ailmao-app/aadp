@@ -19,6 +19,7 @@ import { createStrictUrlPolicy, assertAllowed, BlockedUrlError, type UrlPolicy }
 import { dispatcherFor } from "./dns-pin.js";
 import {
   chargeDiscoveryBudgetBytes,
+  chargeDiscoveryBudgetRequest,
   AadpDiscoveryBudgetExceededError,
   type DiscoveryBudgetState,
 } from "./discovery-budget.js";
@@ -62,6 +63,20 @@ export interface FetchJsonOptions {
    * budget/deadline. See `RetryOptions`.
    */
   retry?: RetryOptions;
+  /**
+   * Called with the current hop's URL immediately before that hop's own
+   * `maxRequests` charge and network attempt — the exact same point in
+   * the per-hop loop below, for the original request, every retry, and
+   * every redirect hop alike (ADR-0008). Lets a caller charge a budget
+   * dimension this module has no concept of (e.g. Relations traversal's
+   * "is this cross-origin relative to the walk's root", ADR-0008
+   * `maxCrossOriginRequests`) at the same per-attempt granularity as
+   * `maxRequests`, without duplicating this hop loop. Throwing here
+   * aborts the request before any network I/O for that hop — same effect
+   * as `maxRequests` being exceeded. Never called for a hop `assertAllowed`
+   * already rejected.
+   */
+  onBeforeAttempt?: (url: URL) => void;
 }
 
 export interface RetryOptions {
@@ -567,6 +582,20 @@ async function requestWithPolicy<T>(
         // no backoff delay is involved (attempt 1 of a fresh retry cycle).
         assertWithinDeadline(budget, `request to ${current.toString()}`);
         assertAllowed(current, policy);
+        // `onBeforeAttempt` runs BEFORE `maxRequests` is charged: if it
+        // throws (a caller's own budget/policy hook rejecting this hop),
+        // `requestsMade` must stay untouched — it counts requests that
+        // were actually going to be attempted, not ones a different check
+        // already vetoed. Reordering these would let a blocked hop still
+        // consume a `maxRequests` slot for a request that was never sent.
+        options.onBeforeAttempt?.(current);
+        // Charged for the original request, every retry attempt, and every
+        // redirect hop alike — each re-enters this loop and reaches this
+        // line before its own `fetch()` call below (AADP-REL-005). Never
+        // charged for a hop that `assertAllowed` already rejected (or
+        // `onBeforeAttempt` already vetoed): a blocked URL was never
+        // actually sent over the network.
+        if (budget) chargeDiscoveryBudgetRequest(budget, `request to ${current.toString()}`);
 
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);

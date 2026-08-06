@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/modules/relations/v1.0/relation-set.schema.json",
+  "title": "AADP Relations Module v1.0 — Relation set",
+  "description": "Top-level module document kind `relation-set`: the value of an AADP v1.0 entity's `x_relations` field (specification.md §4). Nested inside an already-versioned entity, so unlike relation-collection/relation-registry it self-describes `module`/`version`/`kind` but not `aadp_version` (ADR-0007 'Envelope boundary').",
+  "type": "object",
+  "required": ["module", "version", "kind", "items"],
+  "properties": {
+    "module": { "const": "aadp:relations" },
+    "version": { "const": "1.0" },
+    "kind": { "const": "relation-set" },
+    "items": {
+      "type": "array",
+      "items": { "$ref": "relation-item.schema.json" }
+    }
+  },
+  "patternProperties": {
+    "^x_[a-zA-Z0-9_]*$": {}
+  },
+  "additionalProperties": false
+}

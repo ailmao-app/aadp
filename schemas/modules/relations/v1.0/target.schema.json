@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/modules/relations/v1.0/target.schema.json",
+  "title": "AADP Relations Module v1.0 — Canonical target",
+  "description": "Component schema (not a top-level module document kind). Identifies one relation target entity by ID and authoritative URL; also reused for relation-collection items (specification.md §6-7).",
+  "type": "object",
+  "required": ["id", "url"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$" },
+    "url": { "type": "string", "format": "uri", "pattern": "^https?://" },
+    "label": { "type": "string", "minLength": 1 },
+    "checksum": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  },
+  "patternProperties": {
+    "^x_[a-zA-Z0-9_]*$": {}
+  },
+  "additionalProperties": false
+}

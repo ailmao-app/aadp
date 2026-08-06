@@ -46,6 +46,14 @@
       "types": "./dist/validator/index.d.ts",
       "import": "./dist/validator/index.js"
     },
+    "./module-registry": {
+      "types": "./dist/module-registry/index.d.ts",
+      "import": "./dist/module-registry/index.js"
+    },
+    "./modules/relations/v1.0": {
+      "types": "./dist/modules/relations/v1.0/index.d.ts",
+      "import": "./dist/modules/relations/v1.0/index.js"
+    },
     "./conformance": {
       "types": "./dist/conformance/index.d.ts",
       "import": "./dist/conformance/index.js"
@@ -64,6 +72,7 @@
     },
     "./schemas/v0.1/*": "./schemas/v0.1/*",
     "./schemas/v1.0/*": "./schemas/v1.0/*",
+    "./schemas/modules/relations/v1.0/*": "./schemas/modules/relations/v1.0/*",
     "./schemas/*": "./schemas/v0.1/*",
     "./package.json": "./package.json"
   },

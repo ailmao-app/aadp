@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/modules/relations/v1.0/module.schema.json",
+  "title": "AADP Relations Module v1.0 — Module schema dispatch",
+  "description": "The schema URL a manifest's `modules[]` entry points at (specification.md §2, §10). Dispatches by `kind` to exactly the three top-level Relations document schemas — `relation-set`, `relation-collection`, `relation-registry`. This schema MUST NOT be used to validate the manifest discovery entry `{id, version, schema}` itself, which is validated by the core manifest schema v1.0 (ADR-0007 'Module ID and discovery'); component schemas (relation-item, target, collection-link) are not registered as document kinds here.",
+  "oneOf": [
+    { "$ref": "relation-set.schema.json" },
+    { "$ref": "relation-collection.schema.json" },
+    { "$ref": "relation-registry.schema.json" }
+  ]
+}

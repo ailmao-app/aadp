@@ -1,0 +1,14 @@
+{
+  "aadp_version": "1.0",
+  "module": "aadp:relations",
+  "module_version": "1.0",
+  "kind": "relation-registry",
+  "generated_at": "2026-08-05T00:00:00Z",
+  "checksum": "sha256:ec2b33831e93ad4a28e5ab777c7666802e66e035554aea344fdd7b65e2840597",
+  "relations": [
+    { "token": "creator", "inverse": "created", "symmetric": false, "description": "Target created the source." },
+    { "token": "created", "inverse": "creator", "symmetric": false, "description": "Target was created by the source." },
+    { "token": "posts", "inverse": "creator", "symmetric": false, "description": "Target is a post authored by the source." },
+    { "token": "related", "inverse": "related", "symmetric": true, "description": "A general symmetric relationship." }
+  ]
+}
