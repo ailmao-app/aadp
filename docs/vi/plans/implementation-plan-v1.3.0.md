@@ -119,8 +119,9 @@ thêm field mới vào core entity schema.
   "aadp_version": "1.0",
   "id": "answer:what-is-orbit",
   "type": "answer",
-  "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "checksum": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
   "updated_at": "2026-08-06T09:00:00Z",
+  "canonical_url": "https://example.com/answers/what-is-orbit",
   "data": {},
   "x_answer": {
     "module": "aadp:answer",
@@ -141,7 +142,7 @@ thêm field mới vào core entity schema.
       "updated_at": "2026-08-06T09:00:00Z",
       "reviewed_at": "2026-08-06T09:00:00Z"
     },
-    "canonical_url": "https://example.com/answers/what-is-orbit",
+    "content_checksum": "sha256:690084f26171fcc883f2ac0b9987b2511b5b9a3d21faab90ca0bdebe660bc622",
     "applicability": {
       "audiences": ["general"],
       "jurisdictions": ["001"]
@@ -164,8 +165,19 @@ thêm field mới vào core entity schema.
 registry kind hoặc alternate-question document. Listing/pagination answer
 resources tiếp tục dùng core sitemap/resource flow.
 
-Core checksum vẫn tính theo core specification. Answer Module không định nghĩa
-checksum thứ hai cho `x_answer`.
+Ví dụ trên là valid vector, không phải pseudocode: cả `checksum` (core, trên
+`data = {}`) và `x_answer.content_checksum` được tính bằng `checksumOf()` public
+đã phát hành (`ail-aadp/canonical-json`) trên đúng payload hiển thị phía trên.
+Fixture đầu tiên ở Phase 1 phải generate từ script tái tạo ví dụ này (không
+copy tay digest) để tránh drift nếu ví dụ thay đổi; test phải re-run
+`checksumOf()` và so khớp giá trị committed.
+
+Core checksum vẫn tính theo core specification và chỉ bao phủ `data`. Vì mọi
+field normative của Answer nằm trong `x_answer`, core checksum không phát hiện
+được thay đổi nội dung Answer; Answer Module định nghĩa thêm
+`x_answer.content_checksum` làm integrity digest riêng cho phạm vi này (xem
+"Content checksum contract" bên dưới). Đây là quyết định bắt buộc trước khi
+đóng băng wire schema `aadp:answer@1.0`.
 
 ### Field contract
 
@@ -185,9 +197,13 @@ của Relations `1.0`. Extension vendor trong Answer wrapper chưa được hỗ
 | `locale` | Có | Canonical BCP 47 language tag, tối đa 63 ký tự |
 | `authorship` | Có | Tagged union `source-authored` hoặc `generated-summary` |
 | `freshness` | Có | Timestamp provenance và optional expiry |
-| `canonical_url` | Có | Absolute HTTPS URL không fragment/userinfo |
+| `content_checksum` | Có | `sha256:<64 hex>` digest theo Content checksum contract |
 | `applicability` | Không | Audience/jurisdiction/time applicability có cấu trúc |
 | `related_entities` | Không | 0-50 Answer entity references, không trùng canonical target |
+
+`x_answer` không có field `canonical_url` riêng. Answer `1.0` tái sử dụng core
+`entity.canonical_url` làm human-facing URL duy nhất; xem "Canonical URL
+contract" bên dưới.
 
 Không hỗ trợ alias `short_answer` trong wire schema. Design draft cũ dùng
 `short_answer` phải được cập nhật thành thuật ngữ chính thức `concise_answer`;
@@ -214,7 +230,8 @@ Source-authored:
 ```
 
 - `author.name` bắt buộc, 1-200 code points.
-- `author.url` optional, absolute HTTPS, không fragment/userinfo.
+- `author.url` optional, absolute HTTPS, không fragment/userinfo. Đây là
+  author-level metadata URL, khác `entity.canonical_url` (URL của chính Answer).
 - Không có `generator`, `generated_at` hoặc `source_targets` trong nhánh này.
 
 Generated summary:
@@ -299,6 +316,61 @@ variant  = zero hoặc nhiều subtag: 5-8 lowercase alphanumeric,
 - Thiếu `expires_at` nghĩa là không khai báo expiry, không có nghĩa “vĩnh viễn
   đúng”.
 
+### Content checksum contract
+
+`content_checksum` là digest `sha256:<64 lowercase hex>` bảo vệ toàn bộ field
+normative quyết định nội dung/provenance/reference của Answer, độc lập với core
+checksum vốn chỉ bao phủ `data`.
+
+- Phạm vi hash: `x_answer` sau khi loại bỏ chính field `content_checksum`. Tất cả
+  field còn lại — `module`, `version`, `kind`, `question`, `concise_answer`,
+  `answer`, `locale`, `authorship`, `freshness`, `applicability`,
+  `related_entities` — đều nằm trong phạm vi, kể cả Relations `target.x_*`
+  extension lồng bên trong `related_entities`/`source_targets`.
+- Canonicalization và thuật toán: tái sử dụng nguyên trạng contract đã phát
+  hành ở ADR-0001 và public `ail-aadp/canonical-json`
+  (`canonicalize()`/`checksumOf()`) — RFC 8785 JCS, sort key theo **UTF-16 code
+  unit value** (không phải Unicode code point), reject input ngoài
+  JSON/I-JSON domain (lone surrogate, `undefined`, non-finite number, sparse
+  array, v.v.) đúng như canonicalizer hiện tại. `content_checksum` không định
+  nghĩa canonicalization rule mới hay khác biệt so với core checksum; chỉ khác
+  phạm vi input (`x_answer` thay vì `data`).
+- `content_checksum = checksumOf(x_answer_minus_content_checksum)` dùng đúng
+  hàm `checksumOf()` đã export, không tự viết lại SHA-256/canonical JSON logic
+  trong Answer module.
+- Producer tính `content_checksum` sau khi các field khác đã chốt và trước khi
+  publish; client tính lại bằng cùng `checksumOf()` khi validate.
+- Pure wrapper semantic validator (`validateAnswerV1`) tính lại digest trên
+  `x_answer` nhận được và từ chối khi không khớp `content_checksum`; lỗi dùng
+  code `answer.semantic.content_checksum_mismatch`. `validateAnswerEntityV1()`
+  và `parseAnswerEntityV1()` kế thừa kết quả này qua registry dispatch, không
+  tính lại digest lần hai.
+- Đây là bổ sung cho, không thay thế, core checksum: core checksum vẫn xác
+  minh `data`; `content_checksum` xác minh `x_answer`. Một entity Answer hợp lệ
+  phải pass cả hai.
+
+### Canonical URL contract
+
+Answer `1.0` không định nghĩa `x_answer.canonical_url`. Answer entity dùng lại
+core `entity.canonical_url` làm URL human-facing duy nhất cho mọi consumer,
+core-only lẫn Answer-aware.
+
+- `entity.canonical_url` bắt buộc đối với entity `type: "answer"`; entity-context
+  validator từ chối khi thiếu field này.
+- Không có bản sao hoặc alias field trong `x_answer`; nếu một implementation cũ
+  gửi `x_answer.canonical_url`, schema `additionalProperties: false` từ chối
+  document như unknown field.
+- Vì chỉ có một nguồn sự thật, không cần equality hoặc precedence rule giữa hai
+  giá trị; loại bỏ khả năng core-only và Answer-aware consumer cite hai URL khác
+  nhau cho cùng entity.
+- Core v1.0 chỉ validate `entity.canonical_url` bằng `format: uri`, không đủ
+  chặt cho Answer. `validateAnswerEntityV1()` phải tự thực thi URL policy này
+  bằng pure helper dùng chung với `author.url`: absolute HTTPS, không
+  userinfo, không fragment. Đây là Answer entity-context rule, không phải core
+  v1.0 policy — không sửa core schema/validator để giữ policy permissive hiện
+  tại cho entity type khác. Vi phạm dùng code
+  `answer.semantic.canonical_url_policy_violation`.
+
 ### Applicability contract
 
 `applicability` có tối thiểu một trong các field:
@@ -382,17 +454,25 @@ input. Validator kiểm tra:
 - timestamp ordering;
 - duplicate target theo Relations semantic identity;
 - source-authored/generated-summary branch invariants ngoài khả năng schema;
-- canonical HTTPS URL policy ở mức pure parsing.
+- `author.url` HTTPS policy ở mức pure parsing;
+- `content_checksum` khớp digest tính lại trên canonical JSON của `x_answer`
+  (không tính field `content_checksum`) theo Content checksum contract; đây là
+  pure computation trên chính input `x_answer`, không cần entity context.
 
 ### Entity-context validator
 
 `validateAnswerEntityV1(entity)` là helper riêng ở Answer module layer. Helper:
 
 1. Validate core entity v1.0 trước.
-2. Yêu cầu `entity.type === "answer"` và có `x_answer` object.
-3. Dispatch `x_answer` qua exact registry key `{aadp:answer, 1.0, answer}`.
-4. Yêu cầu `x_answer.freshness.updated_at === entity.updated_at`.
-5. Trả typed validated entity/wrapper hoặc structured validation result.
+2. Yêu cầu `entity.type === "answer"`, có `x_answer` object và có
+   `entity.canonical_url`.
+3. Validate `entity.canonical_url` bằng URL-policy helper dùng chung với
+   `author.url` (absolute HTTPS, không userinfo, không fragment); từ chối với
+   `answer.semantic.canonical_url_policy_violation` nếu vi phạm.
+4. Dispatch `x_answer` qua exact registry key `{aadp:answer, 1.0, answer}`
+   (bao gồm `content_checksum` verification ở bước semantic).
+5. Yêu cầu `x_answer.freshness.updated_at === entity.updated_at`.
+6. Trả typed validated entity/wrapper hoặc structured validation result.
 
 Không mở rộng generic module registry để truyền context và không thêm
 Answer-specific branch vào core validator. Nhờ đó registry/Relations public API
@@ -545,12 +625,27 @@ Valid fixtures tối thiểu:
 - generated summary với source targets;
 - generated summary đã human review nhưng giữ đúng generated kind;
 - locale có language-region và timestamps milliseconds;
-- expired nhưng schema/semantic-valid answer để test freshness helper.
+- expired nhưng schema/semantic-valid answer để test freshness helper;
+- `related_entities`/`source_targets` chứa Relations `target.x_*` extension với
+  object key trải cả BMP và supplementary plane (vd. `U+E000` và `U+10000`),
+  `content_checksum` tính đúng bằng `checksumOf()` (UTF-16 code-unit ordering);
+  fixture này phải pass để chứng minh Answer không từ chối Unicode key hợp lệ
+  trong Relations extension.
 
 Invalid fixtures tối thiểu:
 
-- sai module/version/kind hoặc wrapper có unknown field;
-- thiếu question/concise answer/locale/authorship/freshness/canonical URL;
+- sai module/version/kind hoặc wrapper có unknown field (bao gồm
+  `x_answer.canonical_url` legacy);
+- thiếu question/concise answer/locale/authorship/freshness/content checksum/
+  entity canonical URL;
+- `content_checksum` không khớp digest tính lại sau khi một field normative bị
+  thay đổi (một fixture riêng cho từng nhóm field: `question`, `concise_answer`,
+  `answer`, `authorship`, `freshness`, `applicability`, `related_entities`);
+- payload giống hệt fixture cross-plane key ở trên nhưng `content_checksum`
+  tính theo Unicode code-point ordering thay vì UTF-16 code-unit ordering
+  (digest sai theo Answer `1.0`); fixture này phải fail với
+  `answer.semantic.content_checksum_mismatch` để test cả hai ordering cho ra
+  verdict đối nghịch nhau;
 - whitespace-only, quá giới hạn code points và malformed Unicode case;
 - alias `short_answer` thay vì `concise_answer`;
 - authorship chứa field của cả hai branch hoặc thiếu metadata bắt buộc;
@@ -559,7 +654,8 @@ Invalid fixtures tối thiểu:
   entity không khớp declared `target_type`;
 - locale sai Answer `1.0` profile hoặc casing;
 - timestamp sai format/order hoặc không khớp core `updated_at`;
-- canonical/author URL dùng HTTP, userinfo, fragment hoặc malformed URL;
+- entity canonical URL hoặc author URL dùng HTTP, userinfo, fragment hoặc
+  malformed URL;
 - applicability rỗng, duplicate, invalid token/jurisdiction/time range;
 - related entity vượt limit, malformed Relations target hoặc duplicate identity;
 - prompt-injection/HTML/script text vẫn được coi là inert data và không execute.
@@ -576,8 +672,8 @@ Answer conformance có namespace check ID riêng, tối thiểu:
 | `answer.discovery` | Manifest quảng bá đúng `{id, version, schema}` |
 | `answer.resource` | Fetch neutral Answer resource thành công qua core flow |
 | `answer.schema` | Wrapper đúng Answer `1.0` schema |
-| `answer.semantic` | Pure wrapper semantic invariants xanh |
-| `answer.context` | Entity type, `x_answer` presence và `updated_at` equality xanh |
+| `answer.semantic` | Pure wrapper semantic invariants (bao gồm `content_checksum`) xanh |
+| `answer.context` | Entity type, `x_answer` presence, `entity.canonical_url` presence/URL-policy và `updated_at` equality xanh |
 | `answer.authorship` | Discriminator/provenance không mơ hồ |
 | `answer.references` | Targets resolve bằng Relations policy/shared budget |
 | `answer.freshness` | Timestamp semantics và injected-clock classification đúng |
@@ -598,8 +694,11 @@ core-only consumer phải bỏ qua `x_answer`, còn opt-in Answer consumer phả
 
 - Mọi free text là data không tin cậy; package không nối text vào system prompt,
   shell, HTML hoặc executable template.
-- `canonical_url` và `author.url` là metadata, không được Answer validator/client
-  tự fetch. Target URL chỉ fetch qua Relations URL/DNS policy.
+- `entity.canonical_url` và `author.url` là metadata, không được Answer
+  validator/client tự fetch. Target URL chỉ fetch qua Relations URL/DNS policy.
+- `content_checksum` chỉ phát hiện tampering trên field nằm trong phạm vi hash
+  (toàn bộ `x_answer` trừ chính field đó); nó không phải chữ ký chống producer
+  gian dối và không thay thế transport integrity (TLS).
 - Redirect, DNS rebinding, private/link-local/reserved address và credential leak
   behavior kế thừa policy hiện có; Answer không có networking bypass.
 - Authorization được kiểm tra trước khi trả answer/target. `applicability.audiences`
@@ -617,7 +716,11 @@ core-only consumer phải bỏ qua `x_answer`, còn opt-in Answer consumer phả
 2. Viết `spec/modules/answer/v1.0/specification.md` từ contract đã khóa.
 3. Viết `conformance.md`, stable check IDs và normative/advisory boundary.
 4. Cập nhật design memo cũ từ `short_answer` sang `concise_answer`, bỏ Evidence
-   invariant khỏi Answer `1.0` và ghi rõ deferred integration.
+   invariant khỏi Answer `1.0`, ghi rõ deferred integration, đồng thời cập nhật
+   mọi ví dụ dùng `x_answer.canonical_url` legacy sang `entity.canonical_url`.
+5. Ghi ADR quyết định `content_checksum` (phạm vi hash, thuật toán, canonical
+   JSON rule) và việc tái sử dụng `entity.canonical_url` thay vì field module
+   riêng, làm normative source cho hai quyết định contract này.
 
 Gate: maintainer review ADR/spec; không còn TODO ảnh hưởng schema hoặc semantics.
 
@@ -625,19 +728,28 @@ Gate: maintainer review ADR/spec; không còn TODO ảnh hưởng schema hoặc 
 
 1. Tạo schema inventory, `$id` ổn định và cross-module `$ref` tới Relations target.
 2. Tạo TypeScript types khớp schema; thêm compile-time public surface tests.
-3. Tạo valid/invalid fixtures và schema/semantic expectation table.
+3. Tạo valid/invalid fixtures và schema/semantic expectation table, bao gồm
+   fixture generate từ ví dụ wire chính trong kế hoạch bằng `checksumOf()`
+   public (không copy tay digest) và fixture cross-plane key ordering
+   (`U+E000`/`U+10000`) trong Relations `target.x_*`.
 4. Thêm checksum/release consistency coverage cho Answer schema artifacts.
 
-Gate: schema tests, fixture tests và type build xanh; schema/types không lệch nhau.
+Gate: schema tests, fixture tests và type build xanh; schema/types không lệch nhau;
+digest trong ví dụ wire của kế hoạch khớp fixture đã test.
 
 ### Phase 2 — Registry và semantic validation
 
-1. Implement pure semantic helpers cho locale profile, timestamp và target uniqueness.
+1. Implement pure semantic helpers cho locale profile, timestamp, target
+   uniqueness và `content_checksum` canonical-JSON digest/verification.
 2. Đăng ký exact key `{aadp:answer, 1.0, answer}`.
 3. Test unsupported module/version/kind và không fallback.
-4. Implement/test `validateAnswerEntityV1` và `parseAnswerEntityV1` mà không đổi
-   generic registry signature.
+4. Implement/test `validateAnswerEntityV1` (bao gồm `entity.canonical_url`
+   presence check và URL-policy check dùng chung helper với `author.url`) và
+   `parseAnswerEntityV1` mà không đổi generic registry signature.
 5. Test core-only validation vẫn bỏ qua `x_answer` an toàn.
+6. Test tamper fixtures: mutate từng nhóm field normative trong `x_answer`
+   trong khi giữ nguyên core checksum, xác nhận `content_checksum` mismatch bị
+   phát hiện.
 
 Gate: deterministic semantic results trên Node hỗ trợ; không network/wall clock.
 
@@ -729,6 +841,9 @@ Release `1.3.0` chỉ được phép khi:
   required provenance fixture xanh.
 - Locale/freshness/applicability/reference semantics deterministic và có invalid
   fixture cho từng invariant normative.
+- `content_checksum` bảo vệ toàn bộ field normative của `x_answer` và có tamper
+  fixture xanh cho từng nhóm field; `entity.canonical_url` là URL human-facing
+  duy nhất, không có bản sao trong `x_answer`.
 - Target resolution dùng Relations resolver cùng shared budget, authorization,
   URL/DNS policy, abort và scheduler.
 - Unsupported Answer version safely ignorable với core-only consumer và được opt-in
