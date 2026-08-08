@@ -150,6 +150,39 @@ export function chargeNode(
 }
 
 /**
+ * Undoes exactly what `chargeNode` did for `id`/`url` — removes it from
+ * `visitedTargets` and decrements `nodesVisited` — for a resolution that
+ * was ABANDONED (e.g. cancelled) before producing any outcome a caller
+ * could observe, so a later, unrelated attempt at the same canonical
+ * target is not stuck permanently treating it as an already-resolved
+ * duplicate with nothing to replay.
+ *
+ * Callers MUST only invoke this for a canonical target they THEMSELVES
+ * charged and that never produced a `resolved`/`issue` outcome ANY caller
+ * observed (e.g. Answer's `resolveAnswerTargets`, when a canonical
+ * target's own internally-owned in-flight fetch is cancelled because no
+ * caller remains to receive its result) — never for a target that DID
+ * resolve, even if that particular caller is discarding the result for
+ * unrelated reasons, since that would let the same canonical target be
+ * charged (and potentially fetched) more than once, which `chargeNode`'s
+ * per-walk dedup guarantee forbids. No-op if `id`/`url`'s canonical key
+ * was never charged (e.g. already released, or charged by an unrelated
+ * caller this one has no business releasing).
+ *
+ * Deliberately NOT re-exported from `./index.ts` (the `ail-aadp/modules/
+ * relations/v1.0` public subpath): those preconditions are not checkable
+ * here, and an external caller releasing a charge for a target that did
+ * resolve would silently break `chargeNode`'s "fetched/charged at most
+ * once per walk" guarantee. Keep it module-internal.
+ */
+export function releaseNode(budget: RelationsTraversalBudgetState, id: string, url: string): void {
+  const key = canonicalTargetKey(id, url);
+  if (budget.visitedTargets.delete(key)) {
+    budget.nodesVisited--;
+  }
+}
+
+/**
  * Marks `{id, url}`'s outgoing relations as expanded. Returns `false`
  * (already expanded — the caller MUST NOT re-expand it) if this exact
  * canonical key was marked before, `true` otherwise. This is how a graph

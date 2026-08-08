@@ -34,7 +34,7 @@ import {
   UnsupportedAadpVersionError,
   BlockedUrlError,
 } from "../../../../client/v1.0/index.js";
-import { canonicalTargetKey } from "../../../relations/v1.0/client/budget.js";
+import { canonicalTargetKey, releaseNode } from "../../../relations/v1.0/client/budget.js";
 import type { EntityV1 } from "../../../../client/v1.0/types.js";
 import type { AnswerDocumentV1, AnswerEntityReferenceV1 } from "../types.js";
 import type { AnswerResolvedTargetEntry, AnswerResolvedTargets, AnswerReferenceGroup, AnswerTargetResolutionStatus } from "./types.js";
@@ -46,6 +46,34 @@ export interface AnswerResolveOptions extends RelationsClientOptions {
 
 function isGlobalStop(err: unknown): boolean {
   return err instanceof AadpDiscoveryBudgetExceededError || err instanceof AbortedError;
+}
+
+/**
+ * Awaits `promise` but rejects early with `AbortedError` if `signal` fires
+ * first — WITHOUT cancelling `promise` itself. A canonical target's
+ * underlying fetch (`resolveCanonicalTarget`) can be shared across several
+ * concurrent `resolveAnswerTargets` calls, each with its OWN independent
+ * `options.signal` (see `stateFor`'s docstring) — this is what keeps one
+ * caller's cancellation scoped to just that caller's own wait, never
+ * reaching (let alone killing) a fetch other callers are still relying on.
+ */
+function raceSignal<T>(promise: Promise<T>, signal: AbortSignal | undefined, url: string): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(new AbortedError(url, signal.reason));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new AbortedError(url, signal.reason));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      }
+    );
+  });
 }
 
 /**
@@ -167,13 +195,25 @@ function entryFor(
  * was already charged by some path outside this resolver's own cache —
  * see `resolveCanonicalTarget`'s caller) has no fetched entity or issue to
  * fall back on, so it is reported `invalid`, never guessed `resolved`.
+ *
+ * Takes `signal` as its own parameter rather than reading `options.signal`:
+ * this fetch is keyed by canonical target, not by caller, and may be shared
+ * by several concurrent `resolveAnswerTargets` calls each with their OWN
+ * independent signal (see `stateFor`'s docstring) — no single caller's
+ * `options.signal` may unilaterally cancel a fetch other callers still
+ * depend on. The caller below instead passes an INTERNAL `AbortController`'s
+ * signal, owned by and scoped to this one canonical fetch, aborted only once
+ * every reference waiting on it has stopped waiting (see `PendingFetch`) —
+ * so cancellation still actually happens (no zombie background request once
+ * truly nobody wants the result), just never at one caller's unilateral say.
  */
 async function resolveCanonicalTarget(
   reference: AnswerEntityReferenceV1,
   options: AnswerResolveOptions,
+  signal: AbortSignal,
   context: string
 ): Promise<CanonicalOutcome> {
-  const result = await resolveRelationTarget(reference.target, reference.target_type, options, options.budget, context);
+  const result = await resolveRelationTarget(reference.target, reference.target_type, { ...options, signal }, options.budget, context);
   // `resolveRelationTarget`'s own "resolved" status always sets `entity`
   // (`ResolvedRelationTarget.entity` is optional only for the hint-only
   // shape a Relations *traversal* can produce for an unfetched collection
@@ -205,34 +245,57 @@ async function resolveCanonicalTarget(
  *   `chargeNode` dedup honest (fetched/charged at most once per canonical
  *   target for the lifetime of the budget).
  * - `pending`: a canonical target's resolution while it is still in
- *   flight. This is what makes concurrent calls race-safe: a reference
- *   that finds neither `outcomes` nor `pending` populated for its
- *   canonical key becomes that key's "owner" and synchronously (before its
- *   first `await`) records its in-flight promise in `pending` — so any
- *   other reference for the same key, from this call OR a concurrently
- *   running call sharing the same budget, that runs before the owner's
- *   fetch settles finds `pending` already populated and awaits the SAME
- *   promise instead of racing `resolveRelationTarget` a second time (which
- *   would just get Relations' bare `duplicate` with nothing to replay).
- *   Cleared once the owner's promise settles; `outcomes` is the permanent
- *   record from then on.
- * - `globalStops`: the canonical key that was in flight when a global stop
- *   (`AadpDiscoveryBudgetExceededError`/`AbortedError`) hit it. `chargeNode`
- *   marks a target visited BEFORE the budget/cycle check that can still
- *   throw for it, so that one key's dedup entry survives the throw — a
- *   later call for the very same key gets Relations' bare `duplicate` with
- *   no budget re-check (every OTHER, not-yet-visited key still re-triggers
- *   the same monotonic budget/abort condition on its own, since none of
- *   `chargeNode`'s dimensions ever un-exceed once tripped). Without this,
- *   that one key alone would silently downgrade from the stop that
- *   produced it to a guessed `invalid` on any later replay. Recorded right
- *   before `pending` is cleared so a later lookup for this key is turned
- *   back into the same `budget-exhausted` stop instead of ever reaching
- *   `resolveCanonicalTarget` again.
+ *   flight, as a `PendingFetch` — the shared promise, the `AbortController`
+ *   that OWNS this fetch's cancellation (never any one caller's own
+ *   `options.signal` — see `resolveCanonicalTarget`'s docstring), and a
+ *   `waiters` count. This is what makes concurrent calls race-safe: a
+ *   reference that finds neither `outcomes` nor `pending` populated for its
+ *   canonical key creates the fetch and synchronously (before its first
+ *   `await`) records it in `pending` — so any other reference for the same
+ *   key, from this call OR a concurrently running call sharing the same
+ *   budget, that runs before the fetch settles finds `pending` already
+ *   populated and awaits the SAME promise instead of racing
+ *   `resolveRelationTarget` a second time (which would just get Relations'
+ *   bare `duplicate` with nothing to replay). Every reference that starts
+ *   waiting increments `waiters`; when the LAST one stops waiting (settled,
+ *   or bailed out early via its own `raceSignal`) with the fetch still in
+ *   flight, `waiters` hits `0` and the entry's `AbortController` is
+ *   aborted — real cancellation happens once truly nobody depends on the
+ *   result anymore, without any single caller being able to force it
+ *   unilaterally while others still wait. `pending`/`outcomes`/`globalStops`
+ *   are mutated exactly once, by a `.then()` attached to the shared promise
+ *   AT CREATION TIME — deliberately independent of how any individual
+ *   reference later awaits it, and guarded to only delete the entry it
+ *   itself created (never a NEWER entry a later reference may have since
+ *   started for the same key after this one was evicted).
+ * - `globalStops`: the canonical key that was in flight when a genuine
+ *   shared-budget exhaustion (`AadpDiscoveryBudgetExceededError`) hit it.
+ *   `chargeNode` marks a target visited BEFORE the budget/cycle check that
+ *   can still throw for it, so that one key's dedup entry survives the
+ *   throw — a later call for the very same key gets Relations' bare
+ *   `duplicate` with no budget re-check (every OTHER, not-yet-visited key
+ *   still re-triggers the same monotonic budget condition on its own,
+ *   since none of `chargeNode`'s dimensions ever un-exceed once tripped).
+ *   Without this, that one key alone would silently downgrade from the
+ *   stop that produced it to a guessed `invalid` on any later replay.
+ *   Deliberately NEVER records an `AbortedError`: cancellation via
+ *   `options.signal` is scoped to the ONE caller that passed that signal —
+ *   `resolveCanonicalTarget` doesn't even forward it to the shared fetch
+ *   (see its docstring) — so it must never poison a shared, budget-wide,
+ *   cross-caller record the way a real budget exhaustion legitimately does.
  */
+/** A canonical target's in-flight resolution — see `BudgetResolutionState.pending`. */
+interface PendingFetch {
+  promise: Promise<CanonicalOutcome>;
+  /** Owns this fetch's cancellation. Aborted only once `waiters` hits `0` — never by any one caller's own `options.signal`. */
+  controller: AbortController;
+  /** Count of references currently awaiting `promise` (this call or a concurrent one sharing the budget). */
+  waiters: number;
+}
+
 interface BudgetResolutionState {
   outcomes: Map<string, CanonicalOutcome>;
-  pending: Map<string, Promise<CanonicalOutcome>>;
+  pending: Map<string, PendingFetch>;
   globalStops: Map<string, Error>;
 }
 
@@ -282,14 +345,34 @@ function stateFor(budget: RelationsTraversalBudgetState): BudgetResolutionState 
  * inverse direction, where the triggering reference's type doesn't match
  * but a later reference's does.
  *
- * A global stop that hits a canonical key mid-flight is itself remembered
- * per key (`BudgetResolutionState.globalStops`) — a LATER reference (this
- * call or a later call) naming that exact key would otherwise see
- * Relations' bare `duplicate` (it was charged as visited right before the
- * throw) and misreport it `invalid`, silently downgrading a budget/abort
- * stop into a data error and reporting `partial: false` as if the walk had
- * completed. That later reference instead replays `budget-exhausted`
- * (`partial: true`) — the same terminal state the stop originally produced.
+ * A shared-budget exhaustion that hits a canonical key mid-flight is itself
+ * remembered per key (`BudgetResolutionState.globalStops`) — a LATER
+ * reference (this call or a later call) naming that exact key would
+ * otherwise see Relations' bare `duplicate` (it was charged as visited
+ * right before the throw) and misreport it `invalid`, silently downgrading
+ * a budget stop into a data error and reporting `partial: false` as if the
+ * walk had completed. That later reference instead replays
+ * `budget-exhausted` (`partial: true`) — the same terminal state the stop
+ * originally produced.
+ *
+ * `options.signal` is scoped to the ONE `resolveAnswerTargets` call it was
+ * passed to, even for a canonical target whose fetch is shared with other
+ * concurrent calls on the same budget: a canonical target's underlying
+ * fetch is never tied to any individual caller's signal (`resolveCanonicalTarget`
+ * takes an internally-owned one instead), and each reference races only its
+ * OWN wait for that shared fetch against its OWN `options.signal`
+ * (`raceSignal`). So one caller aborting cannot make an unrelated
+ * concurrent caller's reference fail, cannot make it silently succeed off a
+ * fetch it wanted no part of, and never gets recorded as a shared-budget-wide
+ * stop — only a genuine `AadpDiscoveryBudgetExceededError` is (`globalStops`,
+ * above). Cancellation still actually happens, just never unilaterally: a
+ * reference whose `options.signal` is ALREADY aborted never starts a new
+ * fetch at all (no charge, no HTTP request on behalf of a call that already
+ * gave up), and a canonical target's real, underlying fetch — still
+ * in-flight, still consuming shared `maxRequests`/`maxTotalBytes` budget —
+ * is genuinely cancelled the moment its LAST remaining waiter stops waiting
+ * (`PendingFetch.waiters` reaching `0`), rather than left to run to
+ * completion in the background against nobody.
  */
 export async function resolveAnswerTargets(
   answer: AnswerDocumentV1,
@@ -328,32 +411,111 @@ export async function resolveAnswerTargets(
     if (!canonical) {
       // No settled outcome yet. Join an in-flight fetch for this canonical
       // key if one is already running (this call or a concurrent one over
-      // the same budget); otherwise become its owner. Everything up to and
-      // including `pending.set` below is synchronous — no `await` — so no
-      // other reference can observe a state where the key is charged
-      // (`resolveCanonicalTarget` -> `resolveRelationTarget` ->
-      // `chargeNode`) without also being in `pending`.
-      let inflight = pending.get(key);
-      const isOwner = !inflight;
-      if (!inflight) {
-        inflight = resolveCanonicalTarget(reference, options, `answer.${group}[${index}]`);
-        pending.set(key, inflight);
+      // the same budget); otherwise start one — but never for a reference
+      // whose own signal is ALREADY aborted: it must not charge/start real
+      // work (`resolveCanonicalTarget` -> `resolveRelationTarget` ->
+      // `chargeNode` -> HTTP) on behalf of a call that has already given
+      // up. Everything up to and including `pending.set` below is
+      // synchronous — no `await` — so no other reference can observe a
+      // state where the key is charged without also being in `pending`.
+      let entry = pending.get(key);
+      if (!entry && options.signal?.aborted) {
+        partial = true;
+        items.push({
+          group,
+          index,
+          reference,
+          status: "budget-exhausted",
+          message: new AbortedError(reference.target.url, options.signal.reason).message,
+        });
+        continue;
       }
+      if (!entry) {
+        const controller = new AbortController();
+        const promise = resolveCanonicalTarget(reference, options, controller.signal, `answer.${group}[${index}]`);
+        entry = { promise, controller, waiters: 0 };
+        pending.set(key, entry);
+        // Settle shared bookkeeping exactly once, driven by the fetch's OWN
+        // outcome — not by whichever reference happens to be awaiting it
+        // below, since `raceSignal` lets any individual reference bail out
+        // of its own wait early without affecting this shared promise or
+        // its eventual result. See `BudgetResolutionState`.
+        //
+        // `pending.get(key) === entry` gates the WHOLE settlement, not just
+        // the eviction: once `waiters` hit `0` this attempt was abandoned
+        // and synchronously evicted/released/aborted (see the `finally`
+        // below), so it is no longer this key's current attempt and MUST
+        // NOT commit anything. It can still settle afterwards — an abort
+        // landing after the transport's own last cancellation check leaves
+        // a purely synchronous tail, so the promise resolves successfully
+        // even though nobody is waiting — and committing that would cache a
+        // response for a request its caller already abandoned, quite
+        // possibly over a NEWER attempt already in flight for the same key
+        // under different options. Same for `globalStops`: skipping a
+        // budget error here loses nothing, since every budget dimension is
+        // monotonic and the replacement attempt re-trips it on its own.
+        // Releasing the node charge is likewise never done here — that also
+        // happens synchronously at abandonment, because by now a new
+        // attempt may already hold the charge and releasing THAT would be a
+        // stale-promise ABA bug.
+        promise.then(
+          (settled) => {
+            if (pending.get(key) !== entry) return;
+            pending.delete(key);
+            outcomes.set(key, settled);
+          },
+          (err) => {
+            if (pending.get(key) !== entry) return;
+            pending.delete(key);
+            if (err instanceof AadpDiscoveryBudgetExceededError) globalStops.set(key, err);
+          }
+        );
+      }
+      entry.waiters++;
       try {
-        canonical = await inflight;
+        canonical = await raceSignal(entry.promise, options.signal, reference.target.url);
       } catch (err) {
-        if (isOwner) pending.delete(key);
         if (isGlobalStop(err)) {
-          if (isOwner) globalStops.set(key, err as Error);
           partial = true;
           items.push({ group, index, reference, status: "budget-exhausted", message: (err as Error).message });
           continue;
         }
         throw err;
-      }
-      if (isOwner) {
-        pending.delete(key);
-        outcomes.set(key, canonical);
+      } finally {
+        entry.waiters--;
+        // `pending.get(key) === entry` is true here iff this fetch has NOT
+        // already settled through its normal completion path — the
+        // creation-time `.then()` above (registered before any waiter's
+        // own await) always runs, and evicts this exact `entry`, before a
+        // waiter's own `raceSignal`-wrapped await can resume from a NORMAL
+        // settle. It reads false only once that has already happened
+        // (nothing left to abandon — `outcomes`/`globalStops` already has
+        // the real, permanent result) — or once some other waiter already
+        // abandoned this very entry (only possible after eviction, so no
+        // waiter still holding this `entry` can observe `waiters` fall to
+        // `0` a second time for it).
+        if (entry.waiters === 0 && pending.get(key) === entry) {
+          // Still genuinely in flight, and now has zero dependents:
+          // abandon it. Evicted synchronously, right now — NOT left for
+          // the (async) rejection this abort is about to cause to clean up
+          // later — so a reference arriving even immediately after this
+          // point can never join a fetch that's already been abandoned; it
+          // starts a fresh attempt instead. `chargeNode` already marked
+          // this canonical key visited before the fetch started, so that
+          // fresh attempt also needs the charge released right now — not
+          // deferred to the fetch's own eventual rejection, which could
+          // settle after an arbitrary number of later callers have already
+          // run — otherwise every later, unrelated attempt at this exact
+          // target would see Relations' bare `duplicate` and be stuck
+          // reporting `invalid` forever. Finally, actually cancel the real
+          // underlying HTTP work rather than leaving it to complete in the
+          // background against nobody, still consuming shared
+          // `maxRequests`/`maxTotalBytes` budget for a result no caller
+          // remains to receive.
+          pending.delete(key);
+          releaseNode(options.budget, reference.target.id, reference.target.url);
+          entry.controller.abort(new AbortedError(reference.target.url, "no caller is waiting on this canonical target's resolution anymore"));
+        }
       }
     }
     items.push({ group, index, reference, ...entryFor(reference, canonical) });

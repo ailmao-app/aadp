@@ -38,13 +38,20 @@ function runnerVersion(): string {
  * `deadlineMs`, `maxTotalBytes`) require at least 1 — `0` there would make
  * the very first request impossible and indistinguishable from a
  * misconfiguration. `maxRedirects: 0` ("do not follow redirects") is a
- * meaningful policy, not a mistake, so it allows `0`. The Relations
- * traversal dimensions added for Answer target resolution (`maxDepth`,
- * `maxNodes`, `maxRequests`, `maxCrossOriginRequests`) also allow `0` —
- * unlike the transport dimensions, `0` there is an intentional, exercised
- * boundary (stop before resolving even the first target — see
- * `resolveAnswerTargets`' own global-stop-on-first-target regression test),
- * not a configuration mistake.
+ * meaningful policy, not a mistake, so it allows `0`. `maxRequests` is
+ * charged for EVERY HTTP attempt this run makes (`chargeDiscoveryBudgetRequest`
+ * in `../../../../client/http.ts`) — manifest discovery and the sample
+ * entity fetch, not just Answer target resolution — so `0` blocks the
+ * whole run exactly like the transport dimensions above and requires at
+ * least 1 for the same reason. `maxDepth`, `maxNodes`, and
+ * `maxCrossOriginRequests` are scoped narrowly enough that `0` stays a
+ * meaningful, exercised boundary rather than a whole-run blocker: `maxDepth`/
+ * `maxNodes` only gate Relations' own per-target `chargeDepth`/`chargeNode`
+ * during Answer target resolution (stop before resolving even the first
+ * target — see `resolveAnswerTargets`' own global-stop-on-first-target
+ * regression test), never the manifest/sample-entity fetch; `maxCrossOriginRequests`
+ * only gates requests whose origin differs from the run's own, so `0` still
+ * permits every same-origin request a normal run makes.
  */
 const NUMERIC_OPTION_MINIMUMS = {
   timeoutMs: 1,
@@ -55,7 +62,7 @@ const NUMERIC_OPTION_MINIMUMS = {
   maxTotalBytes: 1,
   maxDepth: 0,
   maxNodes: 0,
-  maxRequests: 0,
+  maxRequests: 1,
   maxCrossOriginRequests: 0,
 } as const satisfies Record<string, number>;
 

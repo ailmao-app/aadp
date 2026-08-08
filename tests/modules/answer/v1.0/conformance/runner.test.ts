@@ -134,6 +134,11 @@ describe("runAnswerConformance — invalid options", () => {
     ["maxTotalBytes", 0],
     ["maxRedirects", -1],
     ["maxNodes", -1],
+    // maxRequests is charged for every HTTP attempt this run makes —
+    // manifest discovery and the sample entity fetch, not just Answer
+    // target resolution — so 0 blocks the whole run, not just a
+    // traversal-scoped boundary. See NUMERIC_OPTION_MINIMUMS's docstring.
+    ["maxRequests", 0],
     ["maxPages", Number.NaN],
     ["timeoutMs", 1.5],
     ["deadlineMs", Number.POSITIVE_INFINITY],
@@ -143,6 +148,11 @@ describe("runAnswerConformance — invalid options", () => {
 
   it("accepts maxNodes = 0 and maxDepth = 0 — a legitimate 'stop before the first target' traversal boundary, not a mistake", async () => {
     const report = await runAnswerConformance({ maxNodes: 0, maxDepth: 0 });
+    expect(report.status).not.toBe("failed");
+  });
+
+  it("accepts maxCrossOriginRequests = 0, which only blocks cross-origin requests, not the whole run", async () => {
+    const report = await runAnswerConformance({ maxCrossOriginRequests: 0 });
     expect(report.status).not.toBe("failed");
   });
 

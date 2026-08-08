@@ -78,11 +78,18 @@ request đầu tiên — và ném `InvalidAnswerConformanceOptionsError` cho gi�
 không dùng được (`NaN`/không phải số nguyên/âm/dưới minimum của option đó,
 hoặc `now` không phải Date hợp lệ). Một lỗi cấu hình của caller KHÔNG BAO GIỜ
 được ghi thành `status: "failed"` cho deployment đang test. `maxRedirects`,
-`maxDepth`, `maxNodes`, `maxRequests`, `maxCrossOriginRequests` cho phép `0`
-như một giá trị ranh giới hợp lệ (ví dụ dừng traversal trước cả target đầu
-tiên); các dimension transport/core khác (`timeoutMs`, `maxResponseBytes`,
-`maxPages`, `deadlineMs`, `maxTotalBytes`, `retry.maxAttempts`) yêu cầu tối
-thiểu 1 vì `0` ở đó khiến request đầu tiên không thể thực hiện được.
+`maxDepth`, `maxNodes`, `maxCrossOriginRequests` cho phép `0` như một giá trị
+ranh giới hợp lệ, vì phạm vi của chúng đủ hẹp để không chặn cả run: `maxDepth`/
+`maxNodes` chỉ charge riêng cho Relations resolve từng Answer target (ví dụ
+dừng traversal trước cả target đầu tiên), không áp dụng cho manifest/sample
+entity fetch; `maxCrossOriginRequests` chỉ chặn request khác origin, request
+cùng origin của một run bình thường vẫn đi qua bình thường. Ngược lại,
+`maxRequests` được charge cho MỌI HTTP attempt của cả run — kể cả manifest
+discovery và sample entity fetch, không chỉ Answer target resolution — nên
+nó yêu cầu tối thiểu 1 giống các dimension transport/core khác (`timeoutMs`,
+`maxResponseBytes`, `maxPages`, `deadlineMs`, `maxTotalBytes`,
+`retry.maxAttempts`), vì `0` ở bất kỳ dimension nào trong nhóm này khiến
+request đầu tiên của cả run không thể thực hiện được.
 
 ## 6. Unsupported version
 

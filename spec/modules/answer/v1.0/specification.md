@@ -389,16 +389,60 @@ Relations traversal thô trên cùng budget) không có gì đáng tin để rep
 join — trường hợp đó PHẢI báo `invalid`, không được báo `resolved`, vì một
 duplicate chưa xác minh không phải bằng chứng đã resolve thành công.
 
-Nếu một global stop (`AadpDiscoveryBudgetExceededError`/abort qua
-`options.signal`) xảy ra đúng lúc canonical key T đang in-flight, `chargeNode`
-đã ghi T vào `visitedTargets` TRƯỚC khi ném lỗi, nên T trở thành "duplicate"
-vĩnh viễn với Relations dù chưa có outcome thật. `resolveAnswerTargets` PHẢI
-tự nhớ riêng key T đã dừng vì global stop (gắn theo `options.budget`, không
-chỉ một lần gọi) và replay `status: "budget-exhausted"`/`partial: true` cho
-mọi occurrence sau của đúng key đó — kể cả ở một lời gọi `resolveAnswerTargets`
-khác sau này share cùng budget — thay vì để nó rơi vào nhánh duplicate-không-
-outcome và bị báo nhầm `invalid`/`partial:false` như thể budget đã dừng nhưng
-target này lại hỏng dữ liệu.
+Nếu `AadpDiscoveryBudgetExceededError` xảy ra đúng lúc canonical key T đang
+in-flight, `chargeNode` đã ghi T vào `visitedTargets` TRƯỚC khi ném lỗi, nên T
+trở thành "duplicate" vĩnh viễn với Relations dù chưa có outcome thật.
+`resolveAnswerTargets` PHẢI tự nhớ riêng key T đã dừng vì budget exceeded
+(gắn theo `options.budget`, không chỉ một lần gọi) và replay
+`status: "budget-exhausted"`/`partial: true` cho mọi occurrence sau của đúng
+key đó — kể cả ở một lời gọi `resolveAnswerTargets` khác sau này share cùng
+budget — thay vì để nó rơi vào nhánh duplicate-không-outcome và bị báo nhầm
+`invalid`/`partial:false` như thể budget đã dừng nhưng target này lại hỏng
+dữ liệu.
+
+`options.signal` (abort) KHÔNG được đối xử như một global stop chia sẻ theo
+budget — nó chỉ scope theo đúng MỘT lời gọi `resolveAnswerTargets` đã truyền
+signal đó, kể cả khi target đang resolve là một canonical fetch dùng chung
+với call khác (cùng call tuần tự sau, hoặc một call đang chạy đồng thời trên
+cùng budget). Canonical fetch dùng chung KHÔNG BAO GIỜ được gắn trực tiếp với
+`options.signal` của riêng một caller nào — nó dùng một `AbortController` nội
+bộ do chính resolver sở hữu, chỉ abort khi KHÔNG còn occurrence nào chờ kết
+quả (đếm số waiter, giảm khi một occurrence rời wait — kể cả rời sớm do
+chính `options.signal` của nó abort — abort internal controller khi đếm về
+0). Mỗi occurrence chỉ race chính wait của nó với đúng `options.signal` nó
+nhận, không phải với fetch chung. Vì vậy: (a) một caller abort signal của
+chính mình chỉ khiến call đó dừng (`partial: true`/`budget-exhausted` cho các
+reference còn lại của CHÍNH call đó), không ảnh hưởng call khác đang chờ cùng
+canonical fetch; (b) một canonical fetch KHÔNG bị hủy chỉ vì MỘT TRONG NHIỀU
+caller đang chờ nó đã abort — caller khác vẫn nhận outcome thật khi fetch
+xong — nhưng KHÔNG bị bỏ chạy ngầm vô thời hạn sau khi caller CUỐI CÙNG còn
+chờ nó cũng đã rời đi: request HTTP thật sự bị hủy ngay khi không còn ai phụ
+thuộc kết quả, để không tiếp tục tiêu `maxRequests`/`maxTotalBytes` cho một
+kết quả không còn ai nhận; (c) một occurrence có `options.signal` ĐÃ abort từ
+trước KHÔNG BAO GIỜ được phép khởi tạo fetch mới (không charge, không gửi
+request) thay mặt một call đã bỏ cuộc từ đầu; (d) `AbortedError` KHÔNG BAO
+GIỜ được ghi vào state global-stop theo budget — chỉ
+`AadpDiscoveryBudgetExceededError` (một kết luận thật sự chia sẻ theo budget)
+mới được nhớ và replay cho occurrence sau; một abort không được phép "đầu độc"
+budget khiến mọi call khác — kể cả call dùng signal mới, chưa từng abort —
+vĩnh viễn nhận `budget-exhausted` cho target đó; (e) khi waiter cuối cùng rời
+đi và fetch bị abandon (đếm waiter về 0 trong lúc canonical fetch chưa settle
+qua đường hoàn tất bình thường của nó), resolver PHẢI release ngay lập tức,
+ĐỒNG BỘ trong đúng tick đó — không trì hoãn đến khi promise của fetch bị hủy
+thật sự settle — charge `chargeNode` đã ghi cho canonical key đó (qua
+`releaseNode` của Relations budget), để một call sau (kể cả gọi ngay lập tức
+sau khi call bị abort vừa trả về, không cần chờ fetch bị hủy settle xong)
+có thể bắt đầu một resolution mới hợp lệ cho đúng target đó thay vì mãi mãi
+gặp Relations `duplicate` và bị báo `invalid`; (f) một attempt ĐÃ bị abandon
+KHÔNG BAO GIỜ được commit bất kỳ shared state nào khi nó settle muộn sau đó —
+không ghi outcome, không ghi global stop. Một attempt bị hủy vẫn có thể settle
+thành công (abort đến sau lần kiểm tra cancellation cuối cùng của transport
+chỉ còn lại phần đuôi đồng bộ), và khi đó nó KHÔNG còn là attempt hiện hành
+của canonical key đó: commit nó sẽ cache response mà chính caller đã bỏ, có
+thể đè lên một attempt MỚI đang chạy cho cùng key với options khác. Bỏ qua
+budget error của một attempt đã abandon cũng không mất mát gì, vì mọi
+dimension của budget đều đơn điệu — attempt thay thế sẽ tự trip lại đúng giới
+hạn đó.
 
 Trạng thái mỗi entry: `resolved | forbidden | not-found | invalid |
 budget-exhausted`; không trả partial result như thể complete. Phân loại dựa

@@ -384,6 +384,168 @@ describe("resolveAnswerTargets — generated-summary source_targets", () => {
     expect(budget.nodesVisited).toBe(1);
   });
 
+  it("aborting a joiner's own signal only stops that joiner — the owner call still resolves normally (P1: waiter-level cancellation)", async () => {
+    server = await startServer((_req, res) => {
+      // Delay so the joiner's abort fires while the owner's fetch is still in flight.
+      setTimeout(() => sendJson(res, 200, serviceEntity("x:joiner-abort")), 30);
+    });
+    const sharedTarget = { target_type: "x", target: { id: "x:joiner-abort", url: `${server.baseUrl}/entities/x/joiner-abort.json` } };
+    const budget = createRelationsTraversalBudget();
+    const ownerAnswer = withRelatedEntities([sharedTarget]);
+    const joinerAnswer = withGeneratedSourceTargets([sharedTarget]);
+    const joinerController = new AbortController();
+
+    // Invoked first, so it synchronously becomes the owner of the shared
+    // in-flight fetch before the joiner call below even starts.
+    const ownerPromise = resolveAnswerTargets(ownerAnswer, { ...PERMISSIVE, budget });
+    const joinerPromise = resolveAnswerTargets(joinerAnswer, { ...PERMISSIVE, budget, signal: joinerController.signal });
+    setTimeout(() => joinerController.abort(), 5);
+
+    const [ownerResult, joinerResult] = await Promise.all([ownerPromise, joinerPromise]);
+    // The joiner's own cancellation stops only the joiner's own wait.
+    expect(joinerResult.partial).toBe(true);
+    expect(joinerResult.items[0].status).toBe("budget-exhausted");
+    // The owner — a different caller, different signal — is unaffected and
+    // still gets the real result once the shared fetch completes.
+    expect(ownerResult.partial).toBe(false);
+    expect(ownerResult.items[0].status).toBe("resolved");
+  });
+
+  it("aborting the owner's own signal does not fail a concurrent joiner, and does not poison the budget for a later call (P1: owner-abort isolation)", async () => {
+    server = await startServer((_req, res) => {
+      setTimeout(() => sendJson(res, 200, serviceEntity("x:owner-abort")), 30);
+    });
+    const sharedTarget = { target_type: "x", target: { id: "x:owner-abort", url: `${server.baseUrl}/entities/x/owner-abort.json` } };
+    const budget = createRelationsTraversalBudget();
+    const ownerAnswer = withRelatedEntities([sharedTarget]);
+    const joinerAnswer = withGeneratedSourceTargets([sharedTarget]);
+    const ownerController = new AbortController();
+
+    const ownerPromise = resolveAnswerTargets(ownerAnswer, { ...PERMISSIVE, budget, signal: ownerController.signal });
+    const joinerPromise = resolveAnswerTargets(joinerAnswer, { ...PERMISSIVE, budget });
+    setTimeout(() => ownerController.abort(), 5);
+
+    const [ownerResult, joinerResult] = await Promise.all([ownerPromise, joinerPromise]);
+    // The owner's own cancellation stops only the owner's own wait — it
+    // must not reach (let alone kill) the shared fetch other callers rely on.
+    expect(ownerResult.partial).toBe(true);
+    expect(ownerResult.items[0].status).toBe("budget-exhausted");
+    // The joiner, on a different signal, still resolves normally.
+    expect(joinerResult.partial).toBe(false);
+    expect(joinerResult.items[0].status).toBe("resolved");
+
+    // A later, unrelated call for the same target on the same budget must
+    // not be poisoned by the earlier owner's cancellation — only a genuine
+    // shared-budget exhaustion is remembered as a permanent stop, never a
+    // caller-scoped abort.
+    const laterAnswer = withRelatedEntities([sharedTarget]);
+    const laterResult = await resolveAnswerTargets(laterAnswer, { ...PERMISSIVE, budget });
+    expect(laterResult.partial).toBe(false);
+    expect(laterResult.items[0].status).toBe("resolved");
+  });
+
+  it("never starts a fetch/charges the budget for a reference whose signal is already aborted (P2: pre-aborted signal)", async () => {
+    let requestCount = 0;
+    server = await startServer((_req, res) => {
+      requestCount++;
+      sendJson(res, 200, serviceEntity("x:pre-aborted"));
+    });
+    const answer = withRelatedEntities([
+      { target_type: "x", target: { id: "x:pre-aborted", url: `${server.baseUrl}/entities/x/pre-aborted.json` } },
+    ]);
+    const budget = createRelationsTraversalBudget();
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await resolveAnswerTargets(answer, { ...PERMISSIVE, budget, signal: controller.signal });
+    expect(result.partial).toBe(true);
+    expect(result.items[0].status).toBe("budget-exhausted");
+    expect(requestCount).toBe(0);
+    expect(budget.nodesVisited).toBe(0);
+  });
+
+  it("cancels the real underlying HTTP request once the sole caller's signal aborts mid-flight, not just its own wait (P2: real cancellation)", async () => {
+    let serverObservedAbort = false;
+    server = await startServer((req, res) => {
+      req.on("aborted", () => {
+        serverObservedAbort = true;
+      });
+      req.on("close", () => {
+        if (!res.writableEnded) serverObservedAbort = true;
+      });
+      // Deliberately never responds — the only way this request ends is a
+      // client-side abort of the underlying connection.
+    });
+    const answer = withRelatedEntities([
+      { target_type: "x", target: { id: "x:sole-abort", url: `${server.baseUrl}/entities/x/sole-abort.json` } },
+    ]);
+    const budget = createRelationsTraversalBudget();
+    const controller = new AbortController();
+    const resultPromise = resolveAnswerTargets(answer, { ...PERMISSIVE, budget, signal: controller.signal });
+    setTimeout(() => controller.abort(), 20);
+
+    const result = await resultPromise;
+    expect(result.partial).toBe(true);
+    expect(result.items[0].status).toBe("budget-exhausted");
+    // Give the server a moment to observe the client-side connection close.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(serverObservedAbort).toBe(true);
+  });
+
+  it("does not poison a later call for the same target issued immediately after a sole-waiter abort (P1: post-abort retry availability)", async () => {
+    let requestCount = 0;
+    server = await startServer((_req, res) => {
+      requestCount++;
+      if (requestCount === 1) {
+        // First request: never responds — this is the one that gets aborted.
+        return;
+      }
+      sendJson(res, 200, serviceEntity("x:retry-immediate"));
+    });
+    const targetRef = { target_type: "x", target: { id: "x:retry-immediate", url: `${server.baseUrl}/entities/x/retry-immediate.json` } };
+    const budget = createRelationsTraversalBudget();
+    const controller = new AbortController();
+    const firstPromise = resolveAnswerTargets(withRelatedEntities([targetRef]), { ...PERMISSIVE, budget, signal: controller.signal });
+    setTimeout(() => controller.abort(), 20);
+    const firstResult = await firstPromise;
+    expect(firstResult.partial).toBe(true);
+    expect(firstResult.items[0].status).toBe("budget-exhausted");
+
+    // Issued immediately after the aborted call returns (before the
+    // abandoned fetch's own rejection has necessarily settled) — must not
+    // be permanently stuck reporting "invalid: already visited elsewhere"
+    // just because the first, abandoned attempt already charged the budget.
+    const laterResult = await resolveAnswerTargets(withRelatedEntities([targetRef]), { ...PERMISSIVE, budget });
+    expect(laterResult.partial).toBe(false);
+    expect(laterResult.items[0].status).toBe("resolved");
+    expect(budget.nodesVisited).toBe(1);
+  });
+
+  it("does not poison a later call for the same target after the abandoned fetch's own rejection has settled (P1: post-abort retry availability, settled)", async () => {
+    let requestCount = 0;
+    server = await startServer((_req, res) => {
+      requestCount++;
+      if (requestCount === 1) return;
+      sendJson(res, 200, serviceEntity("x:retry-settled"));
+    });
+    const targetRef = { target_type: "x", target: { id: "x:retry-settled", url: `${server.baseUrl}/entities/x/retry-settled.json` } };
+    const budget = createRelationsTraversalBudget();
+    const controller = new AbortController();
+    const firstPromise = resolveAnswerTargets(withRelatedEntities([targetRef]), { ...PERMISSIVE, budget, signal: controller.signal });
+    setTimeout(() => controller.abort(), 20);
+    const firstResult = await firstPromise;
+    expect(firstResult.partial).toBe(true);
+    expect(firstResult.items[0].status).toBe("budget-exhausted");
+
+    // Give the abandoned fetch's own rejection time to fully settle before
+    // retrying — same verdict as the immediate-retry case above.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const laterResult = await resolveAnswerTargets(withRelatedEntities([targetRef]), { ...PERMISSIVE, budget });
+    expect(laterResult.partial).toBe(false);
+    expect(laterResult.items[0].status).toBe("resolved");
+    expect(budget.nodesVisited).toBe(1);
+  });
+
   it("re-validates a duplicate against its OWN target_type even when the triggering occurrence's declared type was wrong (P1: inverse wrong-type -> correct-type)", async () => {
     server = await startServer((_req, res) => sendJson(res, 200, serviceEntity("x:inverse", "document")));
     const answer = buildXAnswer({
