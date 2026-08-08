@@ -772,7 +772,11 @@ describe("invalid input", () => {
       await oneHop.close();
       await twoHops.close();
     }
-  });
+    // Four full conformance runs in one test, each making the whole check
+    // sequence over loopback HTTP. That legitimately exceeds Vitest's 5s
+    // default on a loaded machine, so the default made this test flaky
+    // rather than catching a real regression.
+  }, 30_000);
 
   it("rejects a negative target that is not an http(s) URL", async () => {
     await expect(
