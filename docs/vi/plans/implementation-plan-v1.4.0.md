@@ -9,7 +9,7 @@
 | Dependency | Relations `1.0` stable; Answer `1.0` stable; ADR-0010 (citation/provenance/security) Accepted |
 | Wire impact | Module riêng `aadp:evidence@1.0`; generic server capability là additive public API của `ail-aadp/server`; KHÔNG sửa `aadp:answer@1.0` |
 | Nợ kế thừa | Hai release gate của `1.3.0` được defer sang release này — xem [roadmap §10](release-roadmap.md) và [implementation record 1.3.0](../../records/implementation-record-v1.3.0.md) |
-| Review | [implementation-plan-v1.4.0-review.md](implementation-plan-v1.4.0-review.md) — kế hoạch này được viết lại để đóng finding 3, 4, 5, 6; finding 1 và 2 vẫn là gate ở Phase 0 |
+| Review | [implementation-plan-v1.4.0-review.md](implementation-plan-v1.4.0-review.md) — kế hoạch này được viết lại để đóng finding 3, 4, 5, 6; finding 1 và 2 vẫn là gate ở Phase 0. Vòng review thứ hai chỉnh thêm: extension grammar phải bằng core, model là acyclic (bỏ cycle/self-reference machinery), `source.access` không tham gia authorization, và `retrieved_at` dùng ordering thay vì equality |
 | Owner | AADP maintainers |
 
 ## Trạng thái theo work package
@@ -84,7 +84,9 @@ tương ứng trong §"Quyết định contract đề xuất":
 - publisher identity và precedence của provenance timestamp;
 - confidence scale, nguồn tạo confidence và ý nghĩa từng stance;
 - xử lý private, authenticated và cross-origin source;
-- cycle nào hợp lệ, cycle nào phải reject.
+- có tồn tại reverse edge evidence → claim hay không; nếu ADR-0010 quyết định
+  thêm thì mới phát sinh cycle policy, còn model đề xuất trong tài liệu này là
+  acyclic by construction.
 
 Nếu ADR-0010 đổi bất kỳ quyết định nào bên dưới thì phải cập nhật kế hoạch này
 **trước khi** tạo wire artifact. Released schema là immutable theo
@@ -195,7 +197,7 @@ Claim document:
 | `kind` | Có | Hằng `claim` |
 | `statement` | Có | String đã trim, 1-1.000 Unicode code points |
 | `locale` | Có | Cùng deterministic BCP 47 profile với Answer `1.0` |
-| `evidence_refs` | Có | 1-50 evidence reference, không trùng canonical target |
+| `evidence_refs` | Có | 1-50 evidence reference (`target_type` hằng `evidence`), không trùng canonical target |
 | `content_checksum` | Có | `sha256:<64 hex>` theo Content checksum contract |
 | `notes` | Không | Untrusted text 1-1.000 code points, không có normative effect |
 
@@ -222,15 +224,23 @@ Source object:
 | `publisher.url` | Không | Absolute HTTPS, không userinfo, không fragment |
 | `access` | Có | Enum `public` \| `authenticated` \| `restricted` |
 
-`access` là **assertion của producer**, không phải kết quả kiểm tra. Nó quyết
-định traversal policy (xem §"Graph và traversal policy") nhưng không cấp và
-không thu hồi quyền truy cập; server vẫn dùng core/Relations authorization.
+`access` là **assertion của producer về source URL**, không phải kết quả kiểm
+tra, và **không tham gia bất kỳ quyết định traversal hay conformance nào**. Nó
+mô tả source nằm ngoài AADP — thứ mà `1.0` không bao giờ fetch — chứ không mô tả
+security của evidence resource; giá trị hợp lệ duy nhất của nó là presentation
+(hiển thị cho người đọc biết source có paywall/đăng nhập hay không). Authorization
+của chính evidence entity do core/Relations authorization và manifest `security`
+declaration quyết định. Nếu sau này có API retrieval cho source thì `access` mới
+có thêm vai trò, và phải do ADR-0010 hoặc một module version mới định nghĩa.
 
 ### Reference identity và deduplicate
 
 - Evidence reference dùng component `evidence-reference.schema.json` với đúng
   bốn field: `target_type`, `target`, `stance`, `confidence` (`confidence`
   optional).
+- `target_type` là **hằng `evidence`**, không phải free token. Đây là thứ giữ cho
+  graph acyclic by construction (xem §"Acyclic by construction"): claim chỉ trỏ
+  được tới evidence, không trỏ được tới claim khác hay tới chính nó.
 - Canonical identity của một target tái sử dụng nguyên trạng Relations semantic
   identity `{id, normalizedUrl}` — không định nghĩa identity rule mới.
 - Trong một `evidence_refs`, hai phần tử không được cùng canonical identity, kể
@@ -270,9 +280,17 @@ không thu hồi quyền truy cập; server vẫn dùng core/Relations authoriza
 - Precedence khi hiển thị "thời điểm của evidence": `modified_at` nếu có, ngược
   lại `published_at`. `retrieved_at` chỉ mô tả thời điểm producer lấy về, không
   bao giờ được dùng làm ngày của nội dung.
-- Với entity `type: "evidence"`, `x_evidence.provenance.retrieved_at` phải bằng
-  core entity `updated_at` — invariant thuộc entity-context validator, không
-  thuộc registry wrapper validator (giống Answer `1.0`).
+- Với entity `type: "evidence"`, invariant là **ordering, không phải equality**:
+  `x_evidence.provenance.retrieved_at <= entity.updated_at`. Hai timestamp mô tả
+  hai sự kiện độc lập — `retrieved_at` là lúc producer lấy source về,
+  `entity.updated_at` là lúc entity được publish/sửa. Yêu cầu bằng nhau sẽ khiến
+  mọi correction không kèm re-retrieval (sửa `summary`, `locale`, `excerpt`,
+  `publisher.name`) tạo ra entity invalid, ép producer khai man provenance hoặc
+  để `updated_at` cũ. Đây là khác biệt có chủ ý so với Answer `1.0`, nơi
+  `freshness.updated_at === entity.updated_at` đúng vì cả hai cùng mô tả một sự
+  kiện. Invariant thuộc entity-context validator, không thuộc registry wrapper
+  validator. ADR-0010 chốt lại lần cuối liệu có thêm ràng buộc equality riêng cho
+  lần publish đầu tiên hay không.
 
 ### Freshness
 
@@ -323,7 +341,8 @@ artifact `aadp:answer@1.0`.
 
 Đây là phần đóng finding 4 của review: các gate "không dangling reference",
 "không unbounded graph", "cycle ngoài policy" được cụ thể hóa thành rule
-deterministic.
+deterministic. Kết luận về cycle: wire model `1.0` **không biểu diễn được cycle
+nào**, nên không có cycle policy để thực thi — xem §"Acyclic by construction".
 
 ### Reference resolution requirement
 
@@ -352,9 +371,18 @@ Vocabulary status tái sử dụng nguyên `AnswerTargetResolutionStatus`
 (`resolved` | `forbidden` | `not-found` | `invalid` | `budget-exhausted`); không
 tạo enum mới.
 
+`source.access` **KHÔNG tham gia** phân loại này. Hai lý do: (a) nó mô tả source
+URL lồng bên trong evidence, không mô tả security của chính AADP evidence
+resource; (b) khi target trả 401/403 thì client không hề có body `x_evidence` để
+đọc `source.access` — giá trị đó không tồn tại đúng lúc cần phân loại. Mọi 401/403
+trên target đều là `forbidden` và là kết quả **không dangling**, độc lập với
+`source.access`. Nếu cần đối chiếu "resource này lẽ ra có được bảo vệ không", căn
+cứ duy nhất là `security` declaration của resource trong core manifest, không phải
+metadata trong payload.
+
 Release gate "không dangling reference" nghĩa là: conformance run trên reference
-deployment không có entry `not-found` hoặc `invalid`. Entry `forbidden` với
-`source.access` là `authenticated`/`restricted` là kết quả **hợp lệ**, không fail gate.
+deployment không có entry `not-found` hoặc `invalid`. Entry `forbidden` luôn là
+kết quả hợp lệ, không fail gate.
 
 ### Budget và limits
 
@@ -367,18 +395,36 @@ dimension đã phát hành ở ADR-0008, với reference default hiện có
 - KHÔNG tạo budget con, KHÔNG nới default, KHÔNG thêm dimension mới;
 - charge depth theo cạnh answer → claim → evidence (evidence là leaf, độ sâu tối
   đa 2 cạnh từ answer);
-- charge node qua `chargeNode`/`markExpanded` để cycle guard dùng chung state.
+- charge node qua `chargeNode` để dedup dùng chung `visitedTargets` state.
 
-### Cycle policy
+### Acyclic by construction — không có cycle policy
 
-- Claim → evidence → claim là cycle **hợp lệ về wire** (evidence có thể được
-  nhiều claim tham chiếu). Guard bằng `expandedTargets`: một node chỉ được expand
-  một lần trong mỗi walk; lần gặp lại trả entry đã resolve, không fetch lại và
-  không throw.
-- Self-reference (`claim` trỏ tới chính nó qua evidence ref) bị **reject ở
-  semantic validator** với code `evidence.semantic.self_reference`, vì nó không
-  mang thông tin provenance nào.
-- Không có "cycle detection" riêng ngoài budget state hiện có.
+Evidence `1.0` là **directed acyclic graph một chiều, tối đa một hop từ claim**,
+và điều đó được bảo đảm bởi chính wire model chứ không bởi runtime guard:
+
+- cạnh duy nhất là `claim.evidence_refs[]`;
+- `evidence_refs[].target_type` là **hằng `evidence`**, nên một claim không thể
+  trỏ tới claim khác hoặc tới chính nó — vi phạm bị schema bắt, và entity-context
+  validation cũng reject khi entity fetch về không đúng `type: "evidence"`;
+- evidence document **không có field nào trỏ ngược về claim**; `source.url` là
+  metadata và không bao giờ được traverse.
+
+Do đó KHÔNG có cycle nào biểu diễn được trên wire. Nhiều claim cùng trỏ tới một
+evidence là **fan-in và dedup**, không phải cycle: `chargeNode` trên
+`visitedTargets` (canonical `{id, normalizedUrl}`) đảm bảo evidence đó chỉ được
+fetch một lần trong mỗi walk.
+
+Vì vậy kế hoạch này KHÔNG yêu cầu:
+
+- cycle guard qua `expandedTargets` — không có node nào cần "expand" ngoài claim gốc;
+- semantic rule `evidence.semantic.self_reference` — không reachable, pure wrapper
+  validator cũng không có entity context để biết id của chính claim;
+- cycle fixture hoặc cycle conformance check.
+
+Nếu ADR-0010 quyết định thêm reverse edge (evidence → claim) thì lúc đó mới định
+nghĩa ownership của cạnh đó cùng cycle policy tương ứng, và phải cập nhật kế
+hoạch này trước khi tạo schema. Duplicate-target check và shared-budget check vẫn
+giữ nguyên trong mọi trường hợp.
 
 ### Partial result, cancellation và retry
 
@@ -420,7 +466,7 @@ export interface SerializedEntity<T = unknown> {
   canonicalUrl?: string;
   locale?: string;
   data: T;
-  /** Root-level `x_*` extension fields (module payloads). Keys MUST match `^x_[a-z][a-z0-9_]*$`. */
+  /** Root-level `x_*` extension fields (module payloads). Keys MUST match the released core entity grammar `^x_[a-zA-Z0-9_]*$`. */
   extensions?: Record<string, unknown>;
 }
 
@@ -447,9 +493,16 @@ Resource/repository
 
 Runtime MUST:
 
-- chỉ chấp nhận key khớp grammar `^x_[a-z][a-z0-9_]*$`; key sai grammar làm
-  `defineAADP()`/`entity()` fail rõ ràng, không silently drop;
-- từ chối key trùng tên core field (defence in depth — grammar `x_*` đã loại trừ,
+- dùng **đúng grammar đã phát hành của core entity schema** `^x_[a-zA-Z0-9_]*$`
+  ([`schemas/v1.0/entity.schema.json`](../../../schemas/v1.0/entity.schema.json)),
+  không tự định nghĩa grammar hẹp hơn ở server layer. Grammar này chấp nhận chữ
+  hoa (`x_Foo`), ký tự số ngay sau prefix (`x_1`) và cả key trần `x_`; một server
+  helper từ chối các key đó sẽ không serialize được entity mà chính core schema
+  coi là hợp lệ, phá vỡ tuyên bố additive compatibility và làm hỏng vendor
+  extension name có sẵn khi user chuyển từ generate entity thủ công sang
+  `ail-aadp/server`;
+- key sai grammar làm `defineAADP()`/`entity()` fail rõ ràng, không silently drop;
+- từ chối key trùng tên core field (defence in depth — prefix `x_` đã loại trừ,
   nhưng check phải tồn tại để một thay đổi grammar sau này không mở lỗ hổng);
 - chạy `assertJsonSafe` trên extension values trước `structuredClone`/
   `JSON.stringify`, giống đường manifest hiện tại;
@@ -460,6 +513,12 @@ Runtime MUST:
   (đây là compatibility gate, phải có test riêng);
 - validate `modules` theo core manifest schema và semantic rule hiện có, cùng
   đường với các field manifest khác.
+
+Grammar này phải được export **một lần duy nhất** dưới dạng predicate dùng chung
+(ví dụ `isExtensionKey(key: string): boolean` ở core layer), rồi tái sử dụng cho
+manifest validation, entity validation và server serialization. Không tạo bản
+sao regex thứ hai trong `src/server/**`; hiện tại repo chưa có predicate nào như
+vậy nên Phase 1 phải tạo nó thay vì inline regex.
 
 Server runtime MUST NOT import hoặc register Answer/Evidence module, và MUST NOT
 chứa branch theo tên module cụ thể.
@@ -473,7 +532,7 @@ Schema chịu trách nhiệm: required fields, constants, closed objects, enum
 evidence reference shape (target qua Relations `$ref`).
 
 Schema KHÔNG kiểm tra: timestamp ordering, duplicate semantic target,
-self-reference, `content_checksum` và equality với core entity `updated_at`.
+`content_checksum` và quan hệ thứ tự với core entity `updated_at`.
 
 ### Pure wrapper semantic validator
 
@@ -489,8 +548,11 @@ clock hệ thống, không mutate input. Kiểm tra:
 - timestamp ordering và precedence;
 - confidence range/precision;
 - duplicate target theo Relations semantic identity;
-- self-reference;
 - `content_checksum` khớp digest tính lại.
+
+Validator KHÔNG có rule self-reference: `target_type` hằng `evidence` đã loại trừ
+claim→claim ở tầng schema, và pure wrapper validator không có entity context để
+biết id của chính document.
 
 ### Entity-context validator
 
@@ -502,7 +564,7 @@ clock hệ thống, không mutate input. Kiểm tra:
 3. Validate `entity.canonical_url` bằng URL-policy helper dùng chung với
    `source.url` (absolute HTTPS, không userinfo, không fragment).
 4. Dispatch `x_evidence` qua exact registry key.
-5. Với kind `evidence`: yêu cầu `provenance.retrieved_at === entity.updated_at`.
+5. Với kind `evidence`: yêu cầu `provenance.retrieved_at <= entity.updated_at`.
 6. Trả typed validated entity hoặc structured validation result.
 
 Không mở rộng generic module registry để truyền context; không thêm
@@ -616,11 +678,17 @@ Valid fixtures tối thiểu:
 - claim tối thiểu với một evidence ref `support`;
 - claim với `contradict` và `neutral` ref, có/không `confidence`;
 - evidence với `access: public`, provenance đủ ba timestamp;
-- evidence với `access: authenticated` (chứng minh forbidden không phải dangling);
+- evidence với `access: authenticated` (chứng minh `access` chỉ là presentation
+  metadata và không đổi kết quả validation hay traversal);
+- evidence entity nằm sau resource `security` declaration, để test 401/403 cho ra
+  `forbidden` và không bị tính là dangling — phân loại này không đọc `source.access`;
+- evidence có `retrieved_at` **sớm hơn** `entity.updated_at` (correction không
+  kèm re-retrieval);
 - evidence có `excerpt` và Unicode cross-plane key trong Relations `target.x_*`
   (`U+E000` và `U+10000`) với `content_checksum` tính bằng `checksumOf()`;
 - answer entity tham chiếu claim qua `related_entities` mà không sửa `x_answer` schema;
-- claim → evidence → claim graph hợp lệ (cycle được guard, không reject).
+- hai claim khác nhau cùng trỏ tới một evidence (fan-in) — evidence chỉ được fetch
+  một lần trong một walk nhờ dedup `visitedTargets`.
 
 Invalid fixtures tối thiểu:
 
@@ -632,8 +700,8 @@ Invalid fixtures tối thiểu:
   unit ordering;
 - `confidence` ngoài `[0,1]`, quá 2 chữ số thập phân, hoặc là string;
 - `stance`/`access` ngoài enum;
-- timestamp sai format, sai thứ tự, hoặc `retrieved_at` không khớp core `updated_at`;
-- self-reference claim;
+- timestamp sai format, sai thứ tự, hoặc `retrieved_at` muộn hơn core `updated_at`;
+- `evidence_refs[].target_type` khác hằng `evidence` (gồm cả trỏ tới `claim`);
 - duplicate canonical target trong `evidence_refs` (kể cả khác `stance`);
 - `evidence_refs` rỗng hoặc vượt 50;
 - `source.url`/`publisher.url` dùng HTTP, userinfo, fragment, hoặc malformed;
@@ -654,7 +722,7 @@ invalid fixture chỉ nên có một primary failure.
 | `evidence.schema` | Wrapper đúng Evidence `1.0` schema |
 | `evidence.semantic` | Pure semantic invariants (gồm `content_checksum`) xanh |
 | `evidence.context` | Entity type, `x_evidence` presence, canonical URL policy, `updated_at` equality |
-| `evidence.graph` | Claim→evidence resolve, không `not-found`/`invalid`, cycle guard đúng |
+| `evidence.graph` | Claim→evidence resolve, không `not-found`/`invalid`, fan-in dedup đúng (một evidence chỉ fetch một lần) |
 | `evidence.stance` | Stance/confidence semantics và vắng-confidence không bị suy diễn |
 | `evidence.provenance` | Timestamp ordering, precedence và freshness classification |
 | `evidence.answer_link` | Answer `related_entities` tới claim/evidence resolve được, `x_answer` không đổi |
@@ -704,12 +772,19 @@ Gate: maintainer review ADR/spec; không còn TODO ảnh hưởng schema hoặc 
 
 ### Phase 1 — Generic server module support (nợ `1.3.0`, không phụ thuộc Phase 0)
 
-1. Thêm `AadpServerConfig.modules` và phát `modules[]` trong manifest builder.
-2. Thêm `SerializedEntity.extensions` và emit `x_*` trong `entity()`.
-3. Validate grammar, core-field collision, JSON-safety; không mutate input.
-4. Test compatibility: config không có `modules`/`extensions` cho ra manifest và
+1. Export shared extension-key predicate từ grammar core đã phát hành
+   (`^x_[a-zA-Z0-9_]*$`); không inline regex mới ở server layer.
+2. Thêm `AadpServerConfig.modules` và phát `modules[]` trong manifest builder.
+3. Thêm `SerializedEntity.extensions` và emit `x_*` trong `entity()`.
+4. Validate grammar bằng predicate dùng chung, core-field collision, JSON-safety;
+   không mutate input.
+5. Test boundary theo đúng released regex: `x_Foo` (uppercase), `x_1`
+   (digit-leading) và `x_` (empty suffix) đều phải **được chấp nhận**; `y_foo`,
+   `xfoo`, `X_foo` phải bị từ chối. Test này là hàng rào chống việc vô tình siết
+   grammar hẹp hơn core.
+6. Test compatibility: config không có `modules`/`extensions` cho ra manifest và
    entity byte-identical với `1.3.0`.
-5. Test checksum ổn định: thêm `extensions` không đổi core `checksum`.
+7. Test checksum ổn định: thêm `extensions` không đổi core `checksum`.
 
 Gate: server/core/Relations/Answer regression suite xanh; không có tên module cụ
 thể trong `src/server/**`.
@@ -727,7 +802,7 @@ Gate: schema/fixture/type tests xanh; schema và types không lệch nhau.
 ### Phase 3 — Registry và semantic validation
 
 1. Implement pure helpers: locale, timestamp ordering/precedence, confidence,
-   target uniqueness, self-reference, `content_checksum`.
+   target uniqueness, `content_checksum`.
 2. Đăng ký exact keys `{aadp:evidence, 1.0, claim}` và `{aadp:evidence, 1.0, evidence}`.
 3. Test unsupported module/version/kind và không fallback.
 4. Implement/test `validateEvidenceEntityV1`/`parseEvidenceEntityV1` mà không đổi
@@ -741,12 +816,14 @@ Gate: deterministic semantic results; không network, không wall clock.
 
 1. Implement `fetchEvidenceEntityV1` bằng core fetch rồi Evidence validation.
 2. Implement `resolveClaimEvidenceV1` dùng Relations resolver + shared budget +
-   cycle guard qua `expandedTargets`.
+   dedup fan-in qua `visitedTargets`.
 3. Implement `resolveAnswerEvidenceV1` trên `resolveAnswerTargets` hiện có, không
    sửa Answer module.
 4. Implement injected-clock freshness classifier.
 5. Test abort, ordering, authorization, partial result, budget exhaustion, URL
-   policy, cycle và dangling classification theo bảng ở §"Graph và traversal policy".
+   policy, fan-in dedup và dangling classification theo bảng ở §"Graph và
+   traversal policy" — gồm case 401/403 được phân loại `forbidden` mà không cần
+   đọc `source.access`.
 
 Gate: không duplicate HTTP/DNS/budget implementation; Answer public API không đổi.
 
@@ -794,6 +871,8 @@ hoặc unit test. Điều kiện tối thiểu:
 
 Ngoài inventory mới, các file hiện có dự kiến thay đổi:
 
+- `src/validator/*` hoặc core shared module: export extension-key predicate dùng
+  chung từ grammar `^x_[a-zA-Z0-9_]*$` (chưa tồn tại trong repo hiện tại).
 - `src/server/types.ts`: `SerializedEntity.extensions`, `AadpServerConfig.modules`.
 - `src/server/runtime.ts`: manifest `modules` emission, entity `x_*` emission,
   extension validation.
@@ -818,11 +897,11 @@ Không sửa released files dưới `schemas/modules/relations/v1.0`,
 | Layer | Verification bắt buộc |
 |---|---|
 | Specification | Doc links, no unresolved normative TODO, examples schema-valid |
-| Server (generic) | Module declaration, `x_*` grammar, collision, JSON-safety, no-mutation, checksum stability, omit-behavior identical với `1.3.0` |
+| Server (generic) | Module declaration, `x_*` grammar **đúng bằng core** (uppercase `x_Foo`, digit-leading `x_1`, bare `x_`), collision, JSON-safety, no-mutation, checksum stability, omit-behavior identical với `1.3.0` |
 | Schema | Valid/invalid fixtures, exact `$id`, closed objects, cross-module `$ref`, immutability digest |
-| Semantic | Locale, code points, timestamp order/precedence, confidence, duplicates, self-reference, content checksum |
+| Semantic | Locale, code points, timestamp order/precedence, confidence, duplicates, content checksum |
 | Registry | Exact dispatch cho hai kind; unsupported module/version/kind; no fallback |
-| Client | Resolution order, abort, auth, shared budget, cycle guard, partial result, injected-clock freshness |
+| Client | Resolution order, abort, auth, shared budget, fan-in dedup, partial result, injected-clock freshness |
 | Answer integration | `x_answer` schema/validation result không đổi; helper resolve claim/evidence đúng |
 | Security | Inert malicious text, URL/DNS/redirect policy, `access` không cấp quyền, no sensitive logging |
 | Conformance | Stable check IDs, required/optional behavior, external implementation |
@@ -856,8 +935,10 @@ Release `1.4.0` chỉ được phép khi:
 - Core entity `checksum` không đổi khi entity mang extension.
 - Không có reference `not-found`/`invalid` trong conformance run; `forbidden` do
   authorization/URL policy là kết quả hợp lệ.
-- Graph traversal dùng shared Relations budget, cycle guard và partial-result
+- Graph traversal dùng shared Relations budget, fan-in dedup và partial-result
   model; không có network stack riêng cho Evidence.
+- Generic server dùng đúng extension grammar của core v1.0 qua predicate dùng
+  chung; boundary test `x_Foo`/`x_1`/`x_` xanh.
 - Stance/confidence/provenance semantics deterministic, có invalid fixture cho
   từng invariant normative.
 - Answer `1.0` artifact không bị sửa; Answer public API và validation result
@@ -876,7 +957,7 @@ Release `1.4.0` chỉ được phép khi:
 - [ ] ADR-0010 citation/provenance/security Accepted.
 - [ ] Wire model cho claim/evidence/source được khóa trong specification.
 - [ ] Answer integration contract xác nhận không sửa `aadp:answer@1.0`.
-- [ ] Graph integrity, cycle và traversal budget semantics đã cụ thể (§"Graph và traversal policy").
+- [x] Graph integrity, acyclicity và traversal budget semantics đã cụ thể (§"Graph và traversal policy").
 - [x] Generic server public API đã chọn và ghi compatibility contract.
 - [x] File map và phase ordering đã bổ sung.
 - [x] Test/conformance matrix có stable expected outcomes.
