@@ -37,6 +37,8 @@ contract. Such a change requires a new protocol version and an ADR.
 - [AADP v1.0 specification](../spec/v1.0/specification.md)
 - [Relations Module v1.0 specification](../spec/modules/relations/v1.0/specification.md)
 - [Relations Module v1.0 conformance contract](../spec/modules/relations/v1.0/conformance.md)
+- [Answer Module v1.0 specification](../spec/modules/answer/v1.0/specification.md)
+- [Answer Module v1.0 conformance contract](../spec/modules/answer/v1.0/conformance.md)
 - [AADP v0.1 schemas](../schemas/v0.1/)
 - [AADP v1.0 schemas](../schemas/v1.0/)
 
@@ -64,6 +66,7 @@ contract. Such a change requires a new protocol version and an ADR.
 - [ADR-0006: Bounded traversal controls](adr/0006-bounded-traversal-controls.md)
 - [ADR-0007: Module versioning and discovery](adr/0007-module-versioning-and-discovery.md)
 - [ADR-0008: Module traversal and authorization](adr/0008-module-traversal-and-authorization.md)
+- [ADR-0009: Answer Module terminology and security boundary](adr/0009-answer-module-terminology-and-security.md)
 
 ADRs retain the Context/Decision/Consequences format. They are not rewritten as
 protocol specifications.

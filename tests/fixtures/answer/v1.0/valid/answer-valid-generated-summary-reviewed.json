@@ -1,0 +1,33 @@
+{
+  "module": "aadp:answer",
+  "version": "1.0",
+  "kind": "answer",
+  "question": "Is Nimbus open source?",
+  "concise_answer": "Yes, Nimbus is released under a neutral example license.",
+  "locale": "en",
+  "authorship": {
+    "kind": "generated-summary",
+    "generator": {
+      "name": "Example Summarizer",
+      "version": "2026-08"
+    },
+    "generated_at": "2026-08-06T08:55:00Z",
+    "source_targets": [
+      {
+        "target_type": "document",
+        "target": {
+          "id": "document:nimbus-license",
+          "url": "https://example.com/ai/v1.0/entities/document/nimbus-license.json"
+        }
+      }
+    ],
+    "reviewed_by": {
+      "name": "Example Editorial Team"
+    }
+  },
+  "freshness": {
+    "published_at": "2026-08-01T00:00:00Z",
+    "updated_at": "2026-08-06T08:55:00Z"
+  },
+  "content_checksum": "sha256:1d655dc4b2a44fb7ed260ab0afd7b6e8c9c9af50239e432a716f0dde44f94671"
+}

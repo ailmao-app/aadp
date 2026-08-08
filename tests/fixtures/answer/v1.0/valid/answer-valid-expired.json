@@ -1,0 +1,20 @@
+{
+  "module": "aadp:answer",
+  "version": "1.0",
+  "kind": "answer",
+  "question": "What was the Nimbus beta?",
+  "concise_answer": "Nimbus beta was a neutral example preview program.",
+  "locale": "en",
+  "authorship": {
+    "kind": "source-authored",
+    "author": {
+      "name": "Example Editorial Team"
+    }
+  },
+  "freshness": {
+    "published_at": "2020-01-01T00:00:00Z",
+    "updated_at": "2020-06-01T00:00:00Z",
+    "expires_at": "2021-01-01T00:00:00Z"
+  },
+  "content_checksum": "sha256:801393976cdabf6a08d2ffc194d2f0d65b94f55d085cad2105d4a7159756eeb5"
+}
