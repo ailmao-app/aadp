@@ -303,6 +303,132 @@ describe("resolveAnswerTargets — generated-summary source_targets", () => {
     expect(result.items[1].entity).toBe(result.items[0].entity);
   });
 
+  it("replays a prior failure across two separate resolveAnswerTargets calls sharing the same budget (P1: cross-call shared-budget replay)", async () => {
+    server = await startServer((_req, res) => sendJson(res, 404, {}));
+    const sharedTarget = { target_type: "x", target: { id: "x:cross-call", url: `${server.baseUrl}/entities/x/cross-call.json` } };
+    const budget = createRelationsTraversalBudget();
+    const first = withRelatedEntities([sharedTarget]);
+    const firstResult = await resolveAnswerTargets(first, { ...PERMISSIVE, budget });
+    expect(firstResult.items[0].status).toBe("not-found");
+
+    // A second, independent resolveAnswerTargets call (e.g. resolving a
+    // different Answer document in the same parent traversal) reusing the
+    // SAME caller-owned budget must replay the known failure, not report a
+    // bare "resolved" for the now-duplicate target.
+    const second = withGeneratedSourceTargets([sharedTarget]);
+    const secondResult = await resolveAnswerTargets(second, { ...PERMISSIVE, budget });
+    expect(secondResult.items[0].status).toBe("not-found");
+    expect(secondResult.items[0].entity).toBeUndefined();
+  });
+
+  it("reports invalid (not resolved) for a duplicate whose canonical target was visited outside this resolver, with no outcome to replay (P1: unknown-duplicate)", async () => {
+    const budget = createRelationsTraversalBudget();
+    // Simulate the target having been visited by some other path over the
+    // same budget (e.g. a raw Relations traversal step) — chargeNode marks
+    // it visited without this resolver ever producing an outcome for it.
+    const { chargeNode } = await import("../../../../../src/modules/relations/v1.0/client/budget.js");
+    chargeNode(budget, "x:external", "https://example.test/x/external.json", "test setup");
+
+    const answer = withRelatedEntities([{ target_type: "x", target: { id: "x:external", url: "https://example.test/x/external.json" } }]);
+    const result = await resolveAnswerTargets(answer, { ...PERMISSIVE, budget });
+    expect(result.items[0].status).toBe("invalid");
+    expect(result.items[0].entity).toBeUndefined();
+  });
+
+  it("reports invalid (not the cached entity) when a duplicate occurrence declares a different target_type than the occurrence that resolved it (P1: cross-group target_type integrity)", async () => {
+    server = await startServer((_req, res) => sendJson(res, 200, serviceEntity("x:typed", "service")));
+    const answer = buildXAnswer({
+      related_entities: [{ target_type: "service", target: { id: "x:typed", url: `${server.baseUrl}/entities/x/typed.json` } }],
+      authorship: {
+        kind: "generated-summary",
+        generator: { name: "Example Summarizer" },
+        generated_at: "2026-08-06T08:55:00Z",
+        // Same canonical {id,url} as related_entities[0], but a different
+        // declared target_type — not rejected by semantic validation
+        // (cross-list dedup identity is {id, normalizedUrl} only).
+        source_targets: [{ target_type: "document", target: { id: "x:typed", url: `${server.baseUrl}/entities/x/typed.json` } }],
+      },
+    }) as unknown as AnswerDocumentV1;
+    const budget = createRelationsTraversalBudget();
+    const result = await resolveAnswerTargets(answer, { ...PERMISSIVE, budget });
+    expect(result.items[0]).toMatchObject({ group: "related_entities", status: "resolved" });
+    expect(result.items[0].entity?.type).toBe("service");
+    expect(result.items[1]).toMatchObject({ group: "source_targets", status: "invalid" });
+    expect(result.items[1].entity).toBeUndefined();
+  });
+
+  it("joins an in-flight fetch instead of guessing invalid for a duplicate arriving from a concurrent resolveAnswerTargets call sharing the same budget (P1: concurrent same-budget duplicate)", async () => {
+    let requestCount = 0;
+    server = await startServer((_req, res) => {
+      requestCount++;
+      // Delay the response so the concurrent call's duplicate lookup for
+      // the same canonical target happens while this fetch is still in
+      // flight, not after it has already settled.
+      setTimeout(() => sendJson(res, 200, serviceEntity("x:concurrent")), 30);
+    });
+    const sharedTarget = { target_type: "x", target: { id: "x:concurrent", url: `${server.baseUrl}/entities/x/concurrent.json` } };
+    const budget = createRelationsTraversalBudget();
+    const answerA = withRelatedEntities([sharedTarget]);
+    const answerB = withGeneratedSourceTargets([sharedTarget]);
+    const [resultA, resultB] = await Promise.all([
+      resolveAnswerTargets(answerA, { ...PERMISSIVE, budget }),
+      resolveAnswerTargets(answerB, { ...PERMISSIVE, budget }),
+    ]);
+    expect(resultA.items[0].status).toBe("resolved");
+    expect(resultB.items[0].status).toBe("resolved");
+    expect(resultA.items[0].entity?.id).toBe("x:concurrent");
+    expect(resultB.items[0].entity?.id).toBe("x:concurrent");
+    // Only ever fetched/charged once, no matter which of the two concurrent
+    // calls "won" the race to trigger it.
+    expect(requestCount).toBe(1);
+    expect(budget.nodesVisited).toBe(1);
+  });
+
+  it("re-validates a duplicate against its OWN target_type even when the triggering occurrence's declared type was wrong (P1: inverse wrong-type -> correct-type)", async () => {
+    server = await startServer((_req, res) => sendJson(res, 200, serviceEntity("x:inverse", "document")));
+    const answer = buildXAnswer({
+      related_entities: [{ target_type: "service", target: { id: "x:inverse", url: `${server.baseUrl}/entities/x/inverse.json` } }],
+      authorship: {
+        kind: "generated-summary",
+        generator: { name: "Example Summarizer" },
+        generated_at: "2026-08-06T08:55:00Z",
+        // Same canonical target as related_entities[0] but declares the
+        // entity's ACTUAL type — must not inherit the first occurrence's
+        // (wrong-type) invalid verdict.
+        source_targets: [{ target_type: "document", target: { id: "x:inverse", url: `${server.baseUrl}/entities/x/inverse.json` } }],
+      },
+    }) as unknown as AnswerDocumentV1;
+    const budget = createRelationsTraversalBudget();
+    const result = await resolveAnswerTargets(answer, { ...PERMISSIVE, budget });
+    expect(result.items[0]).toMatchObject({ group: "related_entities", status: "invalid" });
+    expect(result.items[0].entity).toBeUndefined();
+    expect(result.items[1]).toMatchObject({ group: "source_targets", status: "resolved" });
+    expect(result.items[1].entity?.type).toBe("document");
+    expect(budget.nodesVisited).toBe(1); // fetched once, reused for the second (correctly-typed) occurrence
+  });
+
+  it("replays budget-exhausted (not invalid) for the exact target that first triggered a global stop, on a later call sharing the same budget (P1: global-stop key survives across calls)", async () => {
+    server = await startServer((_req, res) => sendJson(res, 200, serviceEntity("x:stopper")));
+    const sharedTarget = { target_type: "x", target: { id: "x:stopper", url: `${server.baseUrl}/entities/x/stopper.json` } };
+    // maxNodes: 0 means chargeNode throws on the very first distinct target
+    // it charges — but it still marks that target visited before throwing.
+    const budget = createRelationsTraversalBudget({ maxNodes: 0 });
+
+    const first = withRelatedEntities([sharedTarget]);
+    const firstResult = await resolveAnswerTargets(first, { ...PERMISSIVE, budget });
+    expect(firstResult.partial).toBe(true);
+    expect(firstResult.items[0].status).toBe("budget-exhausted");
+
+    // A second, independent call for the SAME target over the SAME budget
+    // must keep reporting the stop that already happened for it — not
+    // silently downgrade to invalid/partial:false as if the walk had
+    // moved on and this target just turned out to be broken.
+    const second = withGeneratedSourceTargets([sharedTarget]);
+    const secondResult = await resolveAnswerTargets(second, { ...PERMISSIVE, budget });
+    expect(secondResult.partial).toBe(true);
+    expect(secondResult.items[0].status).toBe("budget-exhausted");
+  });
+
   it("is inconclusive-free (empty result) when a generated summary's source_targets is the only reference list and related_entities is absent", async () => {
     const answer = buildXAnswer({
       authorship: {

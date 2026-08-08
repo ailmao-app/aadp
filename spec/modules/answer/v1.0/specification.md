@@ -364,17 +364,41 @@ vì nằm trong `authorship`. Mỗi entry kết quả gắn `{group: "related_en
 input order). Một target trùng nhau giữa hai group (cùng canonical `{id,
 normalizedUrl}`) chỉ bị fetch một lần: Relations charge dedup (`chargeNode`)
 trước khi biết outcome fetch/validate, nên bản thân "duplicate" KHÔNG suy ra
-được occurrence đầu đã resolve thành công. `resolveAnswerTargets` tự giữ cache
-outcome (status/entity/message) theo canonical key trong đúng một lần gọi, và
-replay outcome đó cho occurrence trùng thay vì mặc định `resolved` — occurrence
-thứ hai của một target 404/forbidden/invalid ở lần đầu PHẢI mang đúng status đó,
-không được báo `resolved`; occurrence thứ hai của một target resolve thành
-công được replay cùng `entity` object (không fetch lại qua network, nhưng
-entity đã có sẵn trong bộ nhớ nên không cần giấu). Một duplicate ứng với target
-đã visit từ TRƯỚC lần gọi này (share budget với một traversal khác ngoài phạm
-vi hàm) không có outcome để replay — trường hợp đó vẫn báo `resolved` không
-kèm `entity`, nhất quán với cách Relations tự xử lý node đã visit ở nơi khác
-trong cùng traversal.
+được occurrence đầu đã resolve thành công. `resolveAnswerTargets` giữ state
+riêng theo danh tính của `options.budget` (sống suốt vòng đời budget đó,
+không chỉ một lần gọi, và an toàn khi nhiều lời gọi `resolveAnswerTargets`
+share cùng budget chạy ĐỒNG THỜI — budget vốn caller-owned, không có gì cấm
+`Promise.all` nhiều lời gọi trên cùng budget, và scheduler layer của package
+hỗ trợ concurrent request). State này tách outcome fetch/validate của canonical
+target (transport/schema/checksum/id — áp dụng như nhau cho mọi reference)
+khỏi việc kiểm tra `target_type` của TỪNG reference: một canonical target chỉ
+được fetch tối đa một lần cho toàn bộ vòng đời budget; occurrence trùng —
+kể cả khi đến từ một lời gọi đang chạy đồng thời, trong lúc fetch của
+occurrence đầu còn pending — join cùng fetch đang in-flight đó thay vì gọi lại
+Relations lần hai (chỉ nhận `duplicate` trơ mà không có gì để replay). Sau khi
+fetch xong, mỗi occurrence được đánh giá lại bằng `target_type` CỦA CHÍNH NÓ:
+occurrence thứ hai của một target 404/forbidden/invalid ở lần đầu PHẢI mang
+đúng status đó, không được báo `resolved`; nếu fetch thành công nhưng
+`target_type` của occurrence đó không khớp entity đã fetch thì occurrence đó
+là `invalid` (type mismatch) — kể cả khi occurrence ĐẦU (occurrence kích hoạt
+fetch) mới là bên khai sai type còn occurrence sau khai đúng, occurrence sau
+vẫn PHẢI được báo `resolved` với entity đã fetch, không kế thừa verdict sai
+của occurrence đầu. Một duplicate ứng với canonical key mà resolver này chưa
+từng tự tạo outcome/pending fetch (visited qua đường khác, ví dụ một bước
+Relations traversal thô trên cùng budget) không có gì đáng tin để replay hay
+join — trường hợp đó PHẢI báo `invalid`, không được báo `resolved`, vì một
+duplicate chưa xác minh không phải bằng chứng đã resolve thành công.
+
+Nếu một global stop (`AadpDiscoveryBudgetExceededError`/abort qua
+`options.signal`) xảy ra đúng lúc canonical key T đang in-flight, `chargeNode`
+đã ghi T vào `visitedTargets` TRƯỚC khi ném lỗi, nên T trở thành "duplicate"
+vĩnh viễn với Relations dù chưa có outcome thật. `resolveAnswerTargets` PHẢI
+tự nhớ riêng key T đã dừng vì global stop (gắn theo `options.budget`, không
+chỉ một lần gọi) và replay `status: "budget-exhausted"`/`partial: true` cho
+mọi occurrence sau của đúng key đó — kể cả ở một lời gọi `resolveAnswerTargets`
+khác sau này share cùng budget — thay vì để nó rơi vào nhánh duplicate-không-
+outcome và bị báo nhầm `invalid`/`partial:false` như thể budget đã dừng nhưng
+target này lại hỏng dữ liệu.
 
 Trạng thái mỗi entry: `resolved | forbidden | not-found | invalid |
 budget-exhausted`; không trả partial result như thể complete. Phân loại dựa

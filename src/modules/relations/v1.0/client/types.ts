@@ -42,6 +42,19 @@ export interface RelationsTraversalIssue {
    * only read `code`/`message` are unaffected.
    */
   cause?: Error;
+  /**
+   * The fetched, schema/checksum-validated entity, when this issue is
+   * `target_unresolvable` specifically because the entity's declared
+   * `type` disagreed with `expectedType` (an id mismatch does NOT set
+   * this — that means the resource itself is not the declared target at
+   * all, so there is nothing safe to reuse). Absent for every other issue.
+   * Lets a caller that tracks its OWN, differently-scoped expected type
+   * for the same canonical target (e.g. Answer's `resolveAnswerTargets`,
+   * which allows two references to declare different `target_type` for
+   * the same `{id, url}`) re-validate the already-fetched entity against
+   * its own expectation instead of re-fetching or discarding it.
+   */
+  entity?: EntityV1;
 }
 
 /**

@@ -73,6 +73,30 @@ describe("resolveRelationTarget", () => {
     }
   });
 
+  it("returns status: issue but preserves the fetched entity when only the target's type disagrees with expectedType", async () => {
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/entities/post/hello.json") {
+        return sendJson(res, 200, buildEntity("post:hello", "document", { title: "Hello" }));
+      }
+      sendJson(res, 404, {});
+    });
+    const budget = createRelationsTraversalBudget();
+    const hint = { id: "post:hello", url: `${server.baseUrl}/entities/post/hello.json` };
+    const result = await resolveRelationTarget(hint, "post", PERMISSIVE, budget, "test");
+    expect(result.status).toBe("issue");
+    if (result.status === "issue") {
+      expect(result.issue.code).toBe("target_unresolvable");
+      expect(result.issue.cause).toBeInstanceOf(Error);
+      expect(result.issue.cause?.message).toMatch(/has type/);
+      // Unlike an id mismatch, the entity WAS fetched and is schema/checksum
+      // valid — a caller with its own, differently-scoped expected type for
+      // the same canonical target (Answer's resolveAnswerTargets) can reuse
+      // it without a second fetch. See RelationsTraversalIssue.entity.
+      expect(result.issue.entity?.id).toBe("post:hello");
+      expect(result.issue.entity?.type).toBe("document");
+    }
+  });
+
   it("returns a blocked_url issue for a private-network target instead of throwing", async () => {
     server = await startServer((_req, res) => sendJson(res, 200, buildEntity("post:hello", "post", {})));
     const budget = createRelationsTraversalBudget();

@@ -112,9 +112,17 @@ export async function resolveRelationTarget(
       );
     }
     if (entity.type !== expectedType) {
-      throw new AadpIntegrityMismatchError(
-        `Target at ${hint.url} has type "${entity.type}", but the relation declares target_type "${expectedType}"`
-      );
+      // Returned directly (not thrown) so the issue can carry the already-
+      // fetched, schema/checksum-validated `entity` — see
+      // `RelationsTraversalIssue.entity`'s docstring. Same code/message/cause
+      // shape `issueFromError` would have produced for a thrown
+      // `AadpIntegrityMismatchError`, so this is not an observable behavior
+      // change for a caller that only reads `code`/`message`/`cause`.
+      const message = `Target at ${hint.url} has type "${entity.type}", but the relation declares target_type "${expectedType}"`;
+      return {
+        status: "issue",
+        issue: { level: "error", code: "target_unresolvable", message, targetId: hint.id, url: hint.url, cause: new AadpIntegrityMismatchError(message), entity },
+      };
     }
     const issues: RelationsTraversalIssue[] = [];
     if (hint.checksum && hint.checksum !== entity.checksum) {
