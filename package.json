@@ -89,6 +89,7 @@
     "scripts",
     "CHANGELOG.md",
     "README.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "bin": {
