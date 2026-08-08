@@ -9,7 +9,7 @@
 | Dependency | Relations `1.0` stable; Answer `1.0` stable; ADR-0010 (citation/provenance/security) Accepted |
 | Wire impact | Module riêng `aadp:evidence@1.0`; generic server capability là additive public API của `ail-aadp/server`; KHÔNG sửa `aadp:answer@1.0` |
 | Nợ kế thừa | Hai release gate của `1.3.0` được defer sang release này — xem [roadmap §10](release-roadmap.md) và [implementation record 1.3.0](../../records/implementation-record-v1.3.0.md) |
-| Review | [implementation-plan-v1.4.0-review.md](implementation-plan-v1.4.0-review.md) — kế hoạch này được viết lại để đóng finding 3, 4, 5, 6; finding 1 và 2 vẫn là gate ở Phase 0. Vòng review thứ hai chỉnh thêm: extension grammar phải bằng core, model là acyclic (bỏ cycle/self-reference machinery), `source.access` không tham gia authorization, và `retrieved_at` dùng ordering thay vì equality. Vòng thứ ba bổ sung §"Orchestration contract" (thuật toán hai hop, outcome cache tách khỏi budget, `EvidenceGraph` node/edge ordering) và đồng bộ check `evidence.context` sang ordering |
+| Review | [implementation-plan-v1.4.0-review.md](implementation-plan-v1.4.0-review.md) — kế hoạch này được viết lại để đóng finding 3, 4, 5, 6; finding 1 và 2 vẫn là gate ở Phase 0. Vòng review thứ hai chỉnh thêm: extension grammar phải bằng core, model là acyclic (bỏ cycle/self-reference machinery), `source.access` không tham gia authorization, và `retrieved_at` dùng ordering thay vì equality. Vòng thứ ba bổ sung §"Orchestration contract" (thuật toán hai hop, `EvidenceGraph` node/edge ordering) và đồng bộ check `evidence.context` sang ordering. Vòng thứ tư chốt composition API: shared canonical resolution layer khoá theo budget, cache canonical outcome tách khỏi verdict `target_type` theo occurrence, và Evidence không gọi `resolveAnswerTargets` |
 | Owner | AADP maintainers |
 
 ## Trạng thái theo work package
@@ -86,7 +86,9 @@ tương ứng trong §"Quyết định contract đề xuất":
 - xử lý private, authenticated và cross-origin source;
 - có tồn tại reverse edge evidence → claim hay không; nếu ADR-0010 quyết định
   thêm thì mới phát sinh cycle policy, còn model đề xuất trong tài liệu này là
-  acyclic by construction.
+  acyclic by construction;
+- composition API giữa Answer và Evidence: tầng nào sở hữu canonical outcome
+  cache theo budget, và tầng đó public hay internal.
 
 Nếu ADR-0010 đổi bất kỳ quyết định nào bên dưới thì phải cập nhật kế hoạch này
 **trước khi** tạo wire artifact. Released schema là immutable theo
@@ -248,7 +250,7 @@ có thêm vai trò, và phải do ADR-0010 hoặc một module version mới đ�
   thành hai claim.
 - Dedup trên toàn bộ walk dùng cùng canonical key `{id, normalizedUrl}` ở hai
   tầng: `RelationsTraversalBudgetState.visitedTargets` cho **kế toán budget** và
-  `EvidenceResolveState.outcomes` cho **tái dùng kết quả đã validate**
+  shared canonical outcome cache (khoá theo budget) cho **tái dùng entity đã fetch**
   (§"Orchestration contract"). Không dedup riêng theo URL hoặc riêng theo entity ID.
 
 ### Stance và confidence
@@ -329,12 +331,14 @@ extension. Vì vậy:
   không thay đổi `AnswerValidationResult`, `AnswerEntityValidationResult` hoặc
   tập payload hợp lệ của Answer `1.0`.
 - Helper mới `resolveAnswerEvidenceV1(answer, options)` lọc `related_entities`
-  theo `target_type`, gọi `resolveAnswerTargets` hiện có, validate từng entity đã
-  resolve bằng Evidence entity validator, **rồi expand `evidence_refs` của mọi
-  claim đã resolve** trên cùng budget. Không tự fetch ngoài Relations resolver,
-  không tạo budget con. Thuật toán đầy đủ và kết quả `EvidenceGraph` được định
-  nghĩa ở §"Orchestration contract" — bước expand là bắt buộc, nếu bỏ thì helper
-  chỉ validate link trực tiếp và âm thầm bỏ qua toàn bộ evidence của claim.
+  theo `target_type`, resolve qua **shared canonical resolution layer**, validate
+  từng entity bằng Evidence entity validator, **rồi expand `evidence_refs` của
+  mọi claim đã resolve** trên cùng budget. Helper **không gọi
+  `resolveAnswerTargets`** — hàm đó luôn kéo theo cả `authorship.source_targets`,
+  nằm ngoài phạm vi Evidence. Không tự viết network stack, không tạo budget con.
+  Thuật toán đầy đủ và kết quả `EvidenceGraph` được định nghĩa ở §"Orchestration
+  contract" — bước expand là bắt buộc, nếu bỏ thì helper chỉ validate link trực
+  tiếp và âm thầm bỏ qua toàn bộ evidence của claim.
 - Duplicate payload được tránh bằng chính mô hình reference: evidence nằm ở entity
   riêng, answer chỉ giữ target. Không inline evidence vào `x_answer`.
 
@@ -416,8 +420,8 @@ và điều đó được bảo đảm bởi chính wire model chứ không bở
 
 Do đó KHÔNG có cycle nào biểu diễn được trên wire. Nhiều claim cùng trỏ tới một
 evidence là **fan-in và dedup**, không phải cycle: `chargeNode` trên
-`visitedTargets` chặn charge lần hai, còn `EvidenceResolveState.outcomes` giữ
-entity đã validate để lần gặp sau tái dùng thay vì fetch lại — cùng canonical key
+`visitedTargets` chặn charge lần hai, còn shared canonical outcome cache giữ
+entity đã fetch để lần gặp sau tái dùng thay vì fetch lại — cùng canonical key
 `{id, normalizedUrl}`, và cả hai đều cần thiết (§"Orchestration contract").
 
 Vì vậy kế hoạch này KHÔNG yêu cầu:
@@ -445,47 +449,102 @@ lại entity đã validate, nên một resolver gặp `alreadyVisited` không c�
 — nó không được refetch (vi phạm dedup) và cũng không được coi target đó là
 `invalid`.
 
-Vì vậy Evidence định nghĩa outcome cache riêng, **do call sở hữu và luôn đi kèm
-budget**:
+Answer `1.0` đã giải bài này và lời giải đó là **shared infrastructure, không phải
+chi tiết riêng của Answer**: `src/modules/answer/v1.0/client/resolve.ts` giữ một
+`WeakMap<RelationsTraversalBudgetState, BudgetResolutionState>` với `outcomes`
+(canonical outcome), `pending` (join fetch đang bay) và `globalStops` (budget stop
+theo key), sống lâu hơn một call và race-safe giữa các call dùng chung budget.
 
-```ts
-export interface EvidenceResolveState {
-  budget: RelationsTraversalBudgetState;
-  /** Canonical `{id, normalizedUrl}` -> outcome đã quan sát được trong walk này. */
-  outcomes: Map<string, EvidenceGraphNode>;
-}
+Điều này bắt buộc một quyết định composition, vì docstring của
+`resolveAnswerTargets` nói rõ: một canonical key mà Answer resolver **chưa từng
+chạm tới** — ví dụ được charge bởi một raw Relations traversal step trên cùng
+budget — sẽ bị report là `invalid`, không phải `resolved`. Nếu Evidence tự resolve
+bằng Relations resolver trên budget dùng chung với Answer thì chính nó tạo ra
+false `invalid` cho Answer.
 
-export function createEvidenceResolveState(
-  budget: RelationsTraversalBudgetState,
-): EvidenceResolveState;
+**Quyết định (ADR-0010 phải ratify):** trích xuất tầng canonical resolution này
+thành **shared internal layer khoá theo budget**, rồi cho cả Answer lẫn Evidence
+dùng chung:
+
+- Layer mới nằm ở `src/modules/shared/canonical-resolution.ts`, sở hữu
+  `WeakMap<budget, BudgetResolutionState>`, `resolveCanonicalTarget` và replay
+  semantics (`pending`, `globalStops`).
+- Layer này **KHÔNG được export** từ bất kỳ public subpath nào — cùng lý do
+  `releaseNode` của Relations được giữ module-internal: precondition của nó không
+  kiểm tra được từ ngoài.
+- Answer refactor để consume layer này. Đây là **pure refactor**: public API, wire
+  contract và normative semantic result của `aadp:answer@1.0` không đổi, đúng
+  định nghĩa patch-level của ADR-0007. Bằng chứng regression là **toàn bộ test
+  Answer hiện có phải pass mà không sửa một dòng nào**.
+- Evidence dùng đúng layer đó cho mọi fetch, nên hai module chia sẻ **một** bản đồ
+  canonical outcome trên mỗi budget.
+
+Nhờ vậy không cần một resolve-state do call sở hữu, không còn precondition
+"budget phải đi kèm cache" và không còn câu hỏi ownership khi gọi lồng/đồng thời:
+state gắn với budget, giống hệt mô hình Answer đang chạy.
+
+#### Cache canonical outcome, KHÔNG cache verdict theo reference
+
+Cache lưu `EvidenceCanonicalOutcome` — **kết quả fetch/schema/checksum của một
+canonical target** (entity đã validate, hoặc canonical failure) — chứ KHÔNG lưu
+`EvidenceGraphNode`. Verdict `target_type` được tính **lại cho từng occurrence**
+bằng expected type của chính occurrence đó, đúng như `entryFor` của Answer `1.0`.
+
+Lý do là một canonical target có thể được hai reference khai báo hai `target_type`
+khác nhau:
+
+```text
+1. answer.related_entities[0] -> E, khai báo target_type: claim  (SAI, E là evidence)
+2. claim C.evidence_refs[0]   -> E, khai báo target_type: evidence (ĐÚNG)
 ```
 
-`budget` và `outcomes` là một cặp. Truyền một budget đã được walk khác dùng mà
-không kèm `outcomes` tương ứng là **lỗi lập trình**: helper MUST throw ngay
-(precondition), không âm thầm refetch và không bịa status mới. Nhờ vậy tập status
-vẫn đúng bằng `AnswerTargetResolutionStatus`, không phát sinh giá trị `duplicate`.
+Nếu cache lưu cả status thì reference (1) sẽ đầu độc reference (2): edge C → E
+thành `invalid` chỉ vì Answer khai sai type ở chỗ khác, và đảo thứ tự input lại
+cho kết quả ngược — phá đúng cái mixed-order equivalence vừa cam kết, đồng thời
+tạo dangling-reference giả.
+
+Quy tắc: reference (1) vẫn `invalid` **cho riêng nó**, reference (2) vẫn
+`resolved` bằng chính entity đã fetch, và E chỉ được fetch một lần.
 
 #### Thuật toán `resolveAnswerEvidenceV1`
 
 | Bước | Hành động | Ordering |
 |---:|---|---|
 | 1 | Lọc `answer.related_entities` có `target_type` ∈ {`claim`, `evidence`}, giữ nguyên input order | Input order |
-| 2 | Gọi `resolveAnswerTargets` một lần trên tập đã lọc, dùng `state.budget` | Giữ nguyên order của Answer |
-| 3 | Validate từng entity resolve được bằng `validateEvidenceEntityV1`; ghi node vào `state.outcomes` theo canonical key | Như bước 2 |
+| 2 | Resolve từng reference đã lọc qua **shared canonical resolver** trên `options.budget` | Như bước 1 |
+| 3 | Với mỗi canonical outcome: kiểm `target_type` của **chính reference đó**, rồi validate bằng `validateEvidenceEntityV1`; tạo node | Như bước 1 |
 | 4 | Với mỗi **claim** đã resolve, theo đúng thứ tự ở bước 1, duyệt `evidence_refs` theo input order | (claim index, ref index) |
-| 5 | Mỗi ref: tra `state.outcomes` trước. **Hit** → tái dùng outcome, thêm edge, KHÔNG fetch lần hai. **Miss** → resolve qua Relations resolver trên cùng budget, validate, ghi vào `outcomes` | Như bước 4 |
+| 5 | Mỗi ref: tra canonical cache. **Hit** → tái dùng entity đã fetch, kiểm `target_type` riêng cho ref này, thêm edge, KHÔNG fetch lần hai. **Miss** → resolve qua cùng shared resolver | Như bước 4 |
 | 6 | Dừng. Evidence là leaf, không expand tiếp | — |
 
 `resolveClaimEvidenceV1` là đúng bước 4-6 với một claim đã có sẵn.
+
+Bước 2 **KHÔNG được gọi `resolveAnswerTargets`**. Hàm đó nhận nguyên
+`AnswerDocumentV1` chứ không nhận subset, và nó luôn collect cả
+`related_entities` **lẫn** `authorship.source_targets` — gọi nó sẽ fetch và charge
+budget cho những generated-summary source nằm ngoài phạm vi Evidence, thậm chí làm
+cạn budget trước khi walk claim → evidence bắt đầu. Ba đường thoát đều bị loại:
+thêm selector vào `resolveAnswerTargets` là đổi public API của Answer (vi phạm
+gate); dựng synthetic Answer để lách collection sẽ tạo document sai
+schema/checksum; tự viết lại orchestration là duplicate network stack. Đường còn
+lại — và là lý do tầng shared canonical resolution phải tồn tại — là Evidence tự
+collect reference của mình rồi resolve qua **cùng** tầng dùng chung.
+
+Hệ quả kiểm chứng được: một generated-summary Answer đi qua
+`resolveAnswerEvidenceV1` phải **không phát sinh request nào** tới
+`authorship.source_targets`. Đây là test bắt buộc, không phải ghi chú.
 
 Hệ quả trực tiếp:
 
 - **Fan-in**: C1 và C2 cùng trỏ tới E → E được fetch đúng một lần (bước 5 hit),
   và graph có hai edge tới cùng một node.
-- **Mixed order**: nếu Answer trỏ thẳng tới E *và* tới C1 (C1 → E), thì E đã nằm
-  trong `outcomes` từ bước 3; bước 5 tái dùng entity đã validate. Kết quả phải
+- **Mixed order**: nếu Answer trỏ thẳng tới E *và* tới C1 (C1 → E), thì E đã có
+  canonical outcome từ bước 2; bước 5 tái dùng entity đã fetch. Kết quả phải
   **giống hệt nhau ở cả hai thứ tự** (E trước C1, hoặc C1 trước E) — đây là test
   case bắt buộc, không phải chi tiết implementation.
+- **Mixed type**: cùng canonical target nhưng hai reference khai báo `target_type`
+  khác nhau → verdict tính riêng cho từng reference, cả hai chiều (reference sai
+  type đi trước, và reference đúng type đi trước) đều phải cho cùng kết quả.
 - `markExpanded`/`expandedTargets` KHÔNG được dùng: claim chỉ được duyệt một lần
   do chính ordering ở bước 4, và evidence không bao giờ được expand.
 
@@ -494,10 +553,15 @@ Hệ quả trực tiếp:
 ```ts
 export type EvidenceNodeKindV1 = "claim" | "evidence";
 
+/**
+ * Node = MỘT canonical target. `status` chỉ mô tả kết quả fetch/schema/checksum
+ * của chính target đó — KHÔNG mang verdict `target_type` của bất kỳ reference nào.
+ */
 export interface EvidenceGraphNode<T = unknown> {
-  kind: EvidenceNodeKindV1;
   /** Canonical `{id, normalizedUrl}` key — cùng identity rule với Relations. */
   key: string;
+  /** Suy ra từ document đã validate, không phải từ khai báo của reference. Vắng khi chưa resolve được. */
+  kind?: EvidenceNodeKindV1;
   status: AnswerTargetResolutionStatus;
   /** Chỉ có khi status === "resolved". */
   entity?: EntityV1<T>;
@@ -506,6 +570,19 @@ export interface EvidenceGraphNode<T = unknown> {
   message?: string;
 }
 
+/** Một occurrence trong `answer.related_entities` (bước 1-3), có verdict riêng. */
+export interface EvidenceGraphReference {
+  /** Index trong `related_entities` gốc của Answer, không phải index sau khi lọc. */
+  index: number;
+  reference: AnswerEntityReferenceV1;
+  /** Canonical key của node tương ứng. */
+  key: string;
+  /** Verdict của RIÊNG reference này, gồm cả sai `target_type` → "invalid". */
+  status: AnswerTargetResolutionStatus;
+  message?: string;
+}
+
+/** Một occurrence trong `claim.evidence_refs`, cũng có verdict riêng. */
 export interface EvidenceGraphEdge {
   /** `key` của claim node. */
   from: string;
@@ -515,11 +592,15 @@ export interface EvidenceGraphEdge {
   index: number;
   stance: EvidenceStanceV1;
   confidence?: number;
+  status: AnswerTargetResolutionStatus;
+  message?: string;
 }
 
 export interface EvidenceGraph<T = unknown> {
-  /** Discovery order: node bước 3 trước, rồi node bước 5. Không sort lại. */
+  /** Mỗi canonical target đúng một node. Discovery order: bước 2 trước, rồi bước 5. Không sort lại. */
   nodes: EvidenceGraphNode<T>[];
+  /** Direct Answer references theo input order. Rỗng với `resolveClaimEvidenceV1`. */
+  references: EvidenceGraphReference[];
   /** Sắp theo (claim discovery index, ref index). */
   edges: EvidenceGraphEdge[];
   /** True khi walk dừng trước khi thử hết reference (budget/abort). */
@@ -527,9 +608,14 @@ export interface EvidenceGraph<T = unknown> {
 }
 ```
 
+Tách `status` thành hai tầng chính là thứ chặn bug đầu độc cache ở trên: node giữ
+**canonical outcome dùng chung**, còn `references[]`/`edges[]` giữ **verdict theo
+từng occurrence**. Một node `resolved` vẫn có thể bị một reference khai sai
+`target_type` báo `invalid`, mà không kéo theo reference khác.
+
 Node không resolve được vẫn xuất hiện với status tương ứng, không bị bỏ khỏi
-`nodes`. Edge luôn tồn tại nếu wire có ref, kể cả khi node đích không resolve —
-để consumer phân biệt "không có ref" với "có ref nhưng fetch hỏng".
+`nodes`. Edge và reference entry luôn tồn tại nếu wire có ref, kể cả khi node đích
+không resolve — để consumer phân biệt "không có ref" với "có ref nhưng fetch hỏng".
 
 ### Partial result, cancellation và retry
 
@@ -691,9 +777,9 @@ export type EvidenceValidationResult;
 export type EvidenceEntityValidationResult;
 export type EvidenceClientOptions;
 export type EvidenceResolveOptions;
-export type EvidenceResolveState;
 export type EvidenceNodeKindV1 = "claim" | "evidence";
 export type EvidenceGraphNode;
+export type EvidenceGraphReference;
 export type EvidenceGraphEdge;
 export type EvidenceGraph;
 export type EvidenceFreshnessState = "fresh" | "stale";
@@ -709,18 +795,13 @@ export function fetchEvidenceEntityV1(
   options: EvidenceClientOptions,
   budget: RelationsTraversalBudgetState,
 ): Promise<ValidatedEvidenceEntityV1>;
-export function createEvidenceResolveState(
-  budget: RelationsTraversalBudgetState,
-): EvidenceResolveState;
 export function resolveClaimEvidenceV1(
   claim: EvidenceClaimDocumentV1,
   options: EvidenceResolveOptions,
-  state: EvidenceResolveState,
 ): Promise<EvidenceGraph>;
 export function resolveAnswerEvidenceV1(
   answer: AnswerDocumentV1,
   options: EvidenceResolveOptions,
-  state: EvidenceResolveState,
 ): Promise<EvidenceGraph>;
 export function classifyEvidenceFreshness(
   evidence: EvidenceDocumentV1,
@@ -736,10 +817,14 @@ Tên type có suffix `V1` hoặc nằm trong versioned subpath. Public function 
 nhận implementation-private type. `fetchEvidenceEntityV1` dùng core `fetchEntity`
 rồi `parseEvidenceEntityV1`; không trust target URL trước khi entity hợp lệ.
 
-`state` là tham số **bắt buộc** của cả hai resolver, không phải optional: nó mang
-budget và outcome cache như một cặp không tách rời (§"Orchestration contract").
-Đưa cache vào `EvidenceResolveOptions` sẽ khiến việc quên nó trở thành một
-silent-refetch bug thay vì type error.
+Hai resolver nhận `options.budget` giống hệt Answer `1.0` — **không có tham số
+state riêng**. Canonical outcome cache khoá theo chính budget ở tầng shared
+internal (§"Orchestration contract"), nên không có gì để caller quên truyền và
+cũng không phát sinh câu hỏi ownership khi gọi lồng nhau hoặc đồng thời.
+
+`EvidenceCanonicalOutcome` và toàn bộ tầng canonical resolution là **internal**:
+không xuất hiện trong bất kỳ public subpath nào của Answer, Relations hay
+Evidence.
 
 Package/schema export paths:
 
@@ -812,7 +897,12 @@ Valid fixtures tối thiểu:
   §"Orchestration contract";
 - answer trỏ **đồng thời** tới evidence E và tới claim C1 (C1 → E), có hai bản
   đảo thứ tự `related_entities` (E trước C1, và C1 trước E) — cả hai phải cho ra
-  `EvidenceGraph` tương đương và đúng một lần fetch E.
+  `EvidenceGraph` tương đương và đúng một lần fetch E;
+- answer khai `target_type: claim` cho một canonical target thực chất là evidence,
+  trong khi claim C hợp lệ trỏ tới đúng target đó với `target_type: evidence` —
+  hai bản đảo thứ tự, để chứng minh verdict theo occurrence không đầu độc lẫn nhau;
+- generated-summary answer có `authorship.source_targets` không rỗng, để chứng
+  minh `resolveAnswerEvidenceV1` không chạm tới chúng.
 
 Invalid fixtures tối thiểu:
 
@@ -891,6 +981,11 @@ fallback.
 3. Viết `conformance.md`, stable check IDs, ranh giới normative/advisory.
 4. Ghi rõ trong ADR quyết định "Answer integration không sửa `aadp:answer@1.0`"
    và quyết định freshness là client-computed.
+5. Ratify **composition API** giữa các module: trích xuất tầng canonical
+   resolution khoá theo budget thành shared internal layer (§"Orchestration
+   contract"), thay vì thêm selector vào `resolveAnswerTargets` hay để Evidence
+   tự resolve bằng raw Relations trên budget dùng chung. Ghi kèm lý do
+   compatibility: đây là refactor patch-level của Answer theo ADR-0007.
 
 Gate: maintainer review ADR/spec; không còn TODO ảnh hưởng schema hoặc semantics.
 
@@ -938,25 +1033,38 @@ Gate: deterministic semantic results; không network, không wall clock.
 
 ### Phase 4 — Client, traversal và Answer integration
 
-1. Implement `fetchEvidenceEntityV1` bằng core fetch rồi Evidence validation.
-2. Implement `createEvidenceResolveState` và `EvidenceGraph` builder (node/edge
-   ordering theo §"Orchestration contract").
-3. Implement `resolveClaimEvidenceV1` (bước 4-6) dùng Relations resolver + shared
-   budget + outcome cache; test precondition throw khi budget không đi kèm cache
-   tương ứng.
-4. Implement `resolveAnswerEvidenceV1` (bước 1-6) trên `resolveAnswerTargets` hiện
-   có, **gồm bước expand `evidence_refs` của claim đã resolve**; không sửa Answer
-   module.
-5. Implement injected-clock freshness classifier.
-6. Test abort, ordering, authorization, partial result, budget exhaustion, URL
+1. **Trích xuất shared canonical resolution layer** từ
+   `src/modules/answer/v1.0/client/resolve.ts` sang
+   `src/modules/shared/canonical-resolution.ts`: `WeakMap` theo budget,
+   `resolveCanonicalTarget`, `pending`, `globalStops`. Refactor Answer để consume
+   nó. **Bằng chứng bắt buộc: toàn bộ test Answer hiện có pass mà không sửa test
+   nào**, và layer mới không xuất hiện trong bất kỳ public export nào.
+2. Implement `fetchEvidenceEntityV1` bằng core fetch rồi Evidence validation.
+3. Implement `EvidenceGraph` builder: node theo canonical target,
+   `references[]`/`edges[]` theo occurrence, ordering theo §"Orchestration
+   contract".
+4. Implement `resolveClaimEvidenceV1` (bước 4-6) trên shared canonical resolver.
+5. Implement `resolveAnswerEvidenceV1` (bước 1-6), **gồm bước expand
+   `evidence_refs` của claim đã resolve**; tự collect `related_entities` đã lọc,
+   **KHÔNG gọi `resolveAnswerTargets`**; không sửa public API của Answer.
+6. Implement injected-clock freshness classifier.
+7. Test abort, ordering, authorization, partial result, budget exhaustion, URL
    policy và dangling classification theo bảng ở §"Graph và traversal policy" —
    gồm case 401/403 được phân loại `forbidden` mà không cần đọc `source.access`.
-7. Test riêng cho orchestration: hai hop đầy đủ; fan-in C1/C2 → E fetch một lần;
+8. Test riêng cho orchestration: hai hop đầy đủ; fan-in C1/C2 → E fetch một lần;
    **cả hai thứ tự** (E trực tiếp trước C1, và C1 trước E trực tiếp) cho graph
    tương đương; node/edge ordering deterministic; edge vẫn tồn tại khi node đích
    không resolve.
+9. Test composition boundary: generated-summary Answer đi qua
+   `resolveAnswerEvidenceV1` **không phát sinh request nào** tới
+   `authorship.source_targets`; và mixed-type cả hai chiều (reference sai
+   `target_type` trước/sau reference đúng) cho verdict độc lập, đúng một lần fetch.
+10. Test cross-module: một walk trộn `resolveAnswerTargets` và
+    `resolveAnswerEvidenceV1` trên **cùng budget** không sinh `invalid` giả cho
+    canonical target mà module kia đã fetch.
 
-Gate: không duplicate HTTP/DNS/budget implementation; Answer public API không đổi.
+Gate: không duplicate HTTP/DNS/budget implementation; Answer public API, wire
+contract và test suite hiện có không đổi.
 
 ### Phase 5 — Reference resources (nợ `1.3.0`)
 
@@ -1013,6 +1121,12 @@ Ngoài inventory mới, các file hiện có dự kiến thay đổi:
   extension validation.
 - `src/server/index.ts`: export type mới nếu cần.
 - `package.json`: package version, Evidence exports và schema export path.
+- `src/modules/shared/canonical-resolution.ts` (mới, internal): per-budget
+  canonical outcome state trích từ Answer resolver, dùng chung cho Answer và
+  Evidence. Không export từ public subpath nào.
+- `src/modules/answer/v1.0/client/resolve.ts`: refactor để consume layer trên.
+  Pure refactor — public API, wire contract và kết quả semantic không đổi; test
+  Answer hiện có là regression proof và không được sửa.
 - `src/module-registry/*`: chỉ sửa nếu Evidence làm lộ bug generic; không thêm
   Evidence-specific branch.
 - `examples/reference-server/*`: Answer, claim và evidence resource + manifest
@@ -1036,7 +1150,8 @@ Không sửa released files dưới `schemas/modules/relations/v1.0`,
 | Schema | Valid/invalid fixtures, exact `$id`, closed objects, cross-module `$ref`, immutability digest |
 | Semantic | Locale, code points, timestamp order/precedence, confidence, duplicates, content checksum |
 | Registry | Exact dispatch cho hai kind; unsupported module/version/kind; no fallback |
-| Client | Resolution order, abort, auth, shared budget, hai-hop expand, fan-in dedup, mixed-order equivalence, `EvidenceGraph` node/edge ordering, partial result, injected-clock freshness |
+| Client | Resolution order, abort, auth, shared budget, hai-hop expand, fan-in dedup, mixed-order và mixed-type equivalence, `EvidenceGraph` node/reference/edge ordering, partial result, injected-clock freshness |
+| Composition | Shared canonical layer không rò ra public export; Answer test suite pass không sửa; `source_targets` không bị fetch; trộn Answer/Evidence trên cùng budget không sinh `invalid` giả |
 | Answer integration | `x_answer` schema/validation result không đổi; helper resolve claim/evidence đúng |
 | Security | Inert malicious text, URL/DNS/redirect policy, `access` không cấp quyền, no sensitive logging |
 | Conformance | Stable check IDs, required/optional behavior, external implementation |
@@ -1075,6 +1190,12 @@ Release `1.4.0` chỉ được phép khi:
 - `resolveAnswerEvidenceV1` expand claim tới evidence (hai hop) và cho kết quả
   tương đương ở mọi thứ tự `related_entities`; mỗi evidence fetch đúng một lần
   trong một walk.
+- Canonical outcome được cache dùng chung theo budget, còn verdict `target_type`
+  tính riêng cho từng occurrence; không reference nào đầu độc verdict của
+  reference khác.
+- Shared canonical resolution layer là internal, Answer chỉ bị refactor và toàn
+  bộ test Answer hiện có pass không sửa; `authorship.source_targets` không bị
+  Evidence helper fetch.
 - Generic server dùng đúng extension grammar của core v1.0 qua predicate dùng
   chung; boundary test `x_Foo`/`x_1`/`x_` xanh.
 - Stance/confidence/provenance semantics deterministic, có invalid fixture cho
