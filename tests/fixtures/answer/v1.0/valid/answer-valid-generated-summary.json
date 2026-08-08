@@ -1,0 +1,31 @@
+{
+  "module": "aadp:answer",
+  "version": "1.0",
+  "kind": "answer",
+  "question": "What does Nimbus do?",
+  "concise_answer": "Nimbus schedules background jobs for example applications.",
+  "answer": "Nimbus is a neutral example job scheduler used to illustrate the Answer module wire contract; it is not a real product.",
+  "locale": "en",
+  "authorship": {
+    "kind": "generated-summary",
+    "generator": {
+      "name": "Example Summarizer",
+      "version": "2026-08"
+    },
+    "generated_at": "2026-08-06T08:55:00Z",
+    "source_targets": [
+      {
+        "target_type": "document",
+        "target": {
+          "id": "document:nimbus-overview",
+          "url": "https://example.com/ai/v1.0/entities/document/nimbus-overview.json"
+        }
+      }
+    ]
+  },
+  "freshness": {
+    "published_at": "2026-08-01T00:00:00Z",
+    "updated_at": "2026-08-06T08:55:00Z"
+  },
+  "content_checksum": "sha256:bd7e5c597e528bfff074ec73522ac62ea0e99aceca9abd0b2f8a34271d31847a"
+}

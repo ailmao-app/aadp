@@ -1,0 +1,40 @@
+{
+  "module": "aadp:answer",
+  "version": "1.0",
+  "kind": "answer",
+  "question": "What is Orbit?",
+  "concise_answer": "Orbit is a neutral example service.",
+  "locale": "en",
+  "authorship": {
+    "kind": "source-authored",
+    "author": {
+      "name": "Example Editorial Team"
+    }
+  },
+  "freshness": {
+    "published_at": "2026-08-01T00:00:00Z",
+    "updated_at": "2026-08-06T00:00:00Z"
+  },
+  "applicability": {
+    "audiences": [
+      "general"
+    ]
+  },
+  "related_entities": [
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:orbit",
+        "url": "https://example.com/ai/v1.0/entities/service/orbit.json"
+      }
+    },
+    {
+      "target_type": "service",
+      "target": {
+        "id": "service:orbit",
+        "url": "https://example.com/ai/v1.0/entities/service/orbit.json"
+      }
+    }
+  ],
+  "content_checksum": "sha256:ef7eee8d0cc6284f7983add9f06c759945411c4ec63c9e303f1bce223664435e"
+}

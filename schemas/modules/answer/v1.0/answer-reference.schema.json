@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/modules/answer/v1.0/answer-reference.schema.json",
+  "title": "AADP Answer Module v1.0 — Answer entity reference",
+  "description": "Component schema (not a top-level module document kind). Used by both `related_entities` and generated-summary `source_targets` (specification.md \"Related entity and Evidence boundary\"). `target` is the released Relations `1.0` target component, unmodified — Answer does not copy or fork that schema.",
+  "type": "object",
+  "required": ["target_type", "target"],
+  "properties": {
+    "target_type": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+    "target": { "$ref": "https://aadp.dev/schemas/modules/relations/v1.0/target.schema.json" }
+  },
+  "additionalProperties": false
+}
