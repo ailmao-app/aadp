@@ -9,7 +9,7 @@
 | Dependency | Relations `1.0` stable; Answer `1.0` stable; ADR-0010 (citation/provenance/security) Accepted |
 | Wire impact | Module riêng `aadp:evidence@1.0`; generic server capability là additive public API của `ail-aadp/server`; KHÔNG sửa `aadp:answer@1.0` |
 | Nợ kế thừa | Hai release gate của `1.3.0` được defer sang release này — xem [roadmap §10](release-roadmap.md) và [implementation record 1.3.0](../../records/implementation-record-v1.3.0.md) |
-| Review | [implementation-plan-v1.4.0-review.md](implementation-plan-v1.4.0-review.md) — kế hoạch này được viết lại để đóng finding 3, 4, 5, 6; finding 1 và 2 vẫn là gate ở Phase 0. Vòng review thứ hai chỉnh thêm: extension grammar phải bằng core, model là acyclic (bỏ cycle/self-reference machinery), `source.access` không tham gia authorization, và `retrieved_at` dùng ordering thay vì equality |
+| Review | [implementation-plan-v1.4.0-review.md](implementation-plan-v1.4.0-review.md) — kế hoạch này được viết lại để đóng finding 3, 4, 5, 6; finding 1 và 2 vẫn là gate ở Phase 0. Vòng review thứ hai chỉnh thêm: extension grammar phải bằng core, model là acyclic (bỏ cycle/self-reference machinery), `source.access` không tham gia authorization, và `retrieved_at` dùng ordering thay vì equality. Vòng thứ ba bổ sung §"Orchestration contract" (thuật toán hai hop, outcome cache tách khỏi budget, `EvidenceGraph` node/edge ordering) và đồng bộ check `evidence.context` sang ordering |
 | Owner | AADP maintainers |
 
 ## Trạng thái theo work package
@@ -246,9 +246,10 @@ có thêm vai trò, và phải do ADR-0010 hoặc một module version mới đ�
 - Trong một `evidence_refs`, hai phần tử không được cùng canonical identity, kể
   cả khi `stance` khác nhau. Muốn diễn đạt hai stance cho cùng evidence thì tách
   thành hai claim.
-- Dedup trên toàn bộ walk dùng `RelationsTraversalBudgetState.visitedTargets`,
-  cũng theo `{id, normalizedUrl}`. Không dedup riêng theo URL hoặc riêng theo
-  entity ID.
+- Dedup trên toàn bộ walk dùng cùng canonical key `{id, normalizedUrl}` ở hai
+  tầng: `RelationsTraversalBudgetState.visitedTargets` cho **kế toán budget** và
+  `EvidenceResolveState.outcomes` cho **tái dùng kết quả đã validate**
+  (§"Orchestration contract"). Không dedup riêng theo URL hoặc riêng theo entity ID.
 
 ### Stance và confidence
 
@@ -328,8 +329,12 @@ extension. Vì vậy:
   không thay đổi `AnswerValidationResult`, `AnswerEntityValidationResult` hoặc
   tập payload hợp lệ của Answer `1.0`.
 - Helper mới `resolveAnswerEvidenceV1(answer, options)` lọc `related_entities`
-  theo `target_type`, gọi `resolveAnswerTargets` hiện có, rồi validate từng entity
-  đã resolve bằng Evidence entity validator. Không tự fetch, không tạo budget con.
+  theo `target_type`, gọi `resolveAnswerTargets` hiện có, validate từng entity đã
+  resolve bằng Evidence entity validator, **rồi expand `evidence_refs` của mọi
+  claim đã resolve** trên cùng budget. Không tự fetch ngoài Relations resolver,
+  không tạo budget con. Thuật toán đầy đủ và kết quả `EvidenceGraph` được định
+  nghĩa ở §"Orchestration contract" — bước expand là bắt buộc, nếu bỏ thì helper
+  chỉ validate link trực tiếp và âm thầm bỏ qua toàn bộ evidence của claim.
 - Duplicate payload được tránh bằng chính mô hình reference: evidence nằm ở entity
   riêng, answer chỉ giữ target. Không inline evidence vào `x_answer`.
 
@@ -411,8 +416,9 @@ và điều đó được bảo đảm bởi chính wire model chứ không bở
 
 Do đó KHÔNG có cycle nào biểu diễn được trên wire. Nhiều claim cùng trỏ tới một
 evidence là **fan-in và dedup**, không phải cycle: `chargeNode` trên
-`visitedTargets` (canonical `{id, normalizedUrl}`) đảm bảo evidence đó chỉ được
-fetch một lần trong mỗi walk.
+`visitedTargets` chặn charge lần hai, còn `EvidenceResolveState.outcomes` giữ
+entity đã validate để lần gặp sau tái dùng thay vì fetch lại — cùng canonical key
+`{id, normalizedUrl}`, và cả hai đều cần thiết (§"Orchestration contract").
 
 Vì vậy kế hoạch này KHÔNG yêu cầu:
 
@@ -425,6 +431,105 @@ Nếu ADR-0010 quyết định thêm reverse edge (evidence → claim) thì lúc
 nghĩa ownership của cạnh đó cùng cycle policy tương ứng, và phải cập nhật kế
 hoạch này trước khi tạo schema. Duplicate-target check và shared-budget check vẫn
 giữ nguyên trong mọi trường hợp.
+
+### Orchestration contract
+
+`resolveClaimEvidenceV1` (một hop) và `resolveAnswerEvidenceV1` (hai hop) dùng
+chung một state object và cùng trả `EvidenceGraph`.
+
+#### Budget không phải result cache
+
+`RelationsTraversalBudgetState.visitedTargets` là **cấu trúc kế toán budget, KHÔNG
+phải cache kết quả**: `chargeNode` chỉ trả `{ alreadyVisited: true }` và không giữ
+lại entity đã validate, nên một resolver gặp `alreadyVisited` không có gì để replay
+— nó không được refetch (vi phạm dedup) và cũng không được coi target đó là
+`invalid`.
+
+Vì vậy Evidence định nghĩa outcome cache riêng, **do call sở hữu và luôn đi kèm
+budget**:
+
+```ts
+export interface EvidenceResolveState {
+  budget: RelationsTraversalBudgetState;
+  /** Canonical `{id, normalizedUrl}` -> outcome đã quan sát được trong walk này. */
+  outcomes: Map<string, EvidenceGraphNode>;
+}
+
+export function createEvidenceResolveState(
+  budget: RelationsTraversalBudgetState,
+): EvidenceResolveState;
+```
+
+`budget` và `outcomes` là một cặp. Truyền một budget đã được walk khác dùng mà
+không kèm `outcomes` tương ứng là **lỗi lập trình**: helper MUST throw ngay
+(precondition), không âm thầm refetch và không bịa status mới. Nhờ vậy tập status
+vẫn đúng bằng `AnswerTargetResolutionStatus`, không phát sinh giá trị `duplicate`.
+
+#### Thuật toán `resolveAnswerEvidenceV1`
+
+| Bước | Hành động | Ordering |
+|---:|---|---|
+| 1 | Lọc `answer.related_entities` có `target_type` ∈ {`claim`, `evidence`}, giữ nguyên input order | Input order |
+| 2 | Gọi `resolveAnswerTargets` một lần trên tập đã lọc, dùng `state.budget` | Giữ nguyên order của Answer |
+| 3 | Validate từng entity resolve được bằng `validateEvidenceEntityV1`; ghi node vào `state.outcomes` theo canonical key | Như bước 2 |
+| 4 | Với mỗi **claim** đã resolve, theo đúng thứ tự ở bước 1, duyệt `evidence_refs` theo input order | (claim index, ref index) |
+| 5 | Mỗi ref: tra `state.outcomes` trước. **Hit** → tái dùng outcome, thêm edge, KHÔNG fetch lần hai. **Miss** → resolve qua Relations resolver trên cùng budget, validate, ghi vào `outcomes` | Như bước 4 |
+| 6 | Dừng. Evidence là leaf, không expand tiếp | — |
+
+`resolveClaimEvidenceV1` là đúng bước 4-6 với một claim đã có sẵn.
+
+Hệ quả trực tiếp:
+
+- **Fan-in**: C1 và C2 cùng trỏ tới E → E được fetch đúng một lần (bước 5 hit),
+  và graph có hai edge tới cùng một node.
+- **Mixed order**: nếu Answer trỏ thẳng tới E *và* tới C1 (C1 → E), thì E đã nằm
+  trong `outcomes` từ bước 3; bước 5 tái dùng entity đã validate. Kết quả phải
+  **giống hệt nhau ở cả hai thứ tự** (E trước C1, hoặc C1 trước E) — đây là test
+  case bắt buộc, không phải chi tiết implementation.
+- `markExpanded`/`expandedTargets` KHÔNG được dùng: claim chỉ được duyệt một lần
+  do chính ordering ở bước 4, và evidence không bao giờ được expand.
+
+#### `EvidenceGraph`
+
+```ts
+export type EvidenceNodeKindV1 = "claim" | "evidence";
+
+export interface EvidenceGraphNode<T = unknown> {
+  kind: EvidenceNodeKindV1;
+  /** Canonical `{id, normalizedUrl}` key — cùng identity rule với Relations. */
+  key: string;
+  status: AnswerTargetResolutionStatus;
+  /** Chỉ có khi status === "resolved". */
+  entity?: EntityV1<T>;
+  document?: EvidenceClaimDocumentV1 | EvidenceDocumentV1;
+  /** Có với mọi status khác "resolved". */
+  message?: string;
+}
+
+export interface EvidenceGraphEdge {
+  /** `key` của claim node. */
+  from: string;
+  /** `key` của evidence node. */
+  to: string;
+  /** Index trong `claim.evidence_refs`, để truy vết về wire. */
+  index: number;
+  stance: EvidenceStanceV1;
+  confidence?: number;
+}
+
+export interface EvidenceGraph<T = unknown> {
+  /** Discovery order: node bước 3 trước, rồi node bước 5. Không sort lại. */
+  nodes: EvidenceGraphNode<T>[];
+  /** Sắp theo (claim discovery index, ref index). */
+  edges: EvidenceGraphEdge[];
+  /** True khi walk dừng trước khi thử hết reference (budget/abort). */
+  partial: boolean;
+}
+```
+
+Node không resolve được vẫn xuất hiện với status tương ứng, không bị bỏ khỏi
+`nodes`. Edge luôn tồn tại nếu wire có ref, kể cả khi node đích không resolve —
+để consumer phân biệt "không có ref" với "có ref nhưng fetch hỏng".
 
 ### Partial result, cancellation và retry
 
@@ -586,6 +691,10 @@ export type EvidenceValidationResult;
 export type EvidenceEntityValidationResult;
 export type EvidenceClientOptions;
 export type EvidenceResolveOptions;
+export type EvidenceResolveState;
+export type EvidenceNodeKindV1 = "claim" | "evidence";
+export type EvidenceGraphNode;
+export type EvidenceGraphEdge;
 export type EvidenceGraph;
 export type EvidenceFreshnessState = "fresh" | "stale";
 export type EvidenceConformanceOptions;
@@ -600,13 +709,18 @@ export function fetchEvidenceEntityV1(
   options: EvidenceClientOptions,
   budget: RelationsTraversalBudgetState,
 ): Promise<ValidatedEvidenceEntityV1>;
+export function createEvidenceResolveState(
+  budget: RelationsTraversalBudgetState,
+): EvidenceResolveState;
 export function resolveClaimEvidenceV1(
   claim: EvidenceClaimDocumentV1,
   options: EvidenceResolveOptions,
+  state: EvidenceResolveState,
 ): Promise<EvidenceGraph>;
 export function resolveAnswerEvidenceV1(
   answer: AnswerDocumentV1,
   options: EvidenceResolveOptions,
+  state: EvidenceResolveState,
 ): Promise<EvidenceGraph>;
 export function classifyEvidenceFreshness(
   evidence: EvidenceDocumentV1,
@@ -621,6 +735,11 @@ export function runEvidenceConformance(
 Tên type có suffix `V1` hoặc nằm trong versioned subpath. Public function không
 nhận implementation-private type. `fetchEvidenceEntityV1` dùng core `fetchEntity`
 rồi `parseEvidenceEntityV1`; không trust target URL trước khi entity hợp lệ.
+
+`state` là tham số **bắt buộc** của cả hai resolver, không phải optional: nó mang
+budget và outcome cache như một cặp không tách rời (§"Orchestration contract").
+Đưa cache vào `EvidenceResolveOptions` sẽ khiến việc quên nó trở thành một
+silent-refetch bug thay vì type error.
 
 Package/schema export paths:
 
@@ -688,7 +807,12 @@ Valid fixtures tối thiểu:
   (`U+E000` và `U+10000`) với `content_checksum` tính bằng `checksumOf()`;
 - answer entity tham chiếu claim qua `related_entities` mà không sửa `x_answer` schema;
 - hai claim khác nhau cùng trỏ tới một evidence (fan-in) — evidence chỉ được fetch
-  một lần trong một walk nhờ dedup `visitedTargets`.
+  một lần trong một walk nhờ outcome cache;
+- answer → claim → evidence hai hop đầy đủ, để test bước expand ở
+  §"Orchestration contract";
+- answer trỏ **đồng thời** tới evidence E và tới claim C1 (C1 → E), có hai bản
+  đảo thứ tự `related_entities` (E trước C1, và C1 trước E) — cả hai phải cho ra
+  `EvidenceGraph` tương đương và đúng một lần fetch E.
 
 Invalid fixtures tối thiểu:
 
@@ -721,11 +845,11 @@ invalid fixture chỉ nên có một primary failure.
 | `evidence.resource` | Fetch neutral claim và evidence resource qua core flow |
 | `evidence.schema` | Wrapper đúng Evidence `1.0` schema |
 | `evidence.semantic` | Pure semantic invariants (gồm `content_checksum`) xanh |
-| `evidence.context` | Entity type, `x_evidence` presence, canonical URL policy, `updated_at` equality |
+| `evidence.context` | Entity type, `x_evidence` presence, canonical URL policy, ordering `provenance.retrieved_at <= entity.updated_at` (KHÔNG phải equality) |
 | `evidence.graph` | Claim→evidence resolve, không `not-found`/`invalid`, fan-in dedup đúng (một evidence chỉ fetch một lần) |
 | `evidence.stance` | Stance/confidence semantics và vắng-confidence không bị suy diễn |
 | `evidence.provenance` | Timestamp ordering, precedence và freshness classification |
-| `evidence.answer_link` | Answer `related_entities` tới claim/evidence resolve được, `x_answer` không đổi |
+| `evidence.answer_link` | Answer `related_entities` tới claim/evidence resolve được, claim được expand tới evidence (hai hop), `x_answer` không đổi |
 | `evidence.security` | Free text inert; URL/DNS/redirect policy; `access` không cấp quyền |
 
 Runner hỗ trợ server có auth theo cùng option boundary với Relations/Answer.
@@ -815,15 +939,22 @@ Gate: deterministic semantic results; không network, không wall clock.
 ### Phase 4 — Client, traversal và Answer integration
 
 1. Implement `fetchEvidenceEntityV1` bằng core fetch rồi Evidence validation.
-2. Implement `resolveClaimEvidenceV1` dùng Relations resolver + shared budget +
-   dedup fan-in qua `visitedTargets`.
-3. Implement `resolveAnswerEvidenceV1` trên `resolveAnswerTargets` hiện có, không
-   sửa Answer module.
-4. Implement injected-clock freshness classifier.
-5. Test abort, ordering, authorization, partial result, budget exhaustion, URL
-   policy, fan-in dedup và dangling classification theo bảng ở §"Graph và
-   traversal policy" — gồm case 401/403 được phân loại `forbidden` mà không cần
-   đọc `source.access`.
+2. Implement `createEvidenceResolveState` và `EvidenceGraph` builder (node/edge
+   ordering theo §"Orchestration contract").
+3. Implement `resolveClaimEvidenceV1` (bước 4-6) dùng Relations resolver + shared
+   budget + outcome cache; test precondition throw khi budget không đi kèm cache
+   tương ứng.
+4. Implement `resolveAnswerEvidenceV1` (bước 1-6) trên `resolveAnswerTargets` hiện
+   có, **gồm bước expand `evidence_refs` của claim đã resolve**; không sửa Answer
+   module.
+5. Implement injected-clock freshness classifier.
+6. Test abort, ordering, authorization, partial result, budget exhaustion, URL
+   policy và dangling classification theo bảng ở §"Graph và traversal policy" —
+   gồm case 401/403 được phân loại `forbidden` mà không cần đọc `source.access`.
+7. Test riêng cho orchestration: hai hop đầy đủ; fan-in C1/C2 → E fetch một lần;
+   **cả hai thứ tự** (E trực tiếp trước C1, và C1 trước E trực tiếp) cho graph
+   tương đương; node/edge ordering deterministic; edge vẫn tồn tại khi node đích
+   không resolve.
 
 Gate: không duplicate HTTP/DNS/budget implementation; Answer public API không đổi.
 
@@ -831,7 +962,11 @@ Gate: không duplicate HTTP/DNS/budget implementation; Answer public API không 
 
 1. Dựa trên Phase 1, thêm neutral Answer repository/resource vào
    `examples/reference-server` (khoản nợ Phase 3 item 4 của `1.3.0`).
-2. Thêm neutral claim và evidence resource.
+2. Thêm neutral claim và evidence resource, gồm: một answer → claim → evidence
+   hai hop, một evidence được hai claim dùng chung (fan-in), một evidence có
+   `retrieved_at` **sớm hơn** `updated_at` (để `evidence.context` chạy đúng
+   ordering invariant chứ không phải equality), và một evidence resource có
+   `security` declaration để sinh `forbidden` hợp lệ.
 3. Khai báo `aadp:answer@1.0` và `aadp:evidence@1.0` trong manifest `modules`,
    chỉ sau khi artifacts và endpoint đã sẵn sàng.
 4. Reference server không chứa reusable protocol logic hoặc business rule.
@@ -901,7 +1036,7 @@ Không sửa released files dưới `schemas/modules/relations/v1.0`,
 | Schema | Valid/invalid fixtures, exact `$id`, closed objects, cross-module `$ref`, immutability digest |
 | Semantic | Locale, code points, timestamp order/precedence, confidence, duplicates, content checksum |
 | Registry | Exact dispatch cho hai kind; unsupported module/version/kind; no fallback |
-| Client | Resolution order, abort, auth, shared budget, fan-in dedup, partial result, injected-clock freshness |
+| Client | Resolution order, abort, auth, shared budget, hai-hop expand, fan-in dedup, mixed-order equivalence, `EvidenceGraph` node/edge ordering, partial result, injected-clock freshness |
 | Answer integration | `x_answer` schema/validation result không đổi; helper resolve claim/evidence đúng |
 | Security | Inert malicious text, URL/DNS/redirect policy, `access` không cấp quyền, no sensitive logging |
 | Conformance | Stable check IDs, required/optional behavior, external implementation |
@@ -937,6 +1072,9 @@ Release `1.4.0` chỉ được phép khi:
   authorization/URL policy là kết quả hợp lệ.
 - Graph traversal dùng shared Relations budget, fan-in dedup và partial-result
   model; không có network stack riêng cho Evidence.
+- `resolveAnswerEvidenceV1` expand claim tới evidence (hai hop) và cho kết quả
+  tương đương ở mọi thứ tự `related_entities`; mỗi evidence fetch đúng một lần
+  trong một walk.
 - Generic server dùng đúng extension grammar của core v1.0 qua predicate dùng
   chung; boundary test `x_Foo`/`x_1`/`x_` xanh.
 - Stance/confidence/provenance semantics deterministic, có invalid fixture cho
