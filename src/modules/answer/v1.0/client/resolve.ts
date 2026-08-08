@@ -25,6 +25,7 @@ import {
   type RelationsTraversalIssue,
 } from "../../../relations/v1.0/client/index.js";
 import {
+  AadpClientError,
   AadpDiscoveryBudgetExceededError,
   AbortedError,
   AadpRequestError,
@@ -35,6 +36,7 @@ import {
   BlockedUrlError,
 } from "../../../../client/v1.0/index.js";
 import { canonicalTargetKey, releaseNode } from "../../../relations/v1.0/client/budget.js";
+import { resolutionContextDigest, type ResolutionContextOptions } from "./resolution-context.js";
 import type { EntityV1 } from "../../../../client/v1.0/types.js";
 import type { AnswerDocumentV1, AnswerEntityReferenceV1 } from "../types.js";
 import type { AnswerResolvedTargetEntry, AnswerResolvedTargets, AnswerReferenceGroup, AnswerTargetResolutionStatus } from "./types.js";
@@ -297,15 +299,59 @@ interface BudgetResolutionState {
   outcomes: Map<string, CanonicalOutcome>;
   pending: Map<string, PendingFetch>;
   globalStops: Map<string, Error>;
+  /**
+   * Digest of the request-affecting options this budget's state was FIRST
+   * used with — see `resolution-context.ts`. `outcomes`/`pending` are keyed
+   * by canonical target alone, so without this a second call could replay
+   * (or join) a request made under different credentials, URL policy or
+   * response-size cap. Only the digest is kept; raw header values never are.
+   */
+  contextDigest: string;
 }
 
 const budgetState = new WeakMap<RelationsTraversalBudgetState, BudgetResolutionState>();
 
-function stateFor(budget: RelationsTraversalBudgetState): BudgetResolutionState {
-  let state = budgetState.get(budget);
+/**
+ * Returns the budget's resolution state, binding `options`' resolution
+ * context to it on first use.
+ *
+ * Throws `AadpClientError` (`code: "resolution_context_mismatch"`) when a
+ * later call's context differs — fail closed, BEFORE any cache replay,
+ * `pending` join, budget charge or HTTP request, so a rejected call is a
+ * no-op rather than a half-applied one. This is a caller programming error
+ * (one budget must mean one immutable request configuration), not a data
+ * condition, so it is not expressible as a per-reference resolution status:
+ * reporting it as `forbidden`/`invalid` would hide the mistake inside an
+ * ordinary-looking result.
+ *
+ * The message deliberately names no option, header or digest — it must stay
+ * safe to log wherever an `AadpClientError` already is.
+ */
+function stateFor(
+  budget: RelationsTraversalBudgetState,
+  options: ResolutionContextOptions
+): BudgetResolutionState {
+  const contextDigest = resolutionContextDigest(options);
+  const state = budgetState.get(budget);
   if (!state) {
-    state = { outcomes: new Map(), pending: new Map(), globalStops: new Map() };
-    budgetState.set(budget, state);
+    const created: BudgetResolutionState = {
+      outcomes: new Map(),
+      pending: new Map(),
+      globalStops: new Map(),
+      contextDigest,
+    };
+    budgetState.set(budget, created);
+    return created;
+  }
+  if (state.contextDigest !== contextDigest) {
+    throw new AadpClientError(
+      "This traversal budget was first used with a different resolution context. " +
+        "A budget's cached results and in-flight requests are shared, so it must be used with one " +
+        "immutable set of request options (credentials, URL policy, cross-origin-safe headers, " +
+        "root origin, timeout, redirect/response limits and retry policy). " +
+        "Use a separate budget per resolution context.",
+      "resolution_context_mismatch"
+    );
   }
   return state;
 }
@@ -378,9 +424,11 @@ export async function resolveAnswerTargets(
   answer: AnswerDocumentV1,
   options: AnswerResolveOptions
 ): Promise<AnswerResolvedTargets> {
+  // Before `collectReferences` and before anything can charge the budget or
+  // touch the network: a context mismatch must leave the budget untouched.
+  const { outcomes, pending, globalStops } = stateFor(options.budget, options);
   const references = collectReferences(answer);
   const items: AnswerResolvedTargetEntry[] = [];
-  const { outcomes, pending, globalStops } = stateFor(options.budget);
   let partial = false;
 
   for (const { group, index, reference } of references) {
