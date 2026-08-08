@@ -91,7 +91,8 @@ Layer gắn một **context identity** vào `BudgetResolutionState` ở lần d�
 tiên của budget đó. Trước **mọi** cache hit, pending join hoặc charge, so khớp
 context của call hiện tại với context đã gắn.
 
-Thành phần **trong** context identity:
+Nguyên tắc: context identity gồm **mọi option có thể ảnh hưởng tới request dùng
+chung hoặc tới outcome được replay**, không chỉ các option mang tính authorization.
 
 | Option | Lý do |
 |---|---|
@@ -99,10 +100,37 @@ Thành phần **trong** context identity:
 | `crossOriginSafeHeaders` | Quyết định header nào còn được gửi khi vượt origin |
 | `urlPolicy` | Quyết định URL/địa chỉ nào được phép fetch |
 | `rootOrigin` | Quyết định cross-origin accounting |
+| `maxResponseBytes` | **Safety boundary**: outcome cache 5 MiB bị replay cho call đặt cap 1 MiB thì cap đó bị vô hiệu |
+| `maxRedirects` | Quyết định request có đi theo redirect chain hay fail |
+| `timeoutMs` | Quyết định request thành công hay `TimeoutError` |
+| `retry` | Quyết định request có được thử lại hay không |
 
-Thành phần **ngoài** context identity: `signal` (đã là call-scoped theo thiết kế
-hiện có), `timeoutMs`, `maxRedirects`, `maxResponseBytes`, `retry`. Chúng ảnh
-hưởng liveness, không dịch chuyển biên authorization.
+Thành phần **ngoài** context identity: **chỉ** `signal`. Nó là trạng thái chờ của
+riêng caller và đã được thiết kế hiện tại xử lý đúng — một canonical fetch dùng
+chung không bị hủy bởi `signal` của bất kỳ caller đơn lẻ nào.
+
+Bốn option cuối bảng ban đầu bị xếp là "liveness-only" và loại khỏi context. Đó là
+sai: `maxResponseBytes` là ranh giới tài nguyên, và cả bốn đều đổi được việc
+canonical fetch thành công, fail, redirect, retry hay timeout. Vì `pending` và
+outcome đã settle đều dùng chung, bỏ chúng ra ngoài sẽ vá được rò rỉ
+cross-principal nhưng vẫn để lại bypass safety-limit và hành vi phụ thuộc thứ tự.
+
+Ranh giới ở đây là **một budget = một cấu hình request bất biến**, không phải "một
+budget = một principal". Diễn đạt hẹp hơn sẽ để lọt đúng nhóm lỗi vừa nêu.
+
+### Chuẩn hoá đầu vào digest
+
+`FetchJsonOptions.headers` là `Record<string, string>` (không phải `Headers` hay
+mảng tuple), nên chuẩn hoá gọn và không mơ hồ:
+
+- Header: lowercase tên, sort theo tên đã lowercase, giữ nguyên giá trị.
+- Mã hoá **length-prefixed** cho mọi chuỗi (`<byte length>:<value>`) trước khi
+  nối, để không thể tạo va chạm bằng cách nhét dấu phân cách vào tên/giá trị.
+- `crossOriginSafeHeaders`: lowercase, sort, khử trùng lặp.
+- `urlPolicy`: opaque id theo reference identity (WeakMap), không deep-compare.
+- Option số và `retry`: chuẩn hoá về **giá trị hiệu lực sau khi áp default**, để
+  "bỏ trống" và "truyền đúng giá trị default" cùng digest, không throw oan.
+- `undefined` và giá trị default phải cho ra cùng một chuỗi chuẩn hoá.
 
 So khớp `urlPolicy` theo **reference identity** (WeakMap → opaque id), không
 deep-compare config. Đây là cùng pattern `dispatcherFor` đang dùng
@@ -147,6 +175,13 @@ trong changelog chung:
 - Cách dùng đúng — một context duy nhất cho toàn bộ walk — **không đổi gì**: cùng
   kết quả, cùng số request, cùng budget accounting.
 - Cách dùng trộn context trên một budget: trước đây im lặng chia sẻ, nay throw.
+- Lưu ý phạm vi throw rộng hơn "chỉ credential": đổi `timeoutMs`,
+  `maxRedirects`, `maxResponseBytes` hay `retry` giữa các call trên **cùng** một
+  budget cũng throw. Đây là lựa chọn có chủ ý — chia sẻ một request và một outcome
+  giữa các cấu hình khác nhau vốn đã là hành vi phụ thuộc thứ tự, và với
+  `maxResponseBytes` thì còn là bypass safety limit. Consumer cần cấu hình khác
+  nhau thì dùng budget khác nhau; CHANGELOG phải nói rõ điểm này để việc nâng cấp
+  không gây bất ngờ.
 - Không đổi schema, không đổi tập payload hợp lệ, không đổi kết quả semantic của
   bất kỳ document nào → **không bump `aadp:answer@1.0`**.
 - Nếu có test hiện tại đang khẳng định hành vi chia sẻ xuyên context thì chính
@@ -187,8 +222,15 @@ có xanh không sửa (trừ ngoại lệ đã ghi ở §"Ảnh hưởng tương
 | Khác `crossOriginSafeHeaders` | Throw, no-op |
 | Khác `urlPolicy` instance | Throw, no-op |
 | Khác `rootOrigin` | Throw, no-op |
-| Chỉ khác `timeoutMs`/`maxRedirects`/`maxResponseBytes`/`retry` | **Không** throw |
+| `maxResponseBytes` cao → thấp (10 MiB rồi 1 MiB) | Throw, no-op. Không được replay response 5 MiB cho call cap 1 MiB |
+| `maxResponseBytes` thấp → cao | Throw, no-op |
+| Khác `maxRedirects` | Throw, no-op |
+| Khác `timeoutMs` | Throw, no-op |
+| Khác `retry` | Throw, no-op |
+| Bỏ trống option vs truyền đúng giá trị default | **Không** throw (digest tính trên giá trị hiệu lực) |
 | Chỉ khác `signal` | **Không** throw |
+| Header cùng tên khác casing, cùng giá trị | **Không** throw |
+| Header/giá trị chứa dấu phân cách (`:`, `\n`) | Không tạo được va chạm digest (length-prefixed) |
 | Concurrent race khác context | Throw ở call thứ hai; call thứ nhất không bị hỏng |
 | Message lỗi | Không chứa header name/value, không chứa digest |
 | Budget mới cho mỗi call | Không throw, không chia sẻ gì |
@@ -207,6 +249,28 @@ có xanh không sửa (trừ ngoại lệ đã ghi ở §"Ảnh hưởng tương
 Gate: `npm run build`, `npm test`, `npm run docs:check`,
 `npm run check:release-consistency`, `npm pack --dry-run` xanh, cộng clean-install
 suite hiện có.
+
+## Quan hệ với `1.4.0` — release-sequenced, không song song
+
+Hai kế hoạch không đụng file của nhau nên merge sẽ **không** tạo conflict văn bản.
+Đúng vì thế mà rủi ro dễ bị bỏ sót: chúng phụ thuộc nhau về **ngữ nghĩa**.
+`1.4.0` Phase 4 hiện mô tả resolution-context binding như việc phải implement,
+trong khi `1.3.1` mới là nơi contract đó ra đời. Nếu triển khai song song sẽ có hai
+bản normalization/digest/mismatch riêng, drift dần, và refactor `1.4.0` có thể tái
+tạo lại đúng lỗ hổng này.
+
+Gate bắt buộc:
+
+1. Merge, implement và **release `1.3.1` trước**.
+2. Implementation record `1.3.1` chỉ đích danh helper và invariant phải bảo toàn.
+3. Rebase/merge `develop` mới vào branch kế hoạch `1.4.0`.
+4. Viết lại `1.4.0` Phase 4 thành **kế thừa và trích xuất** contract đã phát hành,
+   KHÔNG implement lại rule context.
+5. Chỉ sau bước 4, phần shared canonical layer của `1.4.0` mới được coi là
+   implementation-ready.
+
+PR/issue của `1.4.0` phải ghi dependency này ở chỗ nhìn thấy được, không chỉ nằm
+trong kế hoạch.
 
 ## Disclosure
 
