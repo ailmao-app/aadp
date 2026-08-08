@@ -144,8 +144,10 @@ reference-server module resource — so Answer would be the first module to have
 one.
 
 **Decision: deferred to `1.4.0`.** Recorded in
-[the release roadmap §10](../vi/plans/release-roadmap.md) and added to `1.4.0`'s
-scope and release gate. Rationale:
+[the release roadmap §10](../vi/plans/release-roadmap.md), and carried into
+[the 1.4.0 implementation plan](../vi/plans/implementation-plan-v1.4.0.md) as
+work packages 5–7 and two release-gate items, so the debt is on that release's
+execution checklist rather than only on its roadmap entry. Rationale:
 
 - The missing capability is a **generic** server feature (manifest `modules`
   declaration, `x_*` extension serialization), not an Answer-specific one.
@@ -170,9 +172,10 @@ overall `passed` verdict, because gate 1 leaves no deployment to point it at.
 Consequence: 1.3.0 currently has **no end-to-end interoperability evidence**.
 The runner is covered by unit and mock-server tests only.
 
-**Decision: deferred to `1.4.0`** alongside gate 1, which blocks it. Anyone
-signing off the 1.3.0 release checklist MUST record that they are accepting the
-release without this evidence.
+**Decision: deferred to `1.4.0`** alongside gate 1, which blocks it — tracked
+there as work package 7 and an explicit release-gate item stating it cannot be
+closed by a mock server or unit tests. Anyone signing off the 1.3.0 release
+checklist MUST record that they are accepting the release without this evidence.
 
 ## Decisions worth recording
 
