@@ -27,6 +27,34 @@ export interface RelationsTraversalIssue {
   targetId?: string;
   /** The URL being resolved when this issue occurred, when applicable. */
   url?: string;
+  /**
+   * The original error this issue was derived from, when the issue came
+   * from a caught exception (as opposed to a synthesized issue like
+   * `traversal_budget_exceeded`). `code`/`message` alone collapse several
+   * distinct causes into one coarse bucket (e.g. `target_unresolvable`
+   * covers a 404, a 5xx, a timeout, a schema-invalid response and a
+   * checksum mismatch alike); a caller that needs to distinguish them —
+   * e.g. Answer's `resolveAnswerTargets` telling a confirmed-absent target
+   * apart from a malformed one — can inspect `cause`'s type
+   * (`AadpRequestError.status`, `AadpSchemaValidationError`,
+   * `AadpChecksumMismatchError`, ...) instead of parsing `message`, which
+   * is not a stable API. Optional and additive: existing consumers that
+   * only read `code`/`message` are unaffected.
+   */
+  cause?: Error;
+  /**
+   * The fetched, schema/checksum-validated entity, when this issue is
+   * `target_unresolvable` specifically because the entity's declared
+   * `type` disagreed with `expectedType` (an id mismatch does NOT set
+   * this — that means the resource itself is not the declared target at
+   * all, so there is nothing safe to reuse). Absent for every other issue.
+   * Lets a caller that tracks its OWN, differently-scoped expected type
+   * for the same canonical target (e.g. Answer's `resolveAnswerTargets`,
+   * which allows two references to declare different `target_type` for
+   * the same `{id, url}`) re-validate the already-fetched entity against
+   * its own expectation instead of re-fetching or discarding it.
+   */
+  entity?: EntityV1;
 }
 
 /**

@@ -1,0 +1,21 @@
+{
+  "module": "aadp:answer",
+  "version": "1.0",
+  "kind": "answer",
+  "question": "What does Nimbus do?",
+  "concise_answer": "Nimbus schedules background jobs.",
+  "locale": "en",
+  "authorship": {
+    "kind": "generated-summary",
+    "generator": {
+      "name": "Example Summarizer"
+    },
+    "generated_at": "2026-08-06T08:55:00Z",
+    "source_targets": []
+  },
+  "freshness": {
+    "published_at": "2026-08-01T00:00:00Z",
+    "updated_at": "2026-08-06T08:55:00Z"
+  },
+  "content_checksum": "sha256:4687b4c2fafd7df79453d9b70f639b73212594bde14b0d519155d403e8eaf6a6"
+}

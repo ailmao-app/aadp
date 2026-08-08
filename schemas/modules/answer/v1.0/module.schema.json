@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/modules/answer/v1.0/module.schema.json",
+  "title": "AADP Answer Module v1.0 — Module schema dispatch",
+  "description": "The schema URL a manifest's `modules[]` entry points at (specification.md \"Module discovery and package boundary\"). Answer `1.0` has exactly one top-level document kind (`answer`) — unlike Relations' three-way dispatch, this is a single-entry `oneOf` kept for shape parity with the generic module dispatch convention. This schema MUST NOT be used to validate the manifest discovery entry `{id, version, schema}` itself, which is validated by the core manifest schema v1.0.",
+  "oneOf": [{ "$ref": "answer.schema.json" }]
+}

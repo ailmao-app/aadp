@@ -4,7 +4,7 @@
 
 | Thuộc tính | Giá trị |
 |---|---|
-| Trạng thái | Implementation Ready |
+| Trạng thái | Implementation Complete — Phase 3 item 4 (reference server Answer resource) và Phase 5 item 3 (external conformance từ packed tarball) đã được **defer chính thức sang `1.4.0`** cùng generic server module support; xem [roadmap §10](release-roadmap.md) và [implementation record](../../records/implementation-record-v1.3.0.md) |
 | Chủ đề | Answer Module |
 | Contract baseline | ADR-0007, ADR-0008, Relations Module `1.0` stable và ADR Answer được chấp nhận ở Phase 0 |
 | Owner | AADP maintainers |

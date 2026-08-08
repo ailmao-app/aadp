@@ -81,31 +81,50 @@ Ranh giới layer:
 
 ### 4.1 Resource type đề xuất
 
-Module định nghĩa resource type chuẩn `answer` với payload tối thiểu:
+> **Cập nhật 2026-08-06 (Answer Module `1.0` released — xem
+> [`spec/modules/answer/v1.0/specification.md`](../../../spec/modules/answer/v1.0/specification.md)
+> và [ADR-0009](../../adr/0009-answer-module-terminology-and-security.md)):**
+> ví dụ payload dưới đây là design draft trước khi wire contract chốt và KHÔNG
+> còn khớp shape released. Field chính thức là `concise_answer` (không phải
+> `short_answer`), URL human-facing dùng `entity.canonical_url` (không có
+> `x_answer.canonical_url` riêng), và Answer `1.0` KHÔNG có field `evidence` —
+> liên kết evidence/claim là advisory content-governance rule, chờ Evidence &
+> Provenance Module `1.4.0`. `topics`/`about`/`audience` dưới đây là ý tưởng
+> sản phẩm Ailmao, ánh xạ sang `applicability`/`related_entities` của wire
+> contract thật khi adapter được viết — không phải tên field wire.
+
+Module định nghĩa resource type chuẩn `answer` với payload tối thiểu (minh hoạ
+sản phẩm; xem specification.md cho wire shape chuẩn tắc):
 
 ```json
 {
   "question": "Ailon là gì?",
-  "short_answer": "Ailon là nhân vật AI trong hệ sinh thái Ailmao.",
+  "concise_answer": "Ailon là nhân vật AI trong hệ sinh thái Ailmao.",
   "answer": "...",
   "locale": "vi",
   "topics": ["ailon", "ai-character"],
   "about": ["concept:ailon"],
-  "canonical_url": "https://example.com/vi/about",
-  "evidence": ["claim:ailon-definition"],
   "audience": "public"
 }
 ```
 
+`entity.canonical_url` (core field, không phải field trong payload trên) là URL
+human-facing duy nhất — xem specification.md §12.
+
 Các invariant:
 
-- `question` là câu hỏi tự nhiên, không phải chuỗi keyword.
-- `short_answer` tự đủ nghĩa và có giới hạn độ dài do Answer Module quy định.
-- `answer` không được mâu thuẫn với `short_answer`.
+- `question` là câu hỏi tự nhiên, không phải chuỗi keyword (advisory, không
+  phải schema/semantic invariant — xem specification.md §15).
+- `concise_answer` tự đủ nghĩa và có giới hạn độ dài do Answer Module quy định
+  (1-500 Unicode code points, wire-enforced).
+- `answer` không được mâu thuẫn với `concise_answer` (advisory).
 - `locale` phải nằm trong locale server công bố.
 - `about` chỉ chứa canonical ID hợp lệ.
-- Answer có fact kiểm chứng được phải liên kết ít nhất một claim/evidence.
-- Nhiều biến thể câu hỏi có thể trỏ về cùng answer canonical, không tạo entity trùng nội dung.
+- Nhiều biến thể câu hỏi có thể trỏ về cùng answer canonical, không tạo entity
+  trùng nội dung.
+- Yêu cầu "answer có fact kiểm chứng được phải liên kết evidence" là content
+  governance advisory cho rollout Evidence Module `1.4.0`, không phải Answer
+  `1.0` schema/semantic invariant — Answer `1.0` không có field `evidence`.
 
 ### 4.2 Những gì Answer Module không làm
 

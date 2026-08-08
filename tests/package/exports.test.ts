@@ -105,6 +105,38 @@ describe("published package: every public entry point resolves from the tarball"
       "RELATIONS_CONFORMANCE_PROFILES",
       "InvalidRelationsConformanceOptionsError",
     ],
+    "modules/answer/v1.0": [
+      "registerAnswerModule",
+      "validateAnswerV1",
+      "validateAnswerEntityV1",
+      "parseAnswerEntityV1",
+      "AnswerEntityValidationError",
+      "checkAnswerSemantics",
+      "isValidAnswerLocale",
+      "checkUrlPolicy",
+      "ANSWER_LOCALE_PATTERN",
+      "answerSchema",
+      "authorshipSchema",
+      "freshnessSchema",
+      "applicabilitySchema",
+      "answerReferenceSchema",
+      "moduleDispatchSchema",
+      "answerSchemasByKind",
+      "ANSWER_DOCUMENT_KINDS",
+      // Client (fetch / freshness / target resolution)
+      "fetchAnswerEntityV1",
+      "classifyAnswerFreshness",
+      "resolveAnswerTargets",
+      "AnswerEntityFetchValidationError",
+      // Conformance
+      "runAnswerConformance",
+      "renderAnswerTextReport",
+      "renderAnswerJsonReport",
+      "renderAnswerJUnitReport",
+      "answerExitCodeFor",
+      "ANSWER_CHECKS",
+      "InvalidAnswerConformanceOptionsError",
+    ],
     "conformance": ["runConformance", "renderTextReport", "renderJsonReport", "renderJUnitReport", "exitCodeFor", "CHECKS", "collectAdvertisedUrls", "InvalidConformanceOptionsError", "UnsupportedConformanceVersionError", "SUPPORTED_CONFORMANCE_VERSIONS"],
     "server": ["defineAADP", "defineResource", "AadpServerError", "notFound", "invalidRequest", "unsupportedType", "upstreamUnavailable", "rateLimited", "unauthorized", "forbidden"],
     "scaffold": ["scaffoldInit", "scaffoldAddResource", "ScaffoldFileExistsError", "initTemplate", "resourceTemplate", "toCamelCase"],
@@ -140,6 +172,13 @@ describe("published package: every public entry point resolves from the tarball"
     expect(mod).toHaveProperty("registerModule");
   });
 
+  it("does not re-export Answer-specific names from the root entry point (ADR-0007 'Package exports')", async () => {
+    const mod = await importFromTarball(".");
+    for (const name of ["validateAnswerV1", "validateAnswerEntityV1", "registerAnswerModule", "answerSchema", "runAnswerConformance"]) {
+      expect(mod, `"${name}" must not be re-exported from the package root`).not.toHaveProperty(name);
+    }
+  });
+
   it("ships every schema path exports declares", () => {
     for (const version of ["v0.1", "v1.0"]) {
       for (const kind of ["manifest", "sitemap-index", "sitemap", "entity", "error"]) {
@@ -157,6 +196,17 @@ describe("published package: every public entry point resolves from the tarball"
       "relation-registry.schema.json",
     ]) {
       const schemaFile = path.join(tarball.packageDir, "schemas", "modules", "relations", "v1.0", file);
+      expect(existsSync(schemaFile), schemaFile).toBe(true);
+    }
+    for (const file of [
+      "module.schema.json",
+      "answer.schema.json",
+      "answer-reference.schema.json",
+      "authorship.schema.json",
+      "freshness.schema.json",
+      "applicability.schema.json",
+    ]) {
+      const schemaFile = path.join(tarball.packageDir, "schemas", "modules", "answer", "v1.0", file);
       expect(existsSync(schemaFile), schemaFile).toBe(true);
     }
   });
@@ -212,6 +262,41 @@ describe("published package: every public entry point resolves from the tarball"
     expect(report.module).toEqual({ id: "aadp:relations", version: "1.0" });
     expect(report.status).toBe("inconclusive");
     expect(report.checks.length).toBeGreaterThan(15);
+  });
+
+  it("resolves ail-aadp/modules/answer/v1.0 from a clean tarball install and validates a well-formed wrapper", async () => {
+    const mod = await importFromTarball("modules/answer/v1.0");
+    const checksumOf = (await importFromTarball("canonical-json")).checksumOf as (v: unknown) => string;
+    const base = {
+      module: "aadp:answer",
+      version: "1.0",
+      kind: "answer",
+      question: "What is Orbit?",
+      concise_answer: "Orbit is a neutral example service.",
+      locale: "en",
+      authorship: { kind: "source-authored", author: { name: "Example Editorial Team" } },
+      freshness: { published_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-06T00:00:00Z" },
+    };
+    const xAnswer = { ...base, content_checksum: checksumOf(base) };
+    const validateAnswerV1 = mod.validateAnswerV1 as (data: unknown) => { valid: boolean };
+    expect(validateAnswerV1(xAnswer).valid).toBe(true);
+    expect(validateAnswerV1({ ...xAnswer, question: undefined }).valid).toBe(false);
+  });
+
+  it("runs runAnswerConformance from a clean tarball install (neutral implementation gate)", async () => {
+    const mod = await importFromTarball("modules/answer/v1.0");
+    const runAnswerConformance = mod.runAnswerConformance as (options: unknown) => Promise<{
+      module: unknown;
+      status: string;
+      checks: unknown[];
+    }>;
+    // No baseUrl/sampleEntityUrl supplied: every check must reach a verdict
+    // of its own (skipped/inconclusive), not throw — proving the packaged
+    // runner is self-contained.
+    const report = await runAnswerConformance({});
+    expect(report.module).toEqual({ id: "aadp:answer", version: "1.0" });
+    expect(report.status).toBe("inconclusive");
+    expect(report.checks.length).toBeGreaterThan(5);
   });
 
   it("resolves package.json itself as a subpath export", () => {
