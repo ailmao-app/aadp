@@ -5,6 +5,7 @@ import {
   renderAnswerTextReport,
   renderAnswerJsonReport,
   renderAnswerJUnitReport,
+  InvalidAnswerConformanceOptionsError,
 } from "../../../../../src/modules/answer/v1.0/conformance/index.js";
 import { createPermissiveUrlPolicy } from "../../../../../src/client/v1.0/index.js";
 import { startServer, sendJson, buildAnswerEntity, type TestServer } from "../client/server-helpers.js";
@@ -121,5 +122,40 @@ describe("runAnswerConformance — answer.references also exercises generated-su
     const byId = Object.fromEntries(report.checks.map((c) => [c.id, c]));
     expect(byId["answer.references"].status).toBe("warning");
     expect(byId["answer.references"].details?.some((d) => d.includes("source_targets"))).toBe(true);
+  });
+});
+
+describe("runAnswerConformance — invalid options", () => {
+  it.each([
+    ["timeoutMs", 0],
+    ["maxResponseBytes", 0],
+    ["maxPages", 0],
+    ["deadlineMs", 0],
+    ["maxTotalBytes", 0],
+    ["maxRedirects", -1],
+    ["maxNodes", -1],
+    ["maxPages", Number.NaN],
+    ["timeoutMs", 1.5],
+    ["deadlineMs", Number.POSITIVE_INFINITY],
+  ])("rejects %s = %s as a caller error before making any request, never as a failing/inconclusive deployment verdict", async (option, value) => {
+    await expect(runAnswerConformance({ [option]: value })).rejects.toThrow(InvalidAnswerConformanceOptionsError);
+  });
+
+  it("accepts maxNodes = 0 and maxDepth = 0 — a legitimate 'stop before the first target' traversal boundary, not a mistake", async () => {
+    const report = await runAnswerConformance({ maxNodes: 0, maxDepth: 0 });
+    expect(report.status).not.toBe("failed");
+  });
+
+  it("accepts maxRedirects = 0, which means do not follow redirects", async () => {
+    const report = await runAnswerConformance({ maxRedirects: 0 });
+    expect(report.status).not.toBe("failed");
+  });
+
+  it("rejects an invalid retry.maxAttempts before any request is made", async () => {
+    await expect(runAnswerConformance({ retry: { maxAttempts: 0 } })).rejects.toThrow(InvalidAnswerConformanceOptionsError);
+  });
+
+  it("rejects a garbage `now` clock", async () => {
+    await expect(runAnswerConformance({ now: new Date(Number.NaN) })).rejects.toThrow(InvalidAnswerConformanceOptionsError);
   });
 });

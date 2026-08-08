@@ -19,7 +19,7 @@ import {
   type AnswerCheckOutcome,
   type AnswerRunState,
 } from "./checks.js";
-import type { AnswerConformanceOptions, AnswerConformanceReport, CheckResult, CheckStatus } from "./types.js";
+import { InvalidAnswerConformanceOptionsError, type AnswerConformanceOptions, type AnswerConformanceReport, type CheckResult, type CheckStatus } from "./types.js";
 
 const require = createRequire(import.meta.url);
 
@@ -28,6 +28,79 @@ function runnerVersion(): string {
     return (require("../../../../../package.json") as { version?: string }).version ?? "0.0.0";
   } catch {
     return "0.0.0";
+  }
+}
+
+/**
+ * Numeric options, and the smallest value each accepts (mirrors core's own
+ * `NUMERIC_OPTION_MINIMUMS` in `../../../../conformance/runner.ts`). The
+ * core/transport dimensions (`timeoutMs`, `maxResponseBytes`, `maxPages`,
+ * `deadlineMs`, `maxTotalBytes`) require at least 1 — `0` there would make
+ * the very first request impossible and indistinguishable from a
+ * misconfiguration. `maxRedirects: 0` ("do not follow redirects") is a
+ * meaningful policy, not a mistake, so it allows `0`. The Relations
+ * traversal dimensions added for Answer target resolution (`maxDepth`,
+ * `maxNodes`, `maxRequests`, `maxCrossOriginRequests`) also allow `0` —
+ * unlike the transport dimensions, `0` there is an intentional, exercised
+ * boundary (stop before resolving even the first target — see
+ * `resolveAnswerTargets`' own global-stop-on-first-target regression test),
+ * not a configuration mistake.
+ */
+const NUMERIC_OPTION_MINIMUMS = {
+  timeoutMs: 1,
+  maxRedirects: 0,
+  maxResponseBytes: 1,
+  maxPages: 1,
+  deadlineMs: 1,
+  maxTotalBytes: 1,
+  maxDepth: 0,
+  maxNodes: 0,
+  maxRequests: 0,
+  maxCrossOriginRequests: 0,
+} as const satisfies Record<string, number>;
+
+/** Mirrors the minimums `../../../../client/http.ts` enforces for `RetryOptions` at request time — validated here up front instead. */
+const RETRY_OPTION_MINIMUMS = {
+  maxAttempts: 1,
+  baseDelayMs: 0,
+  maxDelayMs: 0,
+} as const satisfies Record<string, number>;
+
+function assertFiniteIntegerAtLeast(name: string, value: unknown, minimum: number): void {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new InvalidAnswerConformanceOptionsError(name, `expected a finite number, got ${JSON.stringify(value)}`);
+  }
+  if (!Number.isInteger(value)) {
+    throw new InvalidAnswerConformanceOptionsError(name, `expected an integer, got ${value}`);
+  }
+  if (value < minimum) {
+    throw new InvalidAnswerConformanceOptionsError(name, `must be at least ${minimum}, got ${value}`);
+  }
+}
+
+/**
+ * Rejects unusable options before any request is made. A configuration
+ * mistake must surface as an error the caller owns — `InvalidAnswer
+ * ConformanceOptionsError` — never as a `status: "failed"` check blaming
+ * the deployment under test, or as a budget silently built from `NaN`/
+ * negative effective limits.
+ */
+function assertUsableOptions(options: AnswerConformanceOptions): void {
+  for (const [name, minimum] of Object.entries(NUMERIC_OPTION_MINIMUMS)) {
+    const value = options[name as keyof typeof NUMERIC_OPTION_MINIMUMS];
+    if (value !== undefined) assertFiniteIntegerAtLeast(name, value, minimum);
+  }
+  if (options.retry) {
+    for (const [name, minimum] of Object.entries(RETRY_OPTION_MINIMUMS)) {
+      const value = options.retry[name as keyof typeof RETRY_OPTION_MINIMUMS];
+      if (value !== undefined) assertFiniteIntegerAtLeast(`retry.${name}`, value, minimum);
+    }
+  }
+  // `classifyAnswerFreshness` never throws for an invalid `now` — it would
+  // just silently misclassify freshness against a NaN/garbage clock instead
+  // of surfacing a caller mistake.
+  if (options.now !== undefined && (!(options.now instanceof Date) || Number.isNaN(options.now.getTime()))) {
+    throw new InvalidAnswerConformanceOptionsError("now", `expected a valid Date, got ${JSON.stringify(options.now)}`);
   }
 }
 
@@ -128,9 +201,13 @@ async function runCheck(
 /**
  * Runs every Answer v1.0 conformance check and returns a structured
  * report. Never throws for a nonconformant deployment — only for an
- * unusable `options.baseUrl`.
+ * unusable `options` (`InvalidAnswerConformanceOptionsError` — a bad
+ * numeric/retry/`now` option, checked before any request is made — or an
+ * unparseable `options.baseUrl`).
  */
 export async function runAnswerConformance(options: AnswerConformanceOptions = {}): Promise<AnswerConformanceReport> {
+  assertUsableOptions(options);
+
   let origin: string | undefined;
   if (options.baseUrl) {
     try {

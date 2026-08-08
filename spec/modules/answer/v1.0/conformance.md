@@ -70,6 +70,20 @@ manifest → `answer.discovery` inconclusive), và traversal/budget failure
 clean-install chỉ dùng public package exports phải đạt toàn bộ required checks
 mà không import source internals — xem `tests/package/*`.
 
+`runAnswerConformance` validate mọi numeric option (`timeoutMs`/`maxRedirects`/
+`maxResponseBytes`/`maxPages`/`maxDepth`/`maxNodes`/`maxRequests`/
+`maxTotalBytes`/`maxCrossOriginRequests`/`deadlineMs`), `retry.maxAttempts`/
+`retry.baseDelayMs`/`retry.maxDelayMs`, và `now` NGAY từ đầu — trước khi gửi
+request đầu tiên — và ném `InvalidAnswerConformanceOptionsError` cho giá trị
+không dùng được (`NaN`/không phải số nguyên/âm/dưới minimum của option đó,
+hoặc `now` không phải Date hợp lệ). Một lỗi cấu hình của caller KHÔNG BAO GIỜ
+được ghi thành `status: "failed"` cho deployment đang test. `maxRedirects`,
+`maxDepth`, `maxNodes`, `maxRequests`, `maxCrossOriginRequests` cho phép `0`
+như một giá trị ranh giới hợp lệ (ví dụ dừng traversal trước cả target đầu
+tiên); các dimension transport/core khác (`timeoutMs`, `maxResponseBytes`,
+`maxPages`, `deadlineMs`, `maxTotalBytes`, `retry.maxAttempts`) yêu cầu tối
+thiểu 1 vì `0` ở đó khiến request đầu tiên không thể thực hiện được.
+
 ## 6. Unsupported version
 
 Unsupported Answer version KHÔNG phải remote deployment conformance check —
