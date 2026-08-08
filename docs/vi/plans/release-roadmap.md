@@ -252,7 +252,9 @@ Release gate:
 
 ## 10. Release 1.3.0 — Answer Module
 
-Trạng thái: blocked bởi `1.2.0` Relations interoperability gate.
+Trạng thái: implementation xong; một release gate được **defer có chủ đích** sang
+`1.4.0` — xem [Gate deferred](#gate-deferred-external-conformance-trên-reference-deployment)
+bên dưới và [implementation record](../../records/implementation-record-v1.3.0.md).
 
 Issue coverage:
 
@@ -283,7 +285,35 @@ Release gate:
 - Unknown/unsupported Answer version safely ignorable.
 - Schema, validator, types, client và conformance cùng module version.
 - Generated/source-authored distinction không mơ hồ.
-- External consumer clean-install đạt module conformance.
+- External consumer clean-install đạt module conformance — **deferred, xem bên dưới**.
+
+### Gate deferred: external conformance trên reference deployment
+
+Gate "external consumer clean-install đạt module conformance" được defer sang
+`1.4.0`. Đây là quyết định có chủ đích, không phải oversight.
+
+Lý do: `examples/reference-server` không thể publish một Answer entity, vì
+`ail-aadp/server` hiện chưa có khả năng nào để làm việc đó — `SerializedEntity`
+không có chỗ cho extension field `x_*`, và manifest builder không có field
+`modules`. Vì vậy không tồn tại deployment trung tính để chạy
+`runAnswerConformance` với `baseUrl` + `sampleEntityUrl` thật.
+
+Khả năng còn thiếu là **generic server capability**, không phải Answer-specific:
+Evidence Module `1.4.0` sẽ cần đúng khả năng đó để publish `x_evidence`. Do đó
+việc bổ sung nó thuộc `1.4.0` (additive public API → minor bump theo §1), và
+hardcode Answer vào example route để lách gate là sai layer boundary.
+
+Phần đã có ở `1.3.0` thay cho gate này:
+
+- `tests/package/module-compatibility-contract.test.ts` — compatibility contract
+  qua packed tarball: core-only consumer không register Answer; opt-in consumer
+  phân biệt unsupported module/version/kind, không fallback.
+- `tests/package/exports.test.ts` — Answer API import được từ clean install,
+  self-contained, không đụng `src/**`.
+
+Phần chưa có: chưa có run nào chứng minh toàn bộ required Answer checks cùng
+xanh trên một deployment thật. `1.3.0` KHÔNG có end-to-end interoperability
+evidence, và điều này phải được nêu rõ khi ký release checklist.
 
 ## 11. Release 1.3.x — Answer stabilization
 
@@ -309,6 +339,11 @@ Issue coverage:
 
 Candidate scope:
 
+- **Generic module support ở server layer (kế thừa từ `1.3.0`, xem §10)**:
+  manifest `modules` declaration và extension-field (`x_*`) serialization trong
+  `ail-aadp/server`. Generic, không Answer/Evidence-specific. Mở khoá reference
+  deployment cho cả Answer `1.0` lẫn Evidence `1.0`, và là điều kiện để đóng
+  gate external conformance còn nợ của `1.3.0`.
 - Resource contract cho `claim`, `evidence` và `source`.
 - Claim-to-evidence và evidence-to-source reference integrity.
 - Canonical citation target, publisher, published/updated/retrieved timestamps.
@@ -330,6 +365,9 @@ Release gate:
 - Provenance timestamps và canonical target có fixtures đa implementation.
 - Answer có thể tham chiếu Evidence mà không duplicate evidence payload vô hạn.
 - Module conformance và security review xanh.
+- Reference server publish được cả Answer lẫn Evidence entity qua generic module
+  support; external conformance chạy từ packed tarball đạt overall `passed` cho
+  Answer `1.0` (gate defer từ `1.3.0`) và Evidence `1.0`.
 
 ## 13. Release 1.4.x — Evidence stabilization
 

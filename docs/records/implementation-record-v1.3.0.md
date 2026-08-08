@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document type | Implementation record |
-| Status | **Implementation complete; release gate OPEN** — see [Open release gates](#open-release-gates) |
+| Status | **Implementation complete; two release gates formally deferred to `1.4.0`** — see [Open release gates](#open-release-gates) |
 | Audience | Package maintainers and release reviewers |
 | Scope | Answer Module `1.0` (`aadp:answer`), delivered in package version `1.3.0` |
 | Wire impact | New module only. No change to AADP core `1.0` schemas or Relations Module `1.0` schemas |
@@ -23,9 +23,13 @@ Requirement words follow [the AADP documentation conventions](../document-conven
 
 The schema, validator, client and conformance work for Answer `1.0` is
 complete and covered by the test suite. Two release gates defined in the
-implementation plan remain open, both concerning end-to-end evidence against a
-live reference deployment. **This record does not close the 1.3.0 release
-checklist.** See [Open release gates](#open-release-gates).
+implementation plan are **not** satisfied, both concerning end-to-end evidence
+against a live reference deployment; both have been formally deferred to
+`1.4.0`, where the generic server capability they depend on is scheduled.
+
+**This record does not close the 1.3.0 release checklist.** Signing it off means
+accepting 1.3.0 without end-to-end interoperability evidence. See
+[Open release gates](#open-release-gates).
 
 ## Delivered scope
 
@@ -137,8 +141,23 @@ which the 1.3.0 plan's own file map does not list (it names
 `examples/reference-server/*`, not `src/server/*`). Note that Relations `1.0`
 shipped in 1.2.0 under the same limitation — its plan did not require a
 reference-server module resource — so Answer would be the first module to have
-one. Whether to expand 1.3.0's public API surface or defer this gate to a
-follow-up release is an open maintainer decision.
+one.
+
+**Decision: deferred to `1.4.0`.** Recorded in
+[the release roadmap §10](../vi/plans/release-roadmap.md) and added to `1.4.0`'s
+scope and release gate. Rationale:
+
+- The missing capability is a **generic** server feature (manifest `modules`
+  declaration, `x_*` extension serialization), not an Answer-specific one.
+  Evidence Module `1.4.0` needs exactly the same thing to publish `x_evidence`,
+  so building it once in `1.4.0` serves both modules.
+- It is additive public API, which under the roadmap's own versioning rules is a
+  minor bump — so it cannot land in `1.3.x`, which is restricted to conditional
+  patches.
+- The alternative — hardcoding an Answer payload into the example server's route
+  layer to satisfy the gate — would put module-specific logic in the example
+  rather than the server layer, which is the wrong boundary and would have to be
+  unwound when the generic capability arrives.
 
 ### 2. External conformance from a packed tarball — Phase 5 item 3
 
@@ -150,6 +169,10 @@ overall `passed` verdict, because gate 1 leaves no deployment to point it at.
 
 Consequence: 1.3.0 currently has **no end-to-end interoperability evidence**.
 The runner is covered by unit and mock-server tests only.
+
+**Decision: deferred to `1.4.0`** alongside gate 1, which blocks it. Anyone
+signing off the 1.3.0 release checklist MUST record that they are accepting the
+release without this evidence.
 
 ## Decisions worth recording
 
