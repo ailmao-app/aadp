@@ -4,7 +4,7 @@
 
 | Thuộc tính | Giá trị |
 |---|---|
-| Trạng thái | Implementation Ready |
+| Trạng thái | Implementation In Progress — Phase 0–2 và Phase 4 items 1–4 xong; Phase 3 item 4 (reference server Answer resource) và Phase 5 item 3 (chạy từ packed tarball trên deployment thật) còn mở. Xem [implementation record](../../records/implementation-record-v1.3.0.md) |
 | Chủ đề | Answer Module |
 | Contract baseline | ADR-0007, ADR-0008, Relations Module `1.0` stable và ADR Answer được chấp nhận ở Phase 0 |
 | Owner | AADP maintainers |
