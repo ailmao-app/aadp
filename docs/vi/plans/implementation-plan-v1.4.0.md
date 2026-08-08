@@ -9,7 +9,7 @@
 | Dependency | Relations `1.0` stable; Answer `1.0` stable; ADR-0010 (citation/provenance/security) Accepted |
 | Wire impact | Module riêng `aadp:evidence@1.0`; generic server capability là additive public API của `ail-aadp/server`; KHÔNG sửa `aadp:answer@1.0` |
 | Nợ kế thừa | Hai release gate của `1.3.0` được defer sang release này — xem [roadmap §10](release-roadmap.md) và [implementation record 1.3.0](../../records/implementation-record-v1.3.0.md) |
-| Review | [implementation-plan-v1.4.0-review.md](implementation-plan-v1.4.0-review.md) — kế hoạch này được viết lại để đóng finding 3, 4, 5, 6; finding 1 và 2 vẫn là gate ở Phase 0. Vòng review thứ hai chỉnh thêm: extension grammar phải bằng core, model là acyclic (bỏ cycle/self-reference machinery), `source.access` không tham gia authorization, và `retrieved_at` dùng ordering thay vì equality. Vòng thứ ba bổ sung §"Orchestration contract" (thuật toán hai hop, `EvidenceGraph` node/edge ordering) và đồng bộ check `evidence.context` sang ordering. Vòng thứ tư chốt composition API: shared canonical resolution layer khoá theo budget, cache canonical outcome tách khỏi verdict `target_type` theo occurrence, và Evidence không gọi `resolveAnswerTargets` |
+| Review | [implementation-plan-v1.4.0-review.md](implementation-plan-v1.4.0-review.md) — kế hoạch này được viết lại để đóng finding 3, 4, 5, 6; finding 1 và 2 vẫn là gate ở Phase 0. Vòng review thứ hai chỉnh thêm: extension grammar phải bằng core, model là acyclic (bỏ cycle/self-reference machinery), `source.access` không tham gia authorization, và `retrieved_at` dùng ordering thay vì equality. Vòng thứ ba bổ sung §"Orchestration contract" (thuật toán hai hop, `EvidenceGraph` node/edge ordering) và đồng bộ check `evidence.context` sang ordering. Vòng thứ tư chốt composition API: shared canonical resolution layer khoá theo budget, cache canonical outcome tách khỏi verdict `target_type` theo occurrence, và Evidence không gọi `resolveAnswerTargets`. Vòng thứ năm thêm resolution-context binding (một budget = một security context, fail closed khi mismatch) |
 | Owner | AADP maintainers |
 
 ## Trạng thái theo work package
@@ -88,7 +88,9 @@ tương ứng trong §"Quyết định contract đề xuất":
   thêm thì mới phát sinh cycle policy, còn model đề xuất trong tài liệu này là
   acyclic by construction;
 - composition API giữa Answer và Evidence: tầng nào sở hữu canonical outcome
-  cache theo budget, và tầng đó public hay internal.
+  cache theo budget, và tầng đó public hay internal;
+- resolution context: option nào tạo nên security boundary của một budget, và
+  chuyện gì xảy ra khi hai call trộn context trên cùng budget.
 
 Nếu ADR-0010 đổi bất kỳ quyết định nào bên dưới thì phải cập nhật kế hoạch này
 **trước khi** tạo wire artifact. Released schema là immutable theo
@@ -482,6 +484,71 @@ dùng chung:
 Nhờ vậy không cần một resolve-state do call sở hữu, không còn precondition
 "budget phải đi kèm cache" và không còn câu hỏi ownership khi gọi lồng/đồng thời:
 state gắn với budget, giống hệt mô hình Answer đang chạy.
+
+#### Resolution context — cache KHÔNG được vượt biên authorization
+
+Per-budget cache chỉ an toàn khi **một budget = một security context bất biến**.
+`BudgetResolutionState` hiện khoá theo `{budget, canonical key}`, trong khi
+`headers`, `crossOriginSafeHeaders`, `urlPolicy` và `rootOrigin` là **option theo
+từng call** (`FetchJsonOptions` → `RelationsClientOptions`). Hệ quả nếu bê nguyên
+sang tầng dùng chung:
+
+```text
+1. resolveAnswerTargets(E, { budget: B, headers: { Authorization: A } })
+   -> E resolved, cache theo key của E trên budget B.
+2. resolveAnswerEvidenceV1(answer, { budget: B })            // KHÔNG credential
+3. Cache hit theo {B, key(E)} -> caller thứ hai nhận E
+   mà chưa từng phát request lẽ ra phải trả 401/403.
+```
+
+Biến thể concurrent còn tệ hơn: call nào tạo `pending` trước sẽ quyết định
+headers/URL policy cho **một** request dùng chung, và cả hai caller thừa hưởng kết
+quả đó — kết quả phụ thuộc thứ tự chạy.
+
+> Đây là hazard **đã tồn tại trong Answer `1.0` đã phát hành** giữa hai call
+> `resolveAnswerTargets` dùng chung budget với credential khác nhau. Kế hoạch này
+> không tạo ra nó, nhưng việc nâng cache thành tầng dùng chung giữa các module
+> biến nó thành composition path được hỗ trợ chính thức, nên phải xử lý dứt điểm
+> ở đây.
+
+**Quy tắc:** tầng shared canonical resolution gắn một **resolution context
+identity** vào per-budget state ở lần dùng đầu tiên. Trước **mọi** cache hit,
+pending join hoặc charge, layer so khớp context của call hiện tại với context đã
+gắn; **mismatch thì throw ngay** (`AadpResolutionContextMismatchError`), fail
+closed — không hit cache, không join, không âm thầm refetch bằng context khác.
+
+Thành phần **nằm trong** context identity (đủ để đổi câu trả lời hoặc đổi thứ
+client sẵn sàng fetch):
+
+| Option | Lý do |
+|---|---|
+| `headers` (tên **và** giá trị) | Authorization/tenant/session; đây là biên principal |
+| `crossOriginSafeHeaders` | Quyết định header nào còn được gửi khi vượt origin |
+| `urlPolicy` | Quyết định URL/địa chỉ nào được phép fetch |
+| `rootOrigin` | Quyết định cross-origin accounting |
+
+**Ngoài** context identity: `signal` (đã là call-scoped theo thiết kế hiện có),
+`timeoutMs`, `maxRedirects`, `maxResponseBytes`, `retry` — chúng ảnh hưởng
+liveness chứ không dịch chuyển biên authorization. Ghi rõ lựa chọn này trong
+ADR-0010 thay vì để implementer tự đoán.
+
+Cách so khớp mà **không lưu secret**: layer chỉ giữ một digest — HMAC-SHA-256 trên
+chuỗi đã chuẩn hoá của các option trên, với salt ngẫu nhiên sinh mỗi process. Layer
+MUST NOT lưu giá trị header thô, MUST NOT đưa digest hay tên/giá trị header vào
+message lỗi (message chỉ nói "resolution context mismatch"), và MUST NOT log chúng.
+
+**Ảnh hưởng tương thích với Answer `1.0`** — phải được ADR-0010 quyết định tường
+minh, không được lặng lẽ gộp vào refactor: hôm nay hai call `resolveAnswerTargets`
+trộn credential trên cùng budget **im lặng dùng chung kết quả**; sau thay đổi này
+chúng **throw**. Đó là thay đổi behavior của một module đã phát hành. Khuyến nghị:
+coi đây là **security bug fix** chứ không phải feature — nó không đổi schema,
+không đổi tập payload hợp lệ và không đổi kết quả của bất kỳ walk nào vốn đã dùng
+một context duy nhất (đúng cách dùng đã tài liệu hoá), nên không cần bump module
+version của `aadp:answer`. Bắt buộc kèm theo: mục **Security** riêng trong
+CHANGELOG, và test Answer-level cho case tuần tự authenticated → anonymous. Đây là
+ngoại lệ duy nhất được phép của gate "test Answer hiện có không đổi": nếu có test
+nào đang khẳng định hành vi chia sẻ xuyên context thì test đó chính là thứ đang mô
+tả bug, phải sửa kèm ghi chú lý do trong implementation record.
 
 #### Cache canonical outcome, KHÔNG cache verdict theo reference
 
@@ -966,6 +1033,12 @@ fallback.
   behavior kế thừa policy hiện có; Evidence không có networking bypass.
 - Authorization được kiểm tra trước khi trả claim/evidence/target.
   `source.access` là metadata, KHÔNG cấp quyền truy cập.
+- Một budget = một resolution context bất biến. Canonical outcome cache và
+  in-flight request KHÔNG bao giờ được dùng chung giữa hai call có headers,
+  `crossOriginSafeHeaders`, `urlPolicy` hoặc `rootOrigin` khác nhau; mismatch fail
+  closed bằng exception, không phải bằng cache hit. Context identity lưu dưới dạng
+  digest có salt theo process; header thô không được lưu, log hay đưa vào message
+  lỗi.
 - Conformance output không log toàn bộ private payload hoặc auth header mặc định.
 - Stance/confidence/publisher là assertion của producer; schema validity không
   chứng minh assertion trung thực, cũng không chứng minh factual truth,
@@ -986,6 +1059,9 @@ fallback.
    contract"), thay vì thêm selector vào `resolveAnswerTargets` hay để Evidence
    tự resolve bằng raw Relations trên budget dùng chung. Ghi kèm lý do
    compatibility: đây là refactor patch-level của Answer theo ADR-0007.
+6. Ratify **resolution context**: tập option tạo nên context identity, cơ chế
+   digest không lưu secret, hành vi fail-closed khi mismatch, và quyết định coi
+   thay đổi behavior của Answer là security bug fix không bump module version.
 
 Gate: maintainer review ADR/spec; không còn TODO ảnh hưởng schema hoặc semantics.
 
@@ -1038,30 +1114,39 @@ Gate: deterministic semantic results; không network, không wall clock.
    `src/modules/shared/canonical-resolution.ts`: `WeakMap` theo budget,
    `resolveCanonicalTarget`, `pending`, `globalStops`. Refactor Answer để consume
    nó. **Bằng chứng bắt buộc: toàn bộ test Answer hiện có pass mà không sửa test
-   nào**, và layer mới không xuất hiện trong bất kỳ public export nào.
-2. Implement `fetchEvidenceEntityV1` bằng core fetch rồi Evidence validation.
-3. Implement `EvidenceGraph` builder: node theo canonical target,
+   nào** (ngoại lệ duy nhất: test mô tả chia sẻ xuyên context, xem bước 2), và
+   layer mới không xuất hiện trong bất kỳ public export nào.
+2. **Implement resolution context binding**: gắn context identity vào per-budget
+   state ở lần dùng đầu, so khớp trước mọi cache hit/pending join/charge, throw
+   `AadpResolutionContextMismatchError` khi lệch. Digest HMAC với salt theo
+   process; không lưu, không log, không đưa header vào message lỗi.
+3. Test context: tuần tự authenticated → anonymous, anonymous → authenticated,
+   hai principal khác nhau, và **concurrent race** trên cùng budget. Assert không
+   có result hay pending request nào vượt biên context, và message lỗi không rò
+   header/digest.
+4. Implement `fetchEvidenceEntityV1` bằng core fetch rồi Evidence validation.
+5. Implement `EvidenceGraph` builder: node theo canonical target,
    `references[]`/`edges[]` theo occurrence, ordering theo §"Orchestration
    contract".
-4. Implement `resolveClaimEvidenceV1` (bước 4-6) trên shared canonical resolver.
-5. Implement `resolveAnswerEvidenceV1` (bước 1-6), **gồm bước expand
+6. Implement `resolveClaimEvidenceV1` (bước 4-6) trên shared canonical resolver.
+7. Implement `resolveAnswerEvidenceV1` (bước 1-6), **gồm bước expand
    `evidence_refs` của claim đã resolve**; tự collect `related_entities` đã lọc,
    **KHÔNG gọi `resolveAnswerTargets`**; không sửa public API của Answer.
-6. Implement injected-clock freshness classifier.
-7. Test abort, ordering, authorization, partial result, budget exhaustion, URL
+8. Implement injected-clock freshness classifier.
+9. Test abort, ordering, authorization, partial result, budget exhaustion, URL
    policy và dangling classification theo bảng ở §"Graph và traversal policy" —
    gồm case 401/403 được phân loại `forbidden` mà không cần đọc `source.access`.
-8. Test riêng cho orchestration: hai hop đầy đủ; fan-in C1/C2 → E fetch một lần;
-   **cả hai thứ tự** (E trực tiếp trước C1, và C1 trước E trực tiếp) cho graph
-   tương đương; node/edge ordering deterministic; edge vẫn tồn tại khi node đích
-   không resolve.
-9. Test composition boundary: generated-summary Answer đi qua
-   `resolveAnswerEvidenceV1` **không phát sinh request nào** tới
-   `authorship.source_targets`; và mixed-type cả hai chiều (reference sai
-   `target_type` trước/sau reference đúng) cho verdict độc lập, đúng một lần fetch.
-10. Test cross-module: một walk trộn `resolveAnswerTargets` và
-    `resolveAnswerEvidenceV1` trên **cùng budget** không sinh `invalid` giả cho
-    canonical target mà module kia đã fetch.
+10. Test riêng cho orchestration: hai hop đầy đủ; fan-in C1/C2 → E fetch một lần;
+    **cả hai thứ tự** (E trực tiếp trước C1, và C1 trước E trực tiếp) cho graph
+    tương đương; node/edge ordering deterministic; edge vẫn tồn tại khi node đích
+    không resolve.
+11. Test composition boundary: generated-summary Answer đi qua
+    `resolveAnswerEvidenceV1` **không phát sinh request nào** tới
+    `authorship.source_targets`; và mixed-type cả hai chiều (reference sai
+    `target_type` trước/sau reference đúng) cho verdict độc lập, đúng một lần fetch.
+12. Test cross-module: một walk trộn `resolveAnswerTargets` và
+    `resolveAnswerEvidenceV1` trên **cùng budget và cùng context** không sinh
+    `invalid` giả cho canonical target mà module kia đã fetch.
 
 Gate: không duplicate HTTP/DNS/budget implementation; Answer public API, wire
 contract và test suite hiện có không đổi.
@@ -1125,8 +1210,10 @@ Ngoài inventory mới, các file hiện có dự kiến thay đổi:
   canonical outcome state trích từ Answer resolver, dùng chung cho Answer và
   Evidence. Không export từ public subpath nào.
 - `src/modules/answer/v1.0/client/resolve.ts`: refactor để consume layer trên.
-  Pure refactor — public API, wire contract và kết quả semantic không đổi; test
-  Answer hiện có là regression proof và không được sửa.
+  Public API và wire contract không đổi; test Answer hiện có là regression proof
+  và không được sửa, trừ đúng một ngoại lệ đã ghi: hành vi chia sẻ cache xuyên
+  resolution context nay fail closed (security fix, có mục Security trong CHANGELOG).
+- `CHANGELOG.md`: mục **Security** cho thay đổi behavior của Answer client.
 - `src/module-registry/*`: chỉ sửa nếu Evidence làm lộ bug generic; không thêm
   Evidence-specific branch.
 - `examples/reference-server/*`: Answer, claim và evidence resource + manifest
@@ -1151,7 +1238,8 @@ Không sửa released files dưới `schemas/modules/relations/v1.0`,
 | Semantic | Locale, code points, timestamp order/precedence, confidence, duplicates, content checksum |
 | Registry | Exact dispatch cho hai kind; unsupported module/version/kind; no fallback |
 | Client | Resolution order, abort, auth, shared budget, hai-hop expand, fan-in dedup, mixed-order và mixed-type equivalence, `EvidenceGraph` node/reference/edge ordering, partial result, injected-clock freshness |
-| Composition | Shared canonical layer không rò ra public export; Answer test suite pass không sửa; `source_targets` không bị fetch; trộn Answer/Evidence trên cùng budget không sinh `invalid` giả |
+| Composition | Shared canonical layer không rò ra public export; Answer test suite pass không sửa; `source_targets` không bị fetch; trộn Answer/Evidence trên cùng budget/context không sinh `invalid` giả |
+| Resolution context | Auth→anon, anon→auth, hai principal, concurrent race đều fail closed; không result/pending nào vượt biên context; error message không rò header hay digest |
 | Answer integration | `x_answer` schema/validation result không đổi; helper resolve claim/evidence đúng |
 | Security | Inert malicious text, URL/DNS/redirect policy, `access` không cấp quyền, no sensitive logging |
 | Conformance | Stable check IDs, required/optional behavior, external implementation |
@@ -1196,6 +1284,9 @@ Release `1.4.0` chỉ được phép khi:
 - Shared canonical resolution layer là internal, Answer chỉ bị refactor và toàn
   bộ test Answer hiện có pass không sửa; `authorship.source_targets` không bị
   Evidence helper fetch.
+- Resolution context binding fail closed ở cả đường tuần tự lẫn concurrent; không
+  có kết quả protected nào rò sang call có credential khác. CHANGELOG có mục
+  Security mô tả thay đổi behavior này của Answer client.
 - Generic server dùng đúng extension grammar của core v1.0 qua predicate dùng
   chung; boundary test `x_Foo`/`x_1`/`x_` xanh.
 - Stance/confidence/provenance semantics deterministic, có invalid fixture cho
