@@ -4,30 +4,27 @@
 
 | Field | Value |
 |---|---|
-| Status | **Draft — non-normative** |
-| Gate | [ADR-0010](../../../../docs/adr/0010-evidence-citation-provenance-and-security.md) must be Accepted before this document becomes normative |
-| Module ID | `aadp:evidence` (proposed, not allocated) |
-| Module version | `1.0` (proposed) |
+| Status | **Normative** |
+| Gate | [ADR-0010](../../../../docs/adr/0010-evidence-citation-provenance-and-security.md) Accepted 2026-08-09 |
+| Module ID | `aadp:evidence` (allocated) |
+| Module version | `1.0` |
 | Core compatibility | AADP `1.0` |
 | Relations compatibility | `aadp:relations@1.0` |
 | Answer compatibility | `aadp:answer@1.0`, unmodified |
 | Package target | `ail-aadp@1.4.0` |
 
-> **Draft.** Every field, constant and example here is a **proposal**, per
-> [document conventions §5](../../../../docs/document-conventions.md), until
-> ADR-0010 is Accepted. The module ID and version are not allocated by appearing
-> here.
+> **Normative.** ADR-0010 was Accepted on 2026-08-09, ratifying every decision
+> below unchanged, so this document is normative and the module ID and version
+> are allocated. Uppercase BCP 14 keywords carry their normative meaning.
 >
-> **The implementation now exists ahead of that gate**, at explicit maintainer
-> direction: `schemas/modules/evidence/v1.0/*`, `src/modules/evidence/v1.0/**`
-> and the conformance runner are all built, and the schema digests are recorded
-> in [implementation record 1.4.0](../../../../docs/records/implementation-record-v1.4.0.md).
-> The protection ADR-0004 and
-> [ADR-0007](../../../../docs/adr/0007-module-versioning-and-discovery.md) provide
-> — deciding before freezing — has therefore been spent in advance. Nothing under
-> that schema directory may be treated as immutable until `ail-aadp@1.4.0` is
-> tagged: if acceptance changes a decision, the artifacts MUST be edited before
-> the tag, not after.
+> The implementation — `schemas/modules/evidence/v1.0/*`,
+> `src/modules/evidence/v1.0/**` and the conformance runner — was built before
+> that acceptance at explicit maintainer direction, and matches this document.
+> Its schema digests are recorded in
+> [implementation record 1.4.0](../../../../docs/records/implementation-record-v1.4.0.md).
+> From the `ail-aadp@1.4.0` tag onward those artifacts are immutable under
+> [ADR-0004](../../../../docs/adr/0004-backward-compatibility.md) and
+> [ADR-0007](../../../../docs/adr/0007-module-versioning-and-discovery.md).
 
 ## Abstract
 
@@ -550,9 +547,8 @@ src/modules/evidence/v1.0/
 └── conformance/ (types, checks, report, runner, index)
 ```
 
-Every file above now exists (`1.4.0`), with `entity.ts` carrying the
-entity-context validator. Their contract stays non-normative until ADR-0010 is
-Accepted — see the note under "Document metadata".
+Every file above exists as of `1.4.0`, with `entity.ts` carrying the
+entity-context validator.
 
 ## 19. Compatibility
 

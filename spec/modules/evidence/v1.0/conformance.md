@@ -4,18 +4,16 @@
 
 | Field | Value |
 |---|---|
-| Status | **Draft — non-normative** |
-| Gate | [ADR-0010](../../../../docs/adr/0010-evidence-citation-provenance-and-security.md) must be Accepted |
-| Module ID | `aadp:evidence` (proposed, not allocated) |
-| Module version | `1.0` (proposed) |
+| Status | **Normative** |
+| Gate | [ADR-0010](../../../../docs/adr/0010-evidence-citation-provenance-and-security.md) Accepted 2026-08-09 |
+| Module ID | `aadp:evidence` (allocated) |
+| Module version | `1.0` |
 | Runner | `runEvidenceConformance` (`ail-aadp/modules/evidence/v1.0`) — implemented in `1.4.0` |
 | Specification | [`specification.md`](specification.md) |
 
-> **Draft.** The check IDs below are implemented but do not become stable until
-> ADR-0010 is Accepted. The runner was built ahead of that gate at explicit
-> maintainer direction — see the note under "Document metadata" in
-> [`specification.md`](specification.md) and the open gates in
-> [implementation record 1.4.0](../../../../docs/records/implementation-record-v1.4.0.md).
+> **Normative.** The check IDs below are stable as of `ail-aadp@1.4.0`: a
+> released check ID is part of the conformance contract and MUST NOT be renamed
+> or repurposed within Evidence `1.0`.
 
 ## 1. Purpose
 
@@ -111,7 +109,7 @@ The check must also assert that:
   `urlPolicy`) is warned about, since SSRF protection was deliberately relaxed
   for that run.
 
-## 8. Fixture catalog (proposed)
+## 8. Fixture catalog
 
 Minimum valid fixtures: a minimal claim with one `support` ref; a claim with
 `contradict` and `neutral` refs, with and without `confidence`; evidence with

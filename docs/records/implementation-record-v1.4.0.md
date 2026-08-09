@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document type | Implementation record |
-| Status | **In progress — not a release record.** Phases 1-6 implemented; ADR-0010 acceptance and the external interoperability run remain open gates |
+| Status | **In progress — not a release record.** Phases 0-6 complete and ADR-0010 Accepted; the external interoperability run remains the one open gate |
 | Audience | Package maintainers and release reviewers |
 | Scope | Evidence & Provenance Module `1.0` plus the generic server module support and reference resources carried over from `1.3.0` |
 | Wire impact | AADP wire version stays `1.0`. No released core, Relations `1.0` or Answer `1.0` schema, module version or wire contract changed. Evidence `1.0` is a new module contract |
@@ -103,28 +103,27 @@ without being recorded here.
 | `provenance.schema.json` | `sha256:88251a395c57823db174dd046394a7d15fe5e0dd14808699e0e30034f8ee85ed` |
 | `source.schema.json` | `sha256:7b760649dc076d81554d5cbc43762f458884a6926bd50360b1b7cd20c64d08af` |
 
+## Closed gates
+
+### ADR-0010 Accepted (2026-08-09)
+
+[ADR-0010](../adr/0010-evidence-citation-provenance-and-security.md) is
+**Accepted**, allocating the module ID `aadp:evidence` and version `1.0`.
+
+Worth recording how this one went, because the ordering was unusual: the
+implementation was built **before** acceptance, at explicit maintainer
+direction, so the "decide before freezing" protection of ADR-0004 and ADR-0007
+was spent in advance. Acceptance ratified every decision unchanged, so no
+artifact needed editing — but that was the outcome, not a guarantee the process
+provided. From the `ail-aadp@1.4.0` tag onward the schemas above are immutable
+in the ordinary way.
+
 ## Open gates
 
-### 1. ADR-0010 is Proposed, not Accepted
-
-[ADR-0010](../adr/0010-evidence-citation-provenance-and-security.md) is still
-**Proposed**. Acceptance is a maintainer decision; a developer or reviewer MUST
-NOT flip that status, and a green test suite is not evidence for it.
-
-This is the one gate the implementation deliberately runs ahead of, at explicit
-direction. The wire artifacts under `schemas/modules/evidence/v1.0/` now exist,
-so the protection ADR-0004 and ADR-0007 provide — deciding before freezing —
-has been spent in advance. The practical consequence: **if acceptance changes
-any decision, the schema files must be edited before `1.4.0` is tagged**, not
-after. Nothing under that directory may be treated as immutable until the tag
-exists.
-
-`ail-aadp@1.4.0` MUST NOT be published while this gate is open.
-
-### 2. External interoperability evidence has no owner or environment
+### 1. External interoperability evidence has no owner or environment
 
 Carried over from **open gate 2 of the [1.3.0 record](implementation-record-v1.3.0.md)**
-and still open. The plan forbids closing it with a mock server or unit tests; it
+and still open. This is now the only thing standing between `1.4.0` and a tag. The plan forbids closing it with a mock server or unit tests; it
 needs a real deployment and a named person.
 
 | Required | Status |

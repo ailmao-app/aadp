@@ -10,7 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pro
 
 Evidence & Provenance Module `1.0` (`docs/adr/0010-evidence-citation-provenance-and-security.md`, `spec/modules/evidence/v1.0/specification.md`, `docs/vi/plans/implementation-plan-v1.4.0.md`), plus the generic server module support and reference resources carried over from `1.3.0`. Additive only: AADP wire version stays `1.0`, and no released core, Relations `1.0` or Answer `1.0` schema changes. No public API changes for any consumer that does not opt into the `ail-aadp/modules/evidence/v1.0` subpath.
 
-> **Release gate.** ADR-0010 is still **Proposed**. Acceptance is a maintainer decision and this release MUST NOT be tagged before it is Accepted — see `docs/records/implementation-record-v1.4.0.md` for the open gates.
+> **Release gate.** ADR-0010 was Accepted on 2026-08-09, allocating `aadp:evidence@1.0`. The external interoperability run (a packed-tarball conformance run against a real HTTPS deployment, for both Answer and Evidence) is still open — see `docs/records/implementation-record-v1.4.0.md`.
 
 ### Added
 

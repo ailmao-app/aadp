@@ -19,7 +19,7 @@ cho document có delivery state hỗn hợp.
 
 | # | Work package | Trạng thái | Điều kiện mở khóa |
 |---:|---|---|---|
-| 0 | ADR-0010 + Evidence specification/conformance | `Draft` — cả ba artifact đã viết xong, ADR vẫn **Proposed**, chờ maintainer | Maintainer accept ADR |
+| 0 | ADR-0010 + Evidence specification/conformance | `Accepted` (2026-08-09) — spec và conformance nay là normative | — |
 | 1 | Generic server module support (nợ `1.3.0`) | `Implemented` | — |
 | 2 | Evidence schemas/types/fixtures | `Implemented` | — |
 | 3 | Registry + graph semantic validator | `Implemented` | — |
@@ -28,19 +28,17 @@ cho document có delivery state hỗn hợp.
 | 6 | Conformance + package exports | `Implemented`; external interoperability run vẫn `Blocked` | Deployment thật + owner (xem [implementation record](../../records/implementation-record-v1.4.0.md)) |
 
 > **Phase 2-6 đã được triển khai TRƯỚC khi ADR-0010 được Accept**, theo chỉ đạo
-> trực tiếp. Điều đó có nghĩa: lớp bảo vệ "quyết định xong mới đóng băng" của
-> ADR-0004/ADR-0007 đã bị tiêu trước. Hệ quả thực tế — nếu maintainer đổi bất kỳ
-> quyết định nào khi accept, artifact dưới `schemas/modules/evidence/v1.0/` phải
-> được sửa **trước khi** tag `ail-aadp@1.4.0`, không phải sau. Không được coi
-> thư mục đó là immutable cho tới khi tag tồn tại, và không được publish
-> `1.4.0` khi ADR còn ở trạng thái Proposed.
+> trực tiếp, nên lớp bảo vệ "quyết định xong mới đóng băng" của
+> ADR-0004/ADR-0007 đã bị tiêu trước. ADR-0010 sau đó **được Accept ngày
+> 2026-08-09 và ratify nguyên vẹn mọi quyết định**, nên không artifact nào phải
+> sửa — nhưng đó là kết quả, không phải bảo đảm mà quy trình đưa ra. Kể từ tag
+> `ail-aadp@1.4.0`, `schemas/modules/evidence/v1.0/` là immutable theo lệ
+> thường.
 
-Các quyết định contract trong kế hoạch này ở trạng thái **đề xuất, chưa
-normative**. Chúng là input cho ADR-0010; module ID, version, field và ví dụ
-trong tài liệu này là non-normative theo [document conventions §5](../../document-conventions.md)
-cho tới khi ADR-0010 và `spec/modules/evidence/v1.0/specification.md` được
-Accepted. Một draft module version KHÔNG được coi là đã allocated chỉ vì xuất
-hiện trong ví dụ ở đây.
+Các quyết định contract trong kế hoạch này đã được ADR-0010 ratify (2026-08-09).
+Tài liệu này vẫn là **kế hoạch, không phải nguồn normative**: nguồn normative là
+[`spec/modules/evidence/v1.0/specification.md`](../../../spec/modules/evidence/v1.0/specification.md)
+và ADR-0010. Nếu hai bên lệch nhau, spec thắng.
 
 ## Mục tiêu
 
@@ -79,10 +77,10 @@ Implementation của Phase 2 trở đi chỉ bắt đầu sau khi các điều k
 2. [ADR-0007](../../adr/0007-module-versioning-and-discovery.md) và
    [ADR-0008](../../adr/0008-module-traversal-and-authorization.md) vẫn Accepted.
 3. **ADR-0010 citation/provenance/security** được tạo ở Phase 0 và Accepted.
-   [ADR-0010](../../adr/0010-evidence-citation-provenance-and-security.md) nay đã
-   tồn tại nhưng ở trạng thái **Proposed** — nó vẫn là blocker thực sự cho tới
-   khi maintainer chuyển sang Accepted. Developer/reviewer KHÔNG được tự chuyển
-   trạng thái đó.
+   [ADR-0010](../../adr/0010-evidence-citation-provenance-and-security.md)
+   **đã Accepted ngày 2026-08-09** — điều kiện này xanh. Lưu ý thứ tự thực tế:
+   implementation đi trước acceptance theo chỉ đạo trực tiếp, xem ghi chú ở
+   §"Trạng thái theo work package".
 4. Phase 1 (generic server module support) đã merge, vì reference deployment của
    Evidence phụ thuộc nó.
 
@@ -1059,14 +1057,12 @@ fallback.
 
 ### Phase 0 — ADR và normative specification
 
-> **Trạng thái: draft đã viết xong, chờ maintainer.**
+> **Trạng thái: hoàn tất.**
 > [`docs/adr/0010-evidence-citation-provenance-and-security.md`](../../adr/0010-evidence-citation-provenance-and-security.md)
-> (**Proposed**), [`spec/modules/evidence/v1.0/specification.md`](../../../spec/modules/evidence/v1.0/specification.md)
-> và [`conformance.md`](../../../spec/modules/evidence/v1.0/conformance.md) (cả
-> hai **Draft — non-normative**) đã bao phủ đủ các quyết định liệt kê ở
-> §"Dependency bắt buộc". Bước tiếp theo là **quyết định của maintainer**, không
-> phải việc code: chỉ khi ADR chuyển sang Accepted thì Phase 2 mới mở. Không
-> artifact nào dưới `schemas/modules/evidence/v1.0/` được tạo trước mốc đó.
+> **Accepted 2026-08-09**; [`spec/modules/evidence/v1.0/specification.md`](../../../spec/modules/evidence/v1.0/specification.md)
+> và [`conformance.md`](../../../spec/modules/evidence/v1.0/conformance.md) nay
+> là **normative**. ADR ratify nguyên vẹn các quyết định đã liệt kê ở
+> §"Dependency bắt buộc", nên không artifact nào phải sửa lại sau acceptance.
 
 1. Tạo ADR-0010 citation/provenance/security, Accepted trước mọi wire code, phủ
    đủ bảy quyết định ở §"Dependency bắt buộc".
@@ -1348,9 +1344,9 @@ Release `1.4.0` chỉ được phép khi:
 
 ## Điều kiện chuyển toàn bộ kế hoạch sang Implementation Ready
 
-- [ ] ADR-0010 citation/provenance/security Accepted.
-- [ ] Wire model cho claim/evidence/source được khóa trong specification.
-- [ ] Answer integration contract xác nhận không sửa `aadp:answer@1.0`.
+- [x] ADR-0010 citation/provenance/security Accepted (2026-08-09).
+- [x] Wire model cho claim/evidence/source được khóa trong specification (nay là normative).
+- [x] Answer integration contract xác nhận không sửa `aadp:answer@1.0` — toàn bộ test Answer pass không sửa dòng nào.
 - [x] Graph integrity, acyclicity và traversal budget semantics đã cụ thể (§"Graph và traversal policy").
 - [x] Generic server public API đã chọn và ghi compatibility contract.
 - [x] File map và phase ordering đã bổ sung.

@@ -2,19 +2,20 @@
 
 ## Status
 
-**Proposed** — draft for Evidence & Provenance Module `1.0` and package
-`ail-aadp@1.4.0`. Not Accepted.
+**Accepted** (2026-08-09) — for Evidence & Provenance Module `1.0` and package
+`ail-aadp@1.4.0`. The module ID `aadp:evidence` and version `1.0` are hereby
+allocated.
 
-While this ADR is not Accepted, **no Evidence wire artifact may be created**: no
-schema under `schemas/modules/evidence/v1.0/`, no public type, no registry key.
-Released schemas are immutable under
-[ADR-0004](0004-backward-compatibility.md) and
-[ADR-0007](0007-module-versioning-and-discovery.md), so a wrong decision frozen
-into the wire would cost a major version before the module's first release. A
-module version appearing in an example here is NOT thereby allocated.
+The wire artifacts under `schemas/modules/evidence/v1.0/` were implemented
+before this acceptance, at explicit maintainer direction, so the "decide before
+freezing" protection of [ADR-0004](0004-backward-compatibility.md) and
+[ADR-0007](0007-module-versioning-and-discovery.md) was spent in advance. That
+window is now closed: acceptance ratified the decisions below unchanged, and
+the released artifacts match them. From the `ail-aadp@1.4.0` tag onward those
+schemas are immutable — any change to them requires a new module version.
 
-Acceptance is a maintainer decision. A developer or reviewer MUST NOT change
-this status.
+The implementation and its recorded schema digests are in
+[implementation record 1.4.0](../records/implementation-record-v1.4.0.md).
 
 ## Context
 
