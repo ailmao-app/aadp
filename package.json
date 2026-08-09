@@ -1,6 +1,6 @@
 {
   "name": "ail-aadp",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "AI Application Discovery Protocol (AADP) — specification, schemas, validator, reference client and conformance suite",
   "keywords": [
     "aadp",
@@ -89,6 +89,7 @@
     "scripts",
     "CHANGELOG.md",
     "README.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "bin": {

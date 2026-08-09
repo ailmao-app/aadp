@@ -4,6 +4,28 @@ All notable changes to `ail-aadp` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Protocol compatibility follows [ADR-0004](docs/adr/0004-backward-compatibility.md); released schemas are immutable and wire-breaking changes require a new protocol version.
 
+## 1.3.1 - 2026-08-08
+
+Security patch for the Answer client's per-budget canonical resolution cache (`docs/vi/plans/implementation-plan-v1.3.1.md`). Does not change AADP wire version `1.0`, any released schema, the Answer Module `1.0` wire contract, or the package's public export surface — no export was added, changed or removed.
+
+### Security
+
+- Fixed `resolveAnswerTargets` (`ail-aadp/modules/answer/v1.0`) sharing a canonical target's cached result, and joining its in-flight request, across calls made with **different request options** on the same caller-owned `budget`. `resolveAnswerTargets` keys that per-budget state by canonical target alone, while `headers`, `urlPolicy`, `maxResponseBytes` and the other request options are per call, so on a budget deliberately shared between calls (the documented usage — that state is designed to outlive one call and to be race-safe across concurrent calls) a later call could:
+  - receive an entity fetched with **another call's credentials**, without ever making the request that would have produced its own `401`/`403`; and
+  - replay a **larger cached response** than its own `maxResponseBytes` cap allows, bypassing that limit.
+
+  Both were order-dependent, which also made concurrent calls on one budget nondeterministic: whichever call created the in-flight entry first supplied the options for the single shared request.
+
+  A budget's resolution state is now bound, on first use, to the full set of request-affecting options (`headers`, `crossOriginSafeHeaders`, `urlPolicy`, `rootOrigin`, `timeoutMs`, `maxRedirects`, `maxResponseBytes`, `retry`, `onBeforeAttempt`). A later call with a different set throws `AadpClientError` with `code: "resolution_context_mismatch"` **before** any cache replay, in-flight join, budget charge or request — so a rejected call leaves the budget untouched. Only a per-process-keyed HMAC digest of those options is stored; raw header values are never retained, and the error message names no option, header or digest.
+
+  Affected: `1.3.0` (the only release with this cache). Not affected: any consumer that does not call `resolveAnswerTargets`, or that uses a separate budget per set of request options.
+
+  Workaround without upgrading: use a separate `RelationsTraversalBudgetState` for each distinct set of request options.
+
+### Changed
+
+- `resolveAnswerTargets` now throws `AadpClientError` (`code: "resolution_context_mismatch"`) when one budget is reused with different request options. Unchanged for the intended usage — one budget, one immutable request configuration — which keeps identical results, request counts and budget accounting. Note this is wider than credentials alone: varying `timeoutMs`, `maxRedirects`, `maxResponseBytes` or `retry` across calls on the same budget now throws as well, because sharing one request and one cached outcome between different configurations is order-dependent and, for `maxResponseBytes`, a safety-limit bypass. Callers needing different options must use different budgets.
+
 ## 1.3.0 - 2026-08-06
 
 Answer Module `1.0` (`docs/adr/0009-answer-module-terminology-and-security.md`, `spec/modules/answer/v1.0/specification.md`, `docs/vi/plans/implementation-plan-v1.3.0.md`). Does not change AADP wire version `1.0`, the core entity schemas, or the Relations Module `1.0` schemas. Does not change the package public API for any consumer that does not opt into the `ail-aadp/modules/answer/v1.0` subpath.
