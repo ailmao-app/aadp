@@ -206,8 +206,18 @@ function extensionFieldsOf(
   extensions: Record<string, unknown> | undefined
 ): Record<string, unknown> {
   if (extensions === undefined) return {};
+  // Null and non-object values are rejected BEFORE the prototype is read:
+  // `Object.getPrototypeOf(null)` throws a raw `TypeError`, which would
+  // escape this fail-closed contract as a generic 500 instead of the
+  // resource-scoped `upstream_unavailable`. A JavaScript resource adapter
+  // (or upstream data) can produce `null` here regardless of the type.
+  if (extensions === null || typeof extensions !== "object" || Array.isArray(extensions)) {
+    throw upstreamUnavailable(
+      `Resource "${type}" serialize() returned an "extensions" value for "${id}" that is not a plain object.`
+    );
+  }
   const proto = Object.getPrototypeOf(extensions);
-  if (extensions === null || typeof extensions !== "object" || Array.isArray(extensions) || (proto !== Object.prototype && proto !== null)) {
+  if (proto !== Object.prototype && proto !== null) {
     throw upstreamUnavailable(
       `Resource "${type}" serialize() returned an "extensions" value for "${id}" that is not a plain object.`
     );

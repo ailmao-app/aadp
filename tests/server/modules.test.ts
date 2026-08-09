@@ -190,10 +190,34 @@ describe("entity extension serialization", () => {
   });
 
   it("rejects an extensions value that is not a plain object", async () => {
-    for (const bad of [[{ x_example: 1 }], "x_example", 42]) {
+    // `null` is in this list deliberately: it is the one value whose
+    // prototype cannot be read at all, so a guard ordered after
+    // `Object.getPrototypeOf()` would throw a raw TypeError instead of the
+    // resource-scoped AADP error. TypeScript forbids it; a JavaScript
+    // resource adapter can still produce it.
+    for (const bad of [null, [{ x_example: 1 }], "x_example", 42]) {
       const aadp = makeServer({ extensions: () => bad as unknown as Record<string, unknown> });
-      await expect(aadp.entity("post", "first-post")).rejects.toThrow(/is not a plain object/);
+      await expect(aadp.entity("post", "first-post")).rejects.toMatchObject({
+        code: "upstream_unavailable",
+        status: 502,
+        message: expect.stringMatching(/is not a plain object/),
+      });
     }
+  });
+
+  it("maps a non-plain-object extensions value to a diagnosable 502 over handleRequest", async () => {
+    const aadp = makeServer({ extensions: () => null as unknown as Record<string, unknown> });
+    const res = await aadp.handleRequest(
+      new Request("https://example.com/ai/v1.0/entities/post/first-post.json")
+    );
+    expect(res.status).toBe(502);
+    // An unhandled error would ALSO surface as a 502 `upstream_unavailable`,
+    // just with the generic catch-all message — so the message naming the
+    // resource and entity is what actually proves this went through the
+    // extension guard rather than escaping it.
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("upstream_unavailable");
+    expect(body.error.message).toMatch(/Resource "post" serialize\(\) returned an "extensions" value for "post:first-post"/);
   });
 
   it("does not mutate, freeze or adopt the object serialize() returned", async () => {
