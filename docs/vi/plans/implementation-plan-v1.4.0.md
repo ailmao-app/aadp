@@ -19,7 +19,7 @@ cho document có delivery state hỗn hợp.
 
 | # | Work package | Trạng thái | Điều kiện mở khóa |
 |---:|---|---|---|
-| 0 | ADR-0010 + Evidence specification/conformance | `Draft` | Maintainer accept ADR |
+| 0 | ADR-0010 + Evidence specification/conformance | `Draft` — cả ba artifact đã viết xong, ADR ở trạng thái **Proposed**, chờ maintainer | Maintainer accept ADR |
 | 1 | Generic server module support (nợ `1.3.0`) | `Implemented` — chờ release ở Phase 6 | — |
 | 2 | Evidence schemas/types/fixtures | `Blocked` | Phase 0 Accepted |
 | 3 | Registry + graph semantic validator | `Blocked` | Phase 0 + Phase 2 |
@@ -70,8 +70,11 @@ Implementation của Phase 2 trở đi chỉ bắt đầu sau khi các điều k
 1. `ail-aadp@1.3.0` và `aadp:answer@1.0` đã phát hành, schema immutable.
 2. [ADR-0007](../../adr/0007-module-versioning-and-discovery.md) và
    [ADR-0008](../../adr/0008-module-traversal-and-authorization.md) vẫn Accepted.
-3. **ADR-0010 citation/provenance/security** được tạo ở Phase 0 và Accepted. Repo
-   hiện chỉ có ADR-0001…ADR-0009; ADR-0010 chưa tồn tại và là blocker thực sự.
+3. **ADR-0010 citation/provenance/security** được tạo ở Phase 0 và Accepted.
+   [ADR-0010](../../adr/0010-evidence-citation-provenance-and-security.md) nay đã
+   tồn tại nhưng ở trạng thái **Proposed** — nó vẫn là blocker thực sự cho tới
+   khi maintainer chuyển sang Accepted. Developer/reviewer KHÔNG được tự chuyển
+   trạng thái đó.
 4. Phase 1 (generic server module support) đã merge, vì reference deployment của
    Evidence phụ thuộc nó.
 
@@ -1047,6 +1050,15 @@ fallback.
 ## Work packages
 
 ### Phase 0 — ADR và normative specification
+
+> **Trạng thái: draft đã viết xong, chờ maintainer.**
+> [`docs/adr/0010-evidence-citation-provenance-and-security.md`](../../adr/0010-evidence-citation-provenance-and-security.md)
+> (**Proposed**), [`spec/modules/evidence/v1.0/specification.md`](../../../spec/modules/evidence/v1.0/specification.md)
+> và [`conformance.md`](../../../spec/modules/evidence/v1.0/conformance.md) (cả
+> hai **Draft — non-normative**) đã bao phủ đủ các quyết định liệt kê ở
+> §"Dependency bắt buộc". Bước tiếp theo là **quyết định của maintainer**, không
+> phải việc code: chỉ khi ADR chuyển sang Accepted thì Phase 2 mới mở. Không
+> artifact nào dưới `schemas/modules/evidence/v1.0/` được tạo trước mốc đó.
 
 1. Tạo ADR-0010 citation/provenance/security, Accepted trước mọi wire code, phủ
    đủ bảy quyết định ở §"Dependency bắt buộc".
