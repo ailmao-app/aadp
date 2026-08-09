@@ -5,44 +5,47 @@
 | Field | Value |
 |---|---|
 | Status | **Draft — non-normative** |
-| Gate | [ADR-0010](../../../../docs/adr/0010-evidence-citation-provenance-and-security.md) phải Accepted trước khi tài liệu này trở thành normative |
-| Module ID | `aadp:evidence` (đề xuất, chưa allocated) |
-| Module version | `1.0` (đề xuất) |
+| Gate | [ADR-0010](../../../../docs/adr/0010-evidence-citation-provenance-and-security.md) must be Accepted before this document becomes normative |
+| Module ID | `aadp:evidence` (proposed, not allocated) |
+| Module version | `1.0` (proposed) |
 | Core compatibility | AADP `1.0` |
 | Relations compatibility | `aadp:relations@1.0` |
-| Answer compatibility | `aadp:answer@1.0`, không sửa đổi |
+| Answer compatibility | `aadp:answer@1.0`, unmodified |
 | Package target | `ail-aadp@1.4.0` |
 
-> **Draft.** Mọi field, constant và ví dụ trong tài liệu này là **đề xuất**, theo
-> [document conventions §5](../../../../docs/document-conventions.md). Không được
-> coi module ID/version ở đây là đã allocated, và KHÔNG được tạo schema artifact
-> dưới `schemas/modules/evidence/v1.0/` trước khi ADR-0010 Accepted — released
-> schema là immutable theo [ADR-0004](../../../../docs/adr/0004-backward-compatibility.md).
+> **Draft.** Every field, constant and example here is a **proposal**, per
+> [document conventions §5](../../../../docs/document-conventions.md). The module
+> ID and version are not allocated by appearing here, and no schema artifact may
+> be created under `schemas/modules/evidence/v1.0/` before ADR-0010 is Accepted —
+> released schemas are immutable under
+> [ADR-0004](../../../../docs/adr/0004-backward-compatibility.md).
 
 ## Abstract
 
-Tài liệu này định nghĩa wire contract cho Evidence & Provenance Module v1.0.
-Module mô tả **claim** (điều được khẳng định), **evidence** (thứ được viện dẫn)
-và **source** (nơi evidence đến từ), cùng quan hệ tham chiếu giữa claim và
-evidence, provenance timestamp, stance và confidence do producer khai báo. Từ
-khóa BCP 14 viết hoa có nghĩa chuẩn tắc.
+This document defines the wire contract for Evidence & Provenance Module v1.0.
+The module describes a **claim** (what is asserted), **evidence** (what is
+cited) and a **source** (where the evidence came from), together with the
+reference relationship between claim and evidence, provenance timestamps, and
+the stance and confidence declared by the producer. Uppercase BCP 14 keywords
+carry their normative meaning.
 
 ## 1. Scope
 
-Module định nghĩa discovery, `x_evidence`, claim/evidence document kind, source
-object, provenance, stance/confidence, `content_checksum`, graph traversal,
-validation và conformance.
+The module defines discovery, `x_evidence`, the claim and evidence document
+kinds, the source object, provenance, stance/confidence, `content_checksum`,
+graph traversal, validation and conformance.
 
-Module KHÔNG định nghĩa và MUST NOT được diễn giải là định nghĩa: factual truth,
-authenticity, legal validity, fact-checking, ranking, trust score, reputation
-của publisher, chữ ký số hay verification identity. **Schema validity MUST NOT
-được diễn giải thành bất kỳ nghĩa nào trong số đó.**
+The module does NOT define, and MUST NOT be interpreted as defining: factual
+truth, authenticity, legal validity, fact-checking, ranking, trust scores,
+publisher reputation, digital signatures or identity verification. **Schema
+validity MUST NOT be interpreted as any of those.**
 
-Module KHÔNG tự fetch URL nằm trong free text hoặc trong source metadata, KHÔNG
-thêm field vào core schema v1.0 / Relations `1.0` / Answer `1.0`, và KHÔNG định
-nghĩa cross-module graph composition tổng quát (thuộc `1.5.0`).
+The module does not fetch URLs found in free text or in source metadata, does
+not add fields to the core v1.0 schemas, Relations `1.0` or Answer `1.0`, and
+does not define general cross-module graph composition (that belongs to
+`1.5.0`).
 
-## 2. Discovery và compatibility
+## 2. Discovery and compatibility
 
 ```json
 {
@@ -52,39 +55,40 @@ nghĩa cross-module graph composition tổng quát (thuộc `1.5.0`).
 }
 ```
 
-Server MUST chỉ quảng bá module khi resource và schema artifacts đã deploy thật.
-Core-only client MUST bỏ qua declaration và `x_evidence`. Evidence client MUST
-exact-match ID/version và MUST NOT fallback sang version khác.
+A server MUST advertise the module only once its resources and schema artifacts
+are actually deployed. A core-only client MUST ignore the declaration and
+`x_evidence`. An Evidence client MUST exact-match the ID and version, and MUST
+NOT fall back to another version.
 
-Public API và schema paths:
+Public API and schema paths:
 
 ```text
 ail-aadp/modules/evidence/v1.0
 ail-aadp/schemas/modules/evidence/v1.0/*
 ```
 
-Package KHÔNG re-export Evidence API từ root.
+The package does not re-export the Evidence API from its root.
 
-## 3. Document kind
+## 3. Document kinds
 
-Evidence `1.0` có đúng hai top-level module document kind:
+Evidence `1.0` has exactly two top-level module document kinds:
 
-| Kind | Entity type | Vị trí |
+| Kind | Entity type | Location |
 |---|---|---|
 | `claim` | `claim` | `entity.x_evidence` |
 | `evidence` | `evidence` | `entity.x_evidence` |
 
-`source` KHÔNG phải document kind — nó là object lồng bên trong evidence
-document. Không có standalone collection kind hay registry kind ở `1.0`;
-listing/pagination dùng core sitemap/resource flow.
+`source` is NOT a document kind — it is an object nested inside an evidence
+document. There is no standalone collection kind or registry kind at `1.0`;
+listing and pagination use the core sitemap/resource flow.
 
-Registry dispatch dùng exact key `{aadp:evidence, 1.0, claim}` và
+Registry dispatch uses the exact keys `{aadp:evidence, 1.0, claim}` and
 `{aadp:evidence, 1.0, evidence}` (ADR-0007).
 
 ## 4. Wire boundary
 
-Claim entity (ví dụ **non-normative**; digest MUST được sinh bằng `checksumOf()`,
-không copy tay):
+Claim entity (**non-normative** example; the digest MUST be produced by
+`checksumOf()`, never copied by hand):
 
 ```json
 {
@@ -142,90 +146,93 @@ Evidence wrapper:
 
 ## 5. Field contract
 
-Schema đóng với `additionalProperties: false` ở mọi object do Evidence định
-nghĩa; wrapper KHÔNG có `x_*` extension point ở `1.0`. Object `target` được
-`$ref` từ Relations `1.0` và giữ nguyên extension point `x_*` của Relations.
+Every object Evidence defines is closed with `additionalProperties: false`; the
+wrapper has NO `x_*` extension point at `1.0`. The `target` object is `$ref`'d
+from Relations `1.0` and keeps the Relations `x_*` extension point.
 
 ### 5.1 Claim document
 
-| Field | Bắt buộc | Contract |
+| Field | Required | Contract |
 |---|---:|---|
-| `module` | Có | Hằng `aadp:evidence` |
-| `version` | Có | Hằng `1.0` |
-| `kind` | Có | Hằng `claim` |
-| `statement` | Có | String đã trim, 1-1.000 Unicode code points |
-| `locale` | Có | Cùng deterministic BCP 47 profile với Answer `1.0` (§6) |
-| `evidence_refs` | Có | 1-50 evidence reference (§7), không trùng canonical target |
-| `content_checksum` | Có | `sha256:<64 hex>` theo §9 |
-| `notes` | Không | Untrusted text 1-1.000 code points, không có normative effect |
+| `module` | Yes | Constant `aadp:evidence` |
+| `version` | Yes | Constant `1.0` |
+| `kind` | Yes | Constant `claim` |
+| `statement` | Yes | Trimmed string, 1-1,000 Unicode code points |
+| `locale` | Yes | The same deterministic BCP 47 profile as Answer `1.0` (§6) |
+| `evidence_refs` | Yes | 1-50 evidence references (§7), no duplicate canonical target |
+| `content_checksum` | Yes | `sha256:<64 hex>` per §9 |
+| `notes` | No | Untrusted text, 1-1,000 code points, no normative effect |
 
 ### 5.2 Evidence document
 
-| Field | Bắt buộc | Contract |
+| Field | Required | Contract |
 |---|---:|---|
-| `module` / `version` | Có | Hằng `aadp:evidence` / `1.0` |
-| `kind` | Có | Hằng `evidence` |
-| `summary` | Có | String đã trim, 1-1.000 Unicode code points |
-| `locale` | Có | Cùng profile với Answer `1.0` |
-| `source` | Có | Source object (§5.3) |
-| `provenance` | Có | Timestamp provenance (§8) |
-| `content_checksum` | Có | `sha256:<64 hex>` theo §9 |
-| `excerpt` | Không | Trích dẫn nguyên văn, 1-2.000 code points |
+| `module` / `version` | Yes | Constant `aadp:evidence` / `1.0` |
+| `kind` | Yes | Constant `evidence` |
+| `summary` | Yes | Trimmed string, 1-1,000 Unicode code points |
+| `locale` | Yes | The same profile as Answer `1.0` |
+| `source` | Yes | Source object (§5.3) |
+| `provenance` | Yes | Timestamp provenance (§8) |
+| `content_checksum` | Yes | `sha256:<64 hex>` per §9 |
+| `excerpt` | No | Verbatim quotation, 1-2,000 code points |
 
 ### 5.3 Source object
 
-| Field | Bắt buộc | Contract |
+| Field | Required | Contract |
 |---|---:|---|
-| `title` | Có | 1-500 code points |
-| `url` | Có | Absolute HTTPS, không userinfo, không fragment |
-| `publisher.name` | Có | 1-200 code points |
-| `publisher.url` | Không | Absolute HTTPS, không userinfo, không fragment |
-| `access` | Có | Enum `public` \| `authenticated` \| `restricted` (§12) |
+| `title` | Yes | 1-500 code points |
+| `url` | Yes | Absolute HTTPS, no userinfo, no fragment |
+| `publisher.name` | Yes | 1-200 code points |
+| `publisher.url` | No | Absolute HTTPS, no userinfo, no fragment |
+| `access` | Yes | Enum `public` \| `authenticated` \| `restricted` (§12) |
 
-`statement`, `summary`, `excerpt`, `notes`, `source.title` và `publisher.name`
-đều là untrusted text (§13).
+`statement`, `summary`, `excerpt`, `notes`, `source.title` and `publisher.name`
+are all untrusted text (§13).
 
 ## 6. Locale contract
 
-Evidence `1.0` dùng **cùng** deterministic BCP 47 profile với Answer `1.0`,
-enforced giống nhau ở schema và pure semantic validator. Module này KHÔNG định
-nghĩa profile mới và KHÔNG language-detect nội dung.
+Evidence `1.0` uses **the same** deterministic BCP 47 profile as Answer `1.0`,
+enforced identically by the schema and the pure semantic validator. This module
+defines no new profile and does not language-detect content.
 
 ## 7. Evidence reference contract
 
-Component `evidence-reference.schema.json` có đúng bốn field:
+The component `evidence-reference.schema.json` has exactly four fields:
 
-| Field | Bắt buộc | Contract |
+| Field | Required | Contract |
 |---|---:|---|
-| `target_type` | Có | **Hằng `evidence`** |
-| `target` | Có | `$ref` Relations `1.0` target |
-| `stance` | Có | Enum `support` \| `contradict` \| `neutral` |
-| `confidence` | Không | Number trong `[0, 1]`, tối đa 2 chữ số thập phân |
+| `target_type` | Yes | **Constant `evidence`** |
+| `target` | Yes | `$ref` to the Relations `1.0` target |
+| `stance` | Yes | Enum `support` \| `contradict` \| `neutral` |
+| `confidence` | No | Number in `[0, 1]`, at most 2 decimal places |
 
-Quy tắc:
+Rules:
 
-- Canonical identity của target tái sử dụng nguyên trạng Relations semantic
-  identity `{id, normalizedUrl}`; module này KHÔNG định nghĩa identity rule mới.
-- Trong một `evidence_refs`, hai phần tử MUST NOT cùng canonical identity, kể cả
-  khi `stance` khác nhau. Hai stance cho cùng một evidence phải tách thành hai
-  claim.
-- `stance` là assertion của producer về quan hệ giữa evidence và claim, KHÔNG
-  phải kết luận về truth value. `neutral` nghĩa "liên quan nhưng producer không
-  khẳng định hướng", KHÁC với vắng mặt reference.
-- `confidence` do producer khai báo, không có đơn vị thống kê, không so sánh
-  được giữa hai publisher. Client trong package này MUST NOT tính lại hoặc tổng
-  hợp nó thành score. Vắng `confidence` nghĩa "không khai báo" — không phải `0`,
-  không phải `1`.
+- A target's canonical identity reuses the Relations semantic identity
+  `{id, normalizedUrl}` exactly as released; this module defines no new identity
+  rule.
+- Within one `evidence_refs`, two elements MUST NOT share a canonical identity,
+  even with different `stance` values. Two stances for the same evidence must be
+  split into two claims.
+- `stance` is a producer assertion about the relationship between evidence and
+  claim, NOT a conclusion about truth value. `neutral` means "relevant, but the
+  producer asserts no direction", which is DIFFERENT from the absence of a
+  reference.
+- `confidence` is declared by the producer, has no statistical unit and is not
+  comparable across publishers. Clients in this package MUST NOT recompute or
+  aggregate it into a score. A missing `confidence` means "not declared" — not
+  `0`, not `1`.
 
 ### 7.1 Acyclic by construction
 
-`target_type` là **hằng**, nên một claim không thể trỏ tới claim khác hoặc tới
-chính nó; evidence document không có field nào trỏ ngược về claim; `source.url`
-là metadata và không bao giờ được traverse.
+`target_type` is a constant, so a claim cannot point at another claim or at
+itself; an evidence document has no field pointing back at a claim; and
+`source.url` is metadata that is never traversed.
 
-Do đó wire model `1.0` **không biểu diễn được cycle nào**. Module này KHÔNG có
-cycle policy, cycle guard, rule self-reference hay cycle conformance check.
-Nhiều claim cùng trỏ tới một evidence là **fan-in**, xử lý bằng dedup (§10).
+The `1.0` wire model therefore **cannot express any cycle**. This module has no
+cycle policy, no cycle guard, no self-reference rule and no cycle conformance
+check. Several claims pointing at one evidence is **fan-in**, handled by
+deduplication (§10).
 
 ## 8. Provenance contract
 
@@ -237,192 +244,207 @@ Nhiều claim cùng trỏ tới một evidence là **fan-in**, xử lý bằng d
 }
 ```
 
-- RFC 3339 UTC dạng `Z`, precision tối đa milliseconds — cùng rule với Answer `1.0`.
-- `published_at` và `retrieved_at` bắt buộc; `modified_at` optional.
-- Invariant: `published_at <= retrieved_at`; nếu có `modified_at` thì
+- RFC 3339 UTC with a `Z` suffix, millisecond precision at most — the same rule
+  as Answer `1.0`.
+- `published_at` and `retrieved_at` are required; `modified_at` is optional.
+- Invariant: `published_at <= retrieved_at`; when `modified_at` is present,
   `published_at <= modified_at <= retrieved_at`.
-- **Precedence**: "thời điểm của evidence" là `modified_at` nếu có, ngược lại
-  `published_at`. `retrieved_at` MUST NOT được dùng làm ngày của nội dung.
-- Với entity `type: "evidence"`: `provenance.retrieved_at <= entity.updated_at`
-  — **ordering, KHÔNG phải equality** (§11 và ADR-0010 §5).
-- `publisher` là assertion của producer, không phải verified identity.
+- **Precedence**: "the date of the evidence" is `modified_at` when present,
+  otherwise `published_at`. `retrieved_at` MUST NOT be used as the date of the
+  content.
+- For an entity of `type: "evidence"`:
+  `provenance.retrieved_at <= entity.updated_at` — **ordering, NOT equality**
+  (§11 and ADR-0010 §5).
+- `publisher` is a producer assertion, not a verified identity.
 
 ## 9. Content checksum contract
 
-`content_checksum` tái sử dụng nguyên trạng
-[ADR-0001](../../../../docs/adr/0001-checksum-algorithm.md) và public
-`ail-aadp/canonical-json`: `checksumOf(wrapper_minus_content_checksum)`, RFC 8785
-JCS, sort key theo UTF-16 code unit value. Evidence KHÔNG định nghĩa
-canonicalization rule mới; chỉ khác phạm vi input (`x_evidence`).
+`content_checksum` reuses
+[ADR-0001](../../../../docs/adr/0001-checksum-algorithm.md) and the public
+`ail-aadp/canonical-json` exactly as released:
+`checksumOf(wrapper_minus_content_checksum)`, RFC 8785 JCS, keys sorted by
+UTF-16 code unit value. Evidence defines no new canonicalization rule; only the
+input scope differs (`x_evidence`).
 
-Phạm vi hash bao phủ toàn bộ field normative của wrapper, kể cả Relations
-`target.x_*` lồng bên trong `evidence_refs`. Core `checksum` vẫn chỉ bao phủ
-`data`; một Evidence entity hợp lệ MUST pass cả hai.
+The hash scope covers every normative field of the wrapper, including the
+Relations `target.x_*` nested inside `evidence_refs`. The core `checksum` still
+covers `data` only; a valid Evidence entity MUST pass both.
 
-`content_checksum` chỉ phát hiện tampering trong phạm vi hash. Nó KHÔNG phải chữ
-ký, KHÔNG chứng minh producer trung thực và KHÔNG thay thế TLS.
+`content_checksum` only detects tampering within the hash scope. It is NOT a
+signature, does NOT prove the producer is honest, and does NOT replace TLS.
 
-## 10. Graph và traversal contract
+## 10. Graph and traversal contract
 
 ### 10.1 Reference resolution requirement
 
-| Loại reference | Bắt buộc resolve? | Ghi chú |
+| Reference | Must resolve? | Note |
 |---|---|---|
-| `claim.evidence_refs[]` | Có, khi caller opt in traversal | Unresolved → entry có status, không throw |
-| `answer.related_entities[]` với `target_type` claim/evidence | Chỉ khi caller gọi helper Evidence | Behavior Answer `1.0` không đổi khi không gọi |
-| `evidence.source.url` | KHÔNG | Metadata; validator/client MUST NOT tự fetch |
-| `evidence.source.publisher.url` | KHÔNG | Metadata |
+| `claim.evidence_refs[]` | Yes, when the caller opts into traversal | Unresolved → an entry with a status, never a throw |
+| `answer.related_entities[]` with `target_type` claim/evidence | Only when the caller invokes the Evidence helper | Answer `1.0` behaviour is unchanged otherwise |
+| `evidence.source.url` | NO | Metadata; a validator/client MUST NOT fetch it |
+| `evidence.source.publisher.url` | NO | Metadata |
 
-### 10.2 Status vocabulary và dangling
+### 10.2 Status vocabulary and dangling
 
-Vocabulary tái sử dụng nguyên `AnswerTargetResolutionStatus`; không tạo enum mới.
+The vocabulary reuses `AnswerTargetResolutionStatus` as released; no new enum.
 
-| Kết quả | Status | Dangling? |
+| Outcome | Status | Dangling? |
 |---|---|---|
-| 200 + entity hợp lệ | `resolved` | Không |
-| 404/410 | `not-found` | **Có** |
-| 200 nhưng schema/semantic invalid, hoặc sai `target_type` | `invalid` | **Có** |
-| 401/403 | `forbidden` | Không — access control, không phải graph gãy |
-| Bị URL/DNS policy chặn | `forbidden` | Không |
-| Budget cạn hoặc abort | `budget-exhausted` | Không — partial result |
+| 200 + valid entity | `resolved` | No |
+| 404/410 | `not-found` | **Yes** |
+| 200 but schema/semantically invalid, or the wrong `target_type` | `invalid` | **Yes** |
+| 401/403 | `forbidden` | No — access control, not a broken graph |
+| Blocked by URL/DNS policy | `forbidden` | No |
+| Budget exhausted or aborted | `budget-exhausted` | No — partial result |
 
-`source.access` MUST NOT tham gia phân loại này (§12).
+`source.access` MUST NOT take part in this classification (§12).
 
 ### 10.3 Budget
 
-Traversal dùng nguyên `RelationsTraversalBudgetState` do caller sở hữu, với sáu
-dimension đã phát hành ở
+Traversal uses the caller-owned `RelationsTraversalBudgetState` as is, with the
+six dimensions released in
 [ADR-0008](../../../../docs/adr/0008-module-traversal-and-authorization.md).
-Evidence MUST NOT tạo budget con, MUST NOT nới default và MUST NOT thêm dimension
-mới. Depth tính theo cạnh answer → claim → evidence (evidence là leaf, tối đa hai
-cạnh từ answer). Node charge qua `chargeNode` để dedup dùng chung
-`visitedTargets`.
+Evidence MUST NOT create a child budget, MUST NOT raise the defaults and MUST
+NOT add a new dimension. Depth is charged along the edges answer → claim →
+evidence (evidence is a leaf, at most two edges from an answer). Nodes are
+charged through `chargeNode` so deduplication shares `visitedTargets`.
 
-### 10.4 Dedup hai tầng
+### 10.4 Two-layer deduplication
 
-- `visitedTargets` cho **kế toán budget**;
-- shared canonical outcome cache khoá theo budget cho **tái dùng entity đã fetch**.
+- `visitedTargets` for **budget accounting**;
+- the shared canonical outcome cache, keyed by budget, for **reusing an
+  already-fetched entity**.
 
-Cùng canonical key `{id, normalizedUrl}`; cả hai đều cần thiết. Cache lưu
-**canonical outcome**, KHÔNG lưu verdict theo reference: verdict `target_type`
-được tính lại cho từng occurrence, nên một reference khai sai type không đầu độc
-reference khác trỏ tới cùng target.
+Both use the canonical key `{id, normalizedUrl}`, and both are necessary. The
+cache stores the **canonical outcome**, NOT a per-reference verdict: the
+`target_type` verdict is recomputed per occurrence, so a reference declaring the
+wrong type cannot poison another reference pointing at the same target.
 
-### 10.5 Kết quả traversal
+### 10.5 Traversal result
 
-Kết quả là một `EvidenceGraph` với:
+The result is an `EvidenceGraph` with:
 
-- `nodes[]` — mỗi canonical target đúng một node; `status` chỉ mô tả kết quả
-  fetch/schema/checksum của target đó. Discovery order, không sort lại.
-- `references[]` — mỗi occurrence trong `answer.related_entities` có verdict
-  riêng, giữ index gốc.
-- `edges[]` — mỗi occurrence trong `claim.evidence_refs` có verdict riêng, sắp
-  theo (claim discovery index, ref index).
-- `partial` — true khi walk dừng trước khi thử hết reference.
+- `nodes[]` — exactly one node per canonical target; `status` describes only the
+  fetch/schema/checksum outcome for that target. Discovery order, never
+  re-sorted.
+- `references[]` — one entry per occurrence in `answer.related_entities`, each
+  with its own verdict and its original index.
+- `edges[]` — one entry per occurrence in `claim.evidence_refs`, each with its
+  own verdict, ordered by (claim discovery index, ref index).
+- `partial` — true when the walk stopped before every reference was attempted.
 
-Node không resolve được vẫn xuất hiện trong `nodes`; edge/reference entry luôn
-tồn tại nếu wire có ref, để consumer phân biệt "không có ref" với "có ref nhưng
-fetch hỏng". Mọi reference sau điểm dừng xuất hiện với status `budget-exhausted`,
-không bị âm thầm bỏ.
+A node that could not be resolved still appears in `nodes`; an edge or reference
+entry always exists when the wire has a ref, so a consumer can distinguish "no
+ref" from "a ref whose fetch failed". Every reference after the stopping point
+appears with status `budget-exhausted`, never silently dropped.
 
-`AbortSignal` do caller truyền; abort tạo partial result. Module KHÔNG thêm retry
-layer ngoài policy HTTP hiện có.
+The `AbortSignal` is supplied by the caller; an abort produces a partial result.
+The module adds no retry layer beyond the existing HTTP policy.
 
 ## 11. Validation boundary
 
-**JSON Schema** chịu trách nhiệm: required fields, constants, closed objects,
-enum `stance`/`access`, string/array bounds, URL/timestamp shape, confidence
-range và evidence reference shape (target qua Relations `$ref`).
+**JSON Schema** is responsible for: required fields, constants, closed objects,
+the `stance`/`access` enums, string and array bounds, URL and timestamp shape,
+the confidence range, and the evidence reference shape (target via the Relations
+`$ref`).
 
-Schema KHÔNG kiểm tra: timestamp ordering, duplicate semantic target,
-`content_checksum`, và quan hệ thứ tự với core `updated_at`.
+The schema does NOT check: timestamp ordering, duplicate semantic targets,
+`content_checksum`, or the ordering relationship with the core `updated_at`.
 
-**Pure wrapper semantic validator** (registry key `{aadp:evidence, 1.0, claim}` /
-`{aadp:evidence, 1.0, evidence}`) nhận wrapper; MUST NOT nhận entity context,
-MUST NOT fetch network, MUST NOT đọc clock hệ thống, MUST NOT mutate input.
-Kiểm tra: module/version/kind nhất quán; Unicode code-point bounds sau trim;
-locale profile; timestamp ordering và precedence; confidence range/precision;
-duplicate target theo Relations semantic identity; `content_checksum` khớp digest
-tính lại.
+**The pure wrapper semantic validator** (registry keys
+`{aadp:evidence, 1.0, claim}` and `{aadp:evidence, 1.0, evidence}`) receives the
+wrapper only; it MUST NOT receive entity context, MUST NOT fetch over the
+network, MUST NOT read the system clock and MUST NOT mutate its input. It
+checks: module/version/kind consistency; Unicode code-point bounds after
+trimming; the locale profile; timestamp ordering and precedence; confidence
+range and precision; duplicate targets by Relations semantic identity; and
+`content_checksum` against a recomputed digest.
 
-Validator KHÔNG có rule self-reference: `target_type` hằng đã loại trừ
-claim→claim ở tầng schema, và pure validator không có entity context để biết id
-của chính document.
+The validator has no self-reference rule: the constant `target_type` already
+rules out claim → claim at the schema layer, and a pure validator has no entity
+context with which to know the document's own id.
 
-**Entity-context validator** `validateEvidenceEntityV1(entity)`:
+**The entity-context validator** `validateEvidenceEntityV1(entity)`:
 
-1. Validate core entity v1.0.
-2. Yêu cầu `entity.type` khớp kind (`claim` hoặc `evidence`), có `x_evidence`,
-   có `entity.canonical_url`.
-3. Validate `entity.canonical_url` bằng URL-policy helper dùng chung với
-   `source.url` (absolute HTTPS, không userinfo, không fragment).
-4. Dispatch `x_evidence` qua exact registry key.
-5. Với kind `evidence`: yêu cầu `provenance.retrieved_at <= entity.updated_at`.
-6. Trả typed validated entity hoặc structured validation result.
+1. Validate the core entity v1.0.
+2. Require `entity.type` to match the kind (`claim` or `evidence`), an
+   `x_evidence` object, and `entity.canonical_url`.
+3. Validate `entity.canonical_url` with the URL-policy helper shared with
+   `source.url` (absolute HTTPS, no userinfo, no fragment).
+4. Dispatch `x_evidence` through the exact registry key.
+5. For kind `evidence`: require
+   `provenance.retrieved_at <= entity.updated_at`.
+6. Return a typed validated entity or a structured validation result.
 
-`parseEvidenceEntityV1` là throwing convenience wrapper, không duplicate rules.
+`parseEvidenceEntityV1` is a throwing convenience wrapper and duplicates no
+rules.
 
-Advisory (không tạo semantic error): claim có đúng sự thật không; evidence có
-thực sự support/contradict claim không; publisher có đáng tin không; source có
-còn tồn tại không.
+Advisory (never a semantic error): whether the claim is true; whether the
+evidence genuinely supports or contradicts the claim; whether the publisher is
+trustworthy; whether the source still exists.
 
-Issue code ổn định với prefix `evidence.semantic.*`; message text không phải API
-ổn định.
+Issue codes are stable with the prefix `evidence.semantic.*`; message text is
+not a stable API.
 
-## 12. `source.access` không phải authorization
+## 12. `source.access` is not authorization
 
-`access` là assertion của producer về **source nằm ngoài AADP** — thứ mà `1.0`
-không bao giờ fetch. Nó MUST NOT tham gia bất kỳ quyết định traversal,
-authorization hay conformance nào; vai trò hợp lệ duy nhất là presentation.
+`access` is a producer assertion about the **source outside AADP** — something
+`1.0` never fetches. It MUST NOT take part in any traversal, authorization or
+conformance decision; its only valid role is presentation.
 
-Authorization của chính evidence entity do core/Relations authorization và
-manifest `security` declaration quyết định. Mọi 401/403 trên target đều là
-`forbidden`, độc lập với `access` — và khi target trả 401/403 thì client không hề
-có body để đọc `access`.
+Authorization of the evidence entity itself is decided by core/Relations
+authorization and the manifest `security` declaration. Every 401/403 on a target
+is `forbidden`, independent of `access` — and when a target returns 401/403 the
+client has no body from which to read `access` at all.
 
-## 13. Security và privacy contract
+## 13. Security and privacy contract
 
-- Mọi free text là untrusted data; package MUST NOT nối vào system prompt,
-  shell, HTML hay executable template, MUST NOT parse instruction từ chúng.
-- `source.url`, `publisher.url` và `entity.canonical_url` là metadata và MUST NOT
-  được validator/client tự fetch. Chỉ target trong `evidence_refs` /
-  `related_entities` được fetch, và chỉ qua Relations URL/DNS policy khi caller
-  opt in.
-- Redirect, DNS rebinding, private/link-local/reserved address và credential leak
-  behavior kế thừa policy hiện có; Evidence KHÔNG có networking bypass.
-- Authorization được kiểm tra trước khi trả claim/evidence/target.
-- Một budget = một resolution context bất biến; canonical outcome cache và
-  in-flight request MUST NOT được dùng chung giữa hai call khác context.
-  Mismatch fail closed bằng `AadpClientError`
-  (`code: "resolution_context_mismatch"`), theo contract đã phát hành ở `1.3.1`.
-- Conformance output MUST NOT log toàn bộ private payload hoặc auth header mặc
-  định.
-- Stance/confidence/publisher là assertion của producer; schema validity không
-  chứng minh chúng trung thực.
+- All free text is untrusted data; the package MUST NOT interpolate it into a
+  system prompt, shell, HTML or executable template, and MUST NOT parse
+  instructions out of it.
+- `source.url`, `publisher.url` and `entity.canonical_url` are metadata and MUST
+  NOT be fetched by a validator or client. Only targets inside `evidence_refs`
+  and `related_entities` are fetched, and only through the Relations URL/DNS
+  policy when the caller opts in.
+- Redirect, DNS rebinding, private/link-local/reserved address and credential
+  leak behaviour are inherited from the existing policy; Evidence has NO
+  networking bypass.
+- Authorization is checked before a claim, evidence document or target is
+  returned.
+- One budget = one immutable resolution context; the canonical outcome cache and
+  in-flight requests MUST NOT be shared between calls with different contexts.
+  A mismatch fails closed with `AadpClientError`
+  (`code: "resolution_context_mismatch"`), per the contract released in `1.3.1`.
+- Conformance output MUST NOT log full private payloads or auth headers by
+  default.
+- Stance, confidence and publisher are producer assertions; schema validity does
+  not prove them truthful.
 
 ## 14. Freshness
 
-Freshness là **client-computed classification**, không phải publisher metadata.
-Evidence `1.0` KHÔNG có field `expires_at` và KHÔNG có field `freshness`.
-`classifyEvidenceFreshness(evidence, now, maxAgeMs)` là pure helper dùng injected
-clock, phân loại `fresh` | `stale` theo precedence ở §8.
+Freshness is a **client-computed classification**, not publisher metadata.
+Evidence `1.0` has no `expires_at` field and no `freshness` field.
+`classifyEvidenceFreshness(evidence, now, maxAgeMs)` is a pure helper with an
+injected clock, classifying `fresh` | `stale` by the precedence in §8.
 
 ## 15. Answer integration
 
-Answer `1.0` là released immutable contract. Vì vậy:
+Answer `1.0` is a released immutable contract. Therefore:
 
-- Answer liên kết tới claim/evidence **chỉ qua `related_entities`** với
-  `target_type` là `claim` hoặc `evidence`. MUST NOT dùng
+- An Answer links to claims/evidence **only through `related_entities`**, with
+  `target_type` of `claim` or `evidence`. It MUST NOT use
   `authorship.source_targets`.
-- Helper `resolveAnswerEvidenceV1(answer, options)` lọc `related_entities`,
-  resolve qua shared canonical resolution layer, validate từng entity, **rồi
-  expand `evidence_refs` của mọi claim đã resolve** trên cùng budget.
-- Helper MUST NOT gọi `resolveAnswerTargets` — hàm đó luôn collect cả
-  `authorship.source_targets`, nằm ngoài phạm vi Evidence. Hệ quả kiểm chứng
-  được: một generated-summary Answer đi qua `resolveAnswerEvidenceV1` MUST NOT
-  phát sinh request nào tới `authorship.source_targets`.
-- Integration MUST NOT đổi `AnswerValidationResult`,
-  `AnswerEntityValidationResult` hay tập payload hợp lệ của Answer `1.0`.
+- The helper `resolveAnswerEvidenceV1(answer, options)` filters
+  `related_entities`, resolves them through the shared canonical resolution
+  layer, validates each entity, **and then expands the `evidence_refs` of every
+  resolved claim** on the same budget.
+- The helper MUST NOT call `resolveAnswerTargets` — that function always
+  collects `authorship.source_targets` as well, which is out of scope for
+  Evidence. Verifiable consequence: a generated-summary Answer passed through
+  `resolveAnswerEvidenceV1` MUST NOT produce any request to
+  `authorship.source_targets`.
+- Integration MUST NOT change `AnswerValidationResult`,
+  `AnswerEntityValidationResult` or the set of valid Answer `1.0` payloads.
 
 ## 16. Layer boundary
 
@@ -434,12 +456,12 @@ module registry ──► Evidence schema + pure semantic validator
 Evidence entity validator/client ──► shared canonical resolution (internal)
                                      ──► Relations resolver + shared budget
         ↓
-application citation/editorial policy (ngoài package)
+application citation/editorial policy (outside the package)
 ```
 
-Shared canonical resolution layer là **internal**: nó MUST NOT xuất hiện trong
-bất kỳ public subpath nào của Answer, Relations hay Evidence. Networking,
-URL/DNS, authorization, scheduling và budget tiếp tục do core/Relations sở hữu.
+The shared canonical resolution layer is **internal**: it MUST NOT appear in any
+public subpath of Answer, Relations or Evidence. Networking, URL/DNS,
+authorization, scheduling and budget remain owned by core/Relations.
 
 ## 17. Typed API
 
@@ -493,12 +515,12 @@ export function runEvidenceConformance(
 ): Promise<EvidenceConformanceReport>;
 ```
 
-Hai resolver nhận `options.budget` giống hệt Answer `1.0` — không có tham số
-state riêng. Canonical outcome cache khoá theo chính budget ở tầng internal, nên
-không có gì để caller quên truyền và không phát sinh câu hỏi ownership khi gọi
-lồng nhau hoặc đồng thời.
+Both resolvers take `options.budget` exactly like Answer `1.0` — there is no
+separate state parameter. The canonical outcome cache is keyed by that budget in
+the internal layer, so there is nothing for a caller to forget to pass and no
+ownership question for nested or concurrent calls.
 
-## 18. Schema và artifact inventory
+## 18. Schema and artifact inventory
 
 ```text
 schemas/modules/evidence/v1.0/
@@ -519,16 +541,18 @@ src/modules/evidence/v1.0/
 └── conformance/ (types, checks, report, runner, index)
 ```
 
-Không file nào trong danh sách trên được tạo trước khi ADR-0010 Accepted.
+None of the files above may be created before ADR-0010 is Accepted.
 
 ## 19. Compatibility
 
-- Evidence `1.0` là normative wire version đầu tiên; không phát hành `0.1`.
-- Patch chỉ sửa documentation/implementation bug không đổi payload schema hoặc
-  semantic result normative. Minor chỉ thêm optional contract tương thích ngược.
-  Major dùng cho thay đổi field/reference/provenance semantics không tương thích.
-- Client MUST NOT fallback sang Evidence version khác khi exact version không
-  hỗ trợ; consumer opt-in trả `unsupported_module_version`.
-- Core-only consumer bỏ qua `x_evidence` và module discovery entry an toàn.
-- Thêm reverse edge evidence → claim là thay đổi model, cần ADR riêng — không
-  phải minor bump.
+- Evidence `1.0` is the first normative wire version; there is no `0.1`.
+- A patch only fixes documentation or implementation bugs without changing the
+  payload schema or normative semantic results. A minor only adds
+  backward-compatible optional contract. A major covers incompatible changes to
+  fields, references or provenance semantics.
+- A client MUST NOT fall back to another Evidence version when the exact version
+  is unsupported; an opt-in consumer reports `unsupported_module_version`.
+- A core-only consumer safely ignores `x_evidence` and the module discovery
+  entry.
+- Adding a reverse evidence → claim edge is a model change requiring its own ADR
+  — not a minor bump.

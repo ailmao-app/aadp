@@ -1,23 +1,24 @@
 # AADP Relations Module v1.0 — Conformance Contract
 
-## Thông tin
+## Document metadata
 
-| Thuộc tính | Giá trị |
+| Field | Value |
 |---|---|
-| Trạng thái | Accepted implementation contract |
+| Status | Accepted implementation contract |
 | Module | `aadp:relations@1.0` |
 | Owner | AADP maintainers |
 | Normative source | [`specification.md`](specification.md) |
 
 ## Runner boundary
 
-`runRelationsConformance(options)` export từ
-`ail-aadp/modules/relations/v1.0`. Runner dùng chung report/execution utilities
-nhưng có suite riêng; core `CHECKS` và IDs MUST không đổi.
+`runRelationsConformance(options)` is exported from
+`ail-aadp/modules/relations/v1.0`. The runner shares the report and execution
+utilities but has its own suite; the core `CHECKS` and their IDs MUST NOT
+change.
 
 ## Stable check IDs
 
-| Check ID | Ý nghĩa |
+| Check ID | Meaning |
 |---|---|
 | `relations.discovery.declared` | Exact module declaration |
 | `relations.schema.reachable` | Module schema URL usable |
@@ -43,7 +44,7 @@ nhưng có suite riêng; core `CHECKS` và IDs MUST không đổi.
 | `relations.security.credentials` | Credential scoping |
 | `relations.privacy.social_graph` | No public follows/followers |
 
-Released check IDs là stable machine contract.
+Released check IDs are a stable machine contract.
 
 ## Issue taxonomy
 
@@ -66,13 +67,13 @@ Released check IDs là stable machine contract.
 | `graph_cycle` | partial/inconclusive |
 | `traversal_budget_exceeded` | partial/inconclusive |
 | `traversal_aborted` | partial/inconclusive |
-| `blocked_url` | failed hoặc partial theo edge requirement |
-| `credential_scope_blocked` | failed hoặc partial theo edge requirement |
-| `unauthorized` | failed hoặc partial theo edge requirement |
-| `forbidden` | failed hoặc partial theo edge requirement |
+| `blocked_url` | failed or partial, depending on the edge requirement |
+| `credential_scope_blocked` | failed or partial, depending on the edge requirement |
+| `unauthorized` | failed or partial, depending on the edge requirement |
+| `forbidden` | failed or partial, depending on the edge requirement |
 
-Issue MUST có check ID, document URL/path, module ID/version/kind và source/target
-ID khi có.
+An issue MUST carry the check ID, the document URL/path, the module
+ID/version/kind, and the source/target ID when available.
 
 ## Normative fixture catalog
 
@@ -126,27 +127,28 @@ Traversal/security fixtures:
 | `relations-cross-origin-credential-strip` | `relations.security.credentials` | passed |
 | `relations-private-social-graph-omitted` | `relations.privacy.social_graph` | passed |
 
-Mỗi hàng chỉ khóa primary check; fixture metadata MAY khai báo thêm check IDs liên
-quan. Fixture trở thành normative vector khi payload, schema, expected result và
-expected issue/check ID được review cùng nhau. Không dùng Ailmao domain data.
+Each row locks the primary check only; fixture metadata MAY declare additional
+related check IDs. A fixture becomes a normative vector once its payload,
+schema, expected result and expected issue/check ID are reviewed together. Do
+not use Ailmao domain data.
 
 ## Profiles
 
-- `relations-core`: discovery/schema/pure semantics, không traverse.
-- `relations-full`: resolution, pagination, cache, bounded traversal.
-- `relations-authenticated`: full với explicit test credential provider.
+- `relations-core`: discovery, schema and pure semantics; no traversal.
+- `relations-full`: resolution, pagination, caching and bounded traversal.
+- `relations-authenticated`: the full profile with an explicit test credential provider.
 
-Report MUST ghi profile, core/module/package versions và effective limits.
+A report MUST record the profile, the core/module/package versions and the effective limits.
 
 ## Neutral implementation gate
 
-Neutral implementation chỉ dùng published spec/schema/fixtures/public exports,
-không import `src/**`, phân biệt skipped/inconclusive với passed và chạy từ clean
-tarball installation.
+A neutral implementation uses only the published spec, schemas, fixtures and
+public exports; imports nothing from `src/**`; distinguishes skipped and
+inconclusive from passed; and runs from a clean tarball installation.
 
 ## Release gate
 
-- Stable IDs và fixture catalog được implement đầy đủ.
-- Core check IDs/results không regression.
-- JSON/JUnit có module metadata và provenance.
-- Clean-install runner, neutral implementation và security review xanh.
+- The stable IDs and the fixture catalog are fully implemented.
+- Core check IDs and results show no regression.
+- JSON and JUnit output carry module metadata and provenance.
+- The clean-install runner, the neutral implementation and the security review are green.

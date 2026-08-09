@@ -5,149 +5,158 @@
 | Field | Value |
 |---|---|
 | Status | **Draft — non-normative** |
-| Gate | [ADR-0010](../../../../docs/adr/0010-evidence-citation-provenance-and-security.md) phải Accepted |
-| Module ID | `aadp:evidence` (đề xuất, chưa allocated) |
-| Module version | `1.0` (đề xuất) |
-| Runner | `runEvidenceConformance` (`ail-aadp/modules/evidence/v1.0`) — chưa tồn tại |
+| Gate | [ADR-0010](../../../../docs/adr/0010-evidence-citation-provenance-and-security.md) must be Accepted |
+| Module ID | `aadp:evidence` (proposed, not allocated) |
+| Module version | `1.0` (proposed) |
+| Runner | `runEvidenceConformance` (`ail-aadp/modules/evidence/v1.0`) — does not exist yet |
 | Specification | [`specification.md`](specification.md) |
 
-> **Draft.** Check ID dưới đây là đề xuất và chưa ổn định. Không implement runner
-> trước khi ADR-0010 Accepted.
+> **Draft.** The check IDs below are proposals and are not yet stable. Do not
+> implement the runner before ADR-0010 is Accepted.
 
 ## 1. Purpose
 
-Xác định check ID ổn định, taxonomy issue và ranh giới normative/advisory cho
-Evidence `1.0` conformance. Tài liệu này KHÔNG thay đổi core `CHECKS`, Relations
-`RELATIONS_CHECKS` hay Answer check ID
-([ADR-0007](../../../../docs/adr/0007-module-versioning-and-discovery.md)
+Defines the stable check IDs, issue taxonomy and normative/advisory boundary for
+Evidence `1.0` conformance. This document does NOT change the core `CHECKS`, the
+Relations `RELATIONS_CHECKS` or the Answer check IDs
+([ADR-0007](../../../../docs/adr/0007-module-versioning-and-discovery.md),
 "Conformance boundary").
 
 ## 2. Check catalog
 
-| Check ID | Group | Nội dung | Required/Optional |
+| Check ID | Group | Content | Required/Optional |
 |---|---|---|---|
-| `evidence.discovery` | discovery | Manifest quảng bá đúng `{id, version, schema}` cho `aadp:evidence@1.0` | Required |
-| `evidence.resource` | resource | Fetch sample claim và evidence entity qua core discovery/entity flow | Required |
-| `evidence.schema` | schema | Wrapper `x_evidence` đúng Evidence `1.0` schema | Required |
-| `evidence.semantic` | semantic | Pure wrapper semantic invariants (gồm `content_checksum`) xanh | Required |
-| `evidence.context` | context | Entity type, `x_evidence` presence, canonical URL policy, và **ordering** `provenance.retrieved_at <= entity.updated_at` (KHÔNG phải equality) | Required |
-| `evidence.graph` | graph | Claim → evidence resolve; không `not-found`/`invalid`; fan-in dedup đúng (một evidence chỉ fetch một lần trong một walk) | Required khi có sample claim |
-| `evidence.stance` | stance | Stance/confidence semantics; vắng `confidence` không bị suy diễn thành `0`/`1` | Required |
-| `evidence.provenance` | provenance | Timestamp ordering, precedence và freshness classification | Required |
-| `evidence.answer_link` | integration | Answer `related_entities` tới claim/evidence resolve được, claim được expand tới evidence (hai hop), `x_answer` không đổi | Required khi có sample answer |
-| `evidence.security` | security | Free text inert; URL/DNS/redirect policy; `access` không cấp quyền | Required |
+| `evidence.discovery` | discovery | The manifest advertises the correct `{id, version, schema}` for `aadp:evidence@1.0` | Required |
+| `evidence.resource` | resource | A sample claim and evidence entity fetch successfully through the core discovery/entity flow | Required |
+| `evidence.schema` | schema | The `x_evidence` wrapper passes the Evidence `1.0` schema | Required |
+| `evidence.semantic` | semantic | Pure wrapper semantic invariants (including `content_checksum`) are green | Required |
+| `evidence.context` | context | Entity type, `x_evidence` presence, canonical URL policy, and the **ordering** `provenance.retrieved_at <= entity.updated_at` (NOT equality) | Required |
+| `evidence.graph` | graph | Claim → evidence resolves; no `not-found`/`invalid`; fan-in deduplication is correct (one evidence fetched once per walk) | Required when a sample claim exists |
+| `evidence.stance` | stance | Stance/confidence semantics; a missing `confidence` is not inferred as `0`/`1` | Required |
+| `evidence.provenance` | provenance | Timestamp ordering, precedence and freshness classification | Required |
+| `evidence.answer_link` | integration | Answer `related_entities` to claim/evidence resolve, a claim expands to evidence (two hops), `x_answer` is unchanged | Required when a sample answer exists |
+| `evidence.security` | security | Free text is inert; URL/DNS/redirect policy holds; `access` grants nothing | Required |
 
-Mỗi check là async function thuần trên context của runner, không baked-in
-fixture. Check phụ thuộc sample document là `skipped`/`inconclusive`, **KHÔNG BAO
-GIỜ `failed`**, khi không có sample — cùng lý do với core
-`ConformanceOptions.negativeTargets` và Answer.
+Each check is a pure async function over the runner's context, with no baked-in
+fixture. A check that depends on a sample document is `skipped`/`inconclusive`
+and **NEVER `failed`** when no sample is available — the same reasoning as the
+core `ConformanceOptions.negativeTargets` and Answer.
 
 ## 3. Prerequisite chain
 
-`evidence.resource` là prerequisite của mọi check trừ `evidence.discovery`.
-`evidence.schema` là prerequisite của `evidence.semantic`, `evidence.stance`,
-`evidence.provenance`, `evidence.graph`, `evidence.answer_link`. Một prerequisite
-`failed`/`skipped` khiến check phụ thuộc bị `skipped` với message giải thích,
-không tự chạy.
+`evidence.resource` is a prerequisite of every check except
+`evidence.discovery`. `evidence.schema` is a prerequisite of
+`evidence.semantic`, `evidence.stance`, `evidence.provenance`,
+`evidence.graph` and `evidence.answer_link`. A `failed`/`skipped` prerequisite
+makes the dependent check `skipped` with an explanatory message rather than
+letting it run.
 
 ## 4. Status taxonomy
 
-`passed`/`failed`/`warning`/`skipped`, giống core (`CheckStatus`). `skipped` với
-`inconclusive: true` nghĩa là runner không đạt verdict (thiếu sample URL, hoặc
-traversal budget cắt ngang) — không phải bằng chứng conformance. Overall status
-là `failed` nếu có check `failed` (hoặc `warning` khi `failOnWarning`);
-`inconclusive` nếu có check inconclusive nhưng không `failed`; ngược lại
-`passed`.
+`passed`/`failed`/`warning`/`skipped`, as in core (`CheckStatus`). `skipped`
+with `inconclusive: true` means the runner reached no verdict (missing sample
+URL, or the traversal budget cut the run short) — it is not evidence of
+conformance. Overall status is `failed` when any check failed (or warned, under
+`failOnWarning`); `inconclusive` when a check is inconclusive but none failed;
+otherwise `passed`.
 
-## 5. Dangling và `forbidden`
+## 5. Dangling and `forbidden`
 
-Gate "không dangling reference" nghĩa là: run trên reference deployment không có
-entry `not-found` hoặc `invalid`.
+The "no dangling reference" gate means: a run against the reference deployment
+produces no `not-found` and no `invalid` entry.
 
-Entry `forbidden` — 401/403, hoặc URL/DNS policy chặn — **luôn là kết quả hợp lệ
-và KHÔNG fail gate**. Phân loại này MUST NOT đọc `source.access`
-([specification.md §12](specification.md)): khi target trả 401/403 thì body
-không tồn tại để đọc field đó.
+A `forbidden` entry — 401/403, or blocked by URL/DNS policy — **is always a
+valid outcome and does NOT fail the gate**. This classification MUST NOT read
+`source.access` ([specification.md §12](specification.md)): when a target
+returns 401/403 there is no body from which to read that field.
 
 ## 6. Options boundary
 
-Runner hỗ trợ server có auth theo cùng option boundary với Relations/Answer, và
-dùng cùng caller-owned `RelationsTraversalBudgetState`. Report phân biệt ba thứ
-khác nhau: **failed check**, **unsupported module** và **traversal/budget
-failure** — gộp chúng lại sẽ khiến một budget cạn trông như một deployment không
-conformant.
+The runner supports authenticated servers under the same option boundary as
+Relations and Answer, and uses the same caller-owned
+`RelationsTraversalBudgetState`. The report distinguishes three different
+things: a **failed check**, an **unsupported module**, and a **traversal/budget
+failure** — collapsing them would make an exhausted budget look like a
+non-conformant deployment.
 
-Runner MUST validate mọi numeric/`retry`/`now` option trước khi phát request,
-giống preflight của core và Answer runner, để một misconfiguration của caller
-không bị ghi thành `failed` check của deployment.
+The runner MUST validate every numeric/`retry`/`now` option before issuing a
+request, mirroring the preflight in the core and Answer runners, so that a
+caller's misconfiguration is never recorded as a `failed` check against the
+deployment.
 
-Unsupported Evidence version KHÔNG phải remote deployment check — runner không
-thể yêu cầu một conforming server quảng bá version giả. Hành vi này kiểm bằng
-synthetic manifest/entity trong package compatibility suite: core-only consumer
-bỏ qua `x_evidence`; opt-in consumer trả `unsupported_module_version` và không
-fallback.
+An unsupported Evidence version is NOT a remote deployment check — a runner
+cannot require a conforming server to advertise a fake version. That behaviour
+is tested with a synthetic manifest/entity in the package compatibility suite: a
+core-only consumer ignores `x_evidence`; an opt-in consumer reports
+`unsupported_module_version` and does not fall back.
 
 ## 7. Security check scope
 
-`evidence.security` scan free text (`statement`, `summary`, `excerpt`, `notes`,
-`source.title`, `publisher.name`) cho prompt-injection-shaped substring nhưng
-**KHÔNG** coi sự hiện diện của chúng là failure — text đó vẫn là valid, inert
-data. Absence của crash/behavior change mới là điều kiện pass thật, thứ một
-static scan một mình không chứng minh được; substring tìm thấy report như
+`evidence.security` scans free text (`statement`, `summary`, `excerpt`, `notes`,
+`source.title`, `publisher.name`) for prompt-injection-shaped substrings but
+does **NOT** treat their presence as a failure — such text is still valid, inert
+data. The real pass condition is the absence of a crash or behaviour change,
+which a static scan alone cannot prove; any substring found is reported as a
 `warning`.
 
-Check cũng phải khẳng định:
+The check must also assert that:
 
-- `source.url`/`publisher.url` KHÔNG bị fetch trong bất kỳ run nào;
-- một evidence có `access: authenticated` KHÔNG được đối xử khác một evidence
-  `public` ở bất kỳ quyết định traversal hay verdict nào;
-- run dùng non-default URL policy (`allowPrivateNetwork`/custom `urlPolicy`) được
-  cảnh báo, vì SSRF protection bị nới lỏng có chủ đích cho run đó.
+- `source.url`/`publisher.url` are NOT fetched in any run;
+- an evidence document with `access: authenticated` is NOT treated differently
+  from a `public` one in any traversal decision or verdict;
+- a run using a non-default URL policy (`allowPrivateNetwork`/custom
+  `urlPolicy`) is warned about, since SSRF protection was deliberately relaxed
+  for that run.
 
-## 8. Fixture catalog (đề xuất)
+## 8. Fixture catalog (proposed)
 
-Valid fixtures tối thiểu: claim tối thiểu một ref `support`; claim có
-`contradict` và `neutral`, có/không `confidence`; evidence `access: public` đủ ba
-timestamp; evidence `access: authenticated` (chứng minh `access` không đổi kết
-quả); evidence sau resource `security` declaration (401/403 → `forbidden`, không
-dangling); evidence có `retrieved_at` **sớm hơn** `entity.updated_at`; evidence
-có `excerpt` và Relations `target.x_*` cross-plane Unicode key; answer tham chiếu
-claim qua `related_entities`; fan-in hai claim → một evidence; answer → claim →
-evidence hai hop; answer trỏ đồng thời tới E và tới C1 (C1 → E) với **hai bản đảo
-thứ tự**; answer khai sai `target_type` cho một target mà claim khai đúng, cũng
-hai bản đảo thứ tự; generated-summary answer có `source_targets` không rỗng.
+Minimum valid fixtures: a minimal claim with one `support` ref; a claim with
+`contradict` and `neutral` refs, with and without `confidence`; evidence with
+`access: public` and all three timestamps; evidence with
+`access: authenticated` (proving `access` changes no outcome); evidence behind a
+resource `security` declaration (401/403 → `forbidden`, not dangling); evidence
+whose `retrieved_at` is **earlier** than `entity.updated_at`; evidence with an
+`excerpt` and a cross-plane Unicode key in the Relations `target.x_*`; an answer
+referencing a claim through `related_entities`; fan-in of two claims to one
+evidence; a full two-hop answer → claim → evidence; an answer pointing at both E
+and C1 (C1 → E) in **both orderings**; an answer declaring the wrong
+`target_type` for a target that a claim declares correctly, also in both
+orderings; and a generated-summary answer with a non-empty `source_targets`.
 
-Invalid fixtures tối thiểu: sai module/version/kind hoặc unknown field; thiếu
-required field; `content_checksum` sai sau khi mutate từng nhóm field normative;
-checksum tính theo code-point ordering thay vì UTF-16 code unit ordering;
-`confidence` ngoài `[0,1]`/quá 2 chữ số thập phân/là string; `stance`/`access`
-ngoài enum; timestamp sai format hoặc sai thứ tự, `retrieved_at` muộn hơn core
-`updated_at`; `target_type` khác hằng `evidence`; duplicate canonical target;
-`evidence_refs` rỗng hoặc vượt 50; `source.url`/`publisher.url` dùng HTTP,
-userinfo, fragment hoặc malformed; source URL trỏ private/link-local/reserved
-address; redirect chain sang private address.
+Minimum invalid fixtures: wrong module/version/kind or an unknown field; a
+missing required field; a `content_checksum` broken by mutating each normative
+field group; a checksum computed with code-point ordering instead of UTF-16 code
+unit ordering; `confidence` out of `[0,1]`, with more than 2 decimal places, or
+as a string; `stance`/`access` outside the enum; a timestamp with the wrong
+format or the wrong order, and `retrieved_at` later than the core `updated_at`;
+a `target_type` other than the constant `evidence`; a duplicate canonical
+target; `evidence_refs` empty or above 50; `source.url`/`publisher.url` using
+HTTP, userinfo, a fragment, or malformed; a source URL pointing at a
+private/link-local/reserved address; and a redirect chain into a private
+address.
 
-Fixtures dùng domain `example.com`, tên trung tính, deterministic timestamp. Mỗi
-invalid fixture chỉ nên có một primary failure. Prompt-injection fixture là
-**valid**, không phải invalid.
+Fixtures use the `example.com` domain, neutral names and deterministic
+timestamps. Each invalid fixture should have exactly one primary failure. The
+prompt-injection fixture is **valid**, not invalid.
 
 ## 9. Report shape
 
 `EvidenceConformanceReport`: `report_version`, `aadp_version`, `module`,
 `package_version`, `base_url?`, `runner`, `started_at`/`finished_at`/
-`duration_ms`, `status`, `summary`, `effective_limits`, `checks[]` — cùng shape
-với Answer/Relations report. Exit code: `0` conformant, `1` một check failed, `4`
-inconclusive.
+`duration_ms`, `status`, `summary`, `effective_limits`, `checks[]` — the same
+shape as the Answer and Relations reports. Exit codes: `0` conformant, `1` a
+check failed, `4` inconclusive.
 
-Report MUST NOT log toàn bộ private payload hoặc auth header mặc định.
+The report MUST NOT log full private payloads or auth headers by default.
 
 ## 10. External execution
 
-Gate interoperability KHÔNG được đóng bằng mock server hoặc unit test. Điều kiện
-tối thiểu (xem
-[implementation plan 1.4.0](../../../../docs/vi/plans/implementation-plan-v1.4.0.md)
-§"External conformance environment"): reference server deploy tại một origin
-HTTPS thật reachable từ CI; `ail-aadp` cài từ packed tarball, clean install, chỉ
-public exports; HTTP thật, không in-process handler, không fetch mock; report
-JSON của **cả** Answer và Evidence với overall `passed` lưu trong implementation
-record; chạy trên Node engine floor khai báo ở `package.json`.
+The interoperability gate MUST NOT be closed with a mock server or unit tests.
+Minimum conditions (see
+[implementation plan 1.4.0](../../../../docs/vi/plans/implementation-plan-v1.4.0.md),
+"External conformance environment"): the reference server deployed at a real
+HTTPS origin reachable from CI; `ail-aadp` installed from a packed tarball into
+a clean install, public exports only; real HTTP, with no in-process handler and
+no fetch mock; report JSON for **both** Answer and Evidence with overall
+`passed`, stored in the implementation record; and a run on the Node engine
+floor declared in `package.json`.

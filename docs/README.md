@@ -52,7 +52,7 @@ contract. Such a change requires a new protocol version and an ADR.
 | [AADP v1.0 implementation record](records/implementation-record-v1.0.md) | Implementation record | Implemented |
 | [`ail-aadp` 1.4.0 implementation record](records/implementation-record-v1.4.0.md) | Implementation record | In progress |
 | [Manifest v1.0 design](design/manifest-v1.0-design.md) | Design memo | Accepted through ADR-0005 |
-| [Đề xuất tích hợp các cơ chế agent discovery liền kề AADP](design/agent-discovery-integrations-proposal.md) | Design memo | Proposed |
+| [Agent-discovery integrations proposal](design/agent-discovery-integrations-proposal.md) | Design memo | Proposed |
 | [Relations Module design](design/relations-module-design.md) | Design memo | Superseded |
 | [AEO/GEO integration plan](design/aeo-geo-integration-plan.md) | Design plan | Draft |
 | [Evidence Module v1.0 specification](../spec/modules/evidence/v1.0/specification.md) | Wire contract draft | Draft — non-normative until ADR-0010 is Accepted |

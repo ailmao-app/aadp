@@ -1,257 +1,266 @@
-# ADR-0010: Evidence Module — citation, provenance và security boundary
+# ADR-0010: Evidence Module — citation, provenance and security boundary
 
 ## Status
 
-**Proposed** — draft cho Evidence & Provenance Module `1.0` và package
-`ail-aadp@1.4.0`. Chưa Accepted.
+**Proposed** — draft for Evidence & Provenance Module `1.0` and package
+`ail-aadp@1.4.0`. Not Accepted.
 
-Chừng nào ADR này chưa Accepted thì **KHÔNG được tạo bất kỳ wire artifact nào**
-của Evidence: không schema dưới `schemas/modules/evidence/v1.0/`, không public
-type, không registry key. Released schema là immutable theo
-[ADR-0004](0004-backward-compatibility.md) và
-[ADR-0007](0007-module-versioning-and-discovery.md), nên một quyết định sai
-được đóng băng vào wire sẽ phải trả bằng một major version trước cả lần release
-đầu tiên. Một module version xuất hiện trong ví dụ ở đây KHÔNG được coi là đã
-allocated.
+While this ADR is not Accepted, **no Evidence wire artifact may be created**: no
+schema under `schemas/modules/evidence/v1.0/`, no public type, no registry key.
+Released schemas are immutable under
+[ADR-0004](0004-backward-compatibility.md) and
+[ADR-0007](0007-module-versioning-and-discovery.md), so a wrong decision frozen
+into the wire would cost a major version before the module's first release. A
+module version appearing in an example here is NOT thereby allocated.
 
-Acceptance là quyết định của maintainer. Developer/reviewer không được tự
-chuyển trạng thái này.
+Acceptance is a maintainer decision. A developer or reviewer MUST NOT change
+this status.
 
 ## Context
 
 Answer Module `1.0` ([ADR-0009](0009-answer-module-terminology-and-security.md))
-cố ý **không** có field `evidence`, `claims` hay `citations`: nó mô tả câu trả
-lời, không mô tả căn cứ của câu trả lời. Khoảng trống đó là mục tiêu của
-`1.4.0`.
+deliberately has **no** `evidence`, `claims` or `citations` field: it describes
+the answer, not the grounds for the answer. That gap is the target of `1.4.0`.
 
-Mô tả căn cứ đòi hỏi ba khái niệm mới — claim (điều được khẳng định), evidence
-(thứ được viện dẫn), source (nơi evidence đến từ) — và mỗi khái niệm kéo theo
-một quyết định contract mà schema không tự trả lời được:
+Describing grounds requires three new concepts — claim (what is asserted),
+evidence (what is cited), source (where the evidence came from) — and each one
+brings a contract decision a schema cannot answer by itself:
 
-- ba khái niệm đó là document kind riêng, resource type, hay object lồng;
-- cạnh giữa chúng thuộc về ai, cardinality bao nhiêu, và điều gì xảy ra khi một
-  cạnh không resolve được;
-- identity nào để dedup, khi cùng một evidence được nhiều claim viện dẫn;
-- timestamp nào mô tả "thời điểm của evidence" khi có tới ba mốc thời gian;
-- `confidence` và `stance` mang nghĩa gì, và ai được phép tính lại chúng;
-- source private/authenticated/cross-origin được xử lý ra sao — đây là chỗ dễ
-  nhất để một metadata field vô tình trở thành cơ chế authorization;
-- Answer liên kết tới evidence bằng đường nào mà **không** sửa artifact
-  `aadp:answer@1.0` đã phát hành;
-- tầng nào sở hữu canonical resolution cache khi hai module cùng đi trên một
+- whether those three are document kinds, resource types, or nested objects;
+- who owns the edge between them, what its cardinality is, and what happens when
+  an edge does not resolve;
+- which identity is used for deduplication when several claims cite the same
+  evidence;
+- which timestamp describes "the date of the evidence" when there are three;
+- what `confidence` and `stance` mean, and who is allowed to recompute them;
+- how private, authenticated and cross-origin sources are handled — the easiest
+  place for a metadata field to accidentally become an authorization mechanism;
+- how an Answer links to evidence **without** modifying the released
+  `aadp:answer@1.0` artifact;
+- which layer owns the canonical resolution cache when two modules walk one
   traversal budget.
 
-Nguồn của các đề xuất dưới đây là
-[implementation plan 1.4.0](../vi/plans/implementation-plan-v1.4.0.md) §"Quyết
-định contract đề xuất" và §"Graph và traversal policy", sau năm vòng review.
+The proposals below come from
+[implementation plan 1.4.0](../vi/plans/implementation-plan-v1.4.0.md) after
+five review rounds.
 
 ## Decision
 
-### 1. Document kind: `claim` và `evidence` là document kind, `source` là object lồng
+### 1. Document kinds: `claim` and `evidence` are document kinds, `source` is nested
 
-| Khái niệm | Hình thức | Lý do |
+| Concept | Form | Reason |
 |---|---|---|
-| `claim` | Document kind `claim` trên entity `type: "claim"`, mang ở `x_evidence` | Nhiều answer/claim tham chiếu tới → cần identity và URL riêng |
-| `evidence` | Document kind `evidence` trên entity `type: "evidence"` | Nhiều claim cùng viện dẫn → fetch độc lập để không nhân bản payload |
-| `source` | Object lồng trong evidence | Không consumer nào cần resolve source độc lập ở `1.0`; tách ra chỉ thêm một hop traversal |
+| `claim` | Document kind `claim` on an entity of `type: "claim"`, carried in `x_evidence` | Referenced by many answers/claims → needs its own identity and URL |
+| `evidence` | Document kind `evidence` on an entity of `type: "evidence"` | Cited by many claims → fetched independently so the payload is not duplicated |
+| `source` | Object nested inside evidence | No consumer needs to resolve a source independently at `1.0`; splitting it out only adds a traversal hop |
 
-Registry dispatch bằng exact key `{aadp:evidence, 1.0, claim}` và
-`{aadp:evidence, 1.0, evidence}`, đúng cơ chế ADR-0007. Không có standalone
-collection kind hay registry kind ở `1.0`; listing tiếp tục dùng core
-sitemap/resource flow.
+Registry dispatch uses the exact keys `{aadp:evidence, 1.0, claim}` and
+`{aadp:evidence, 1.0, evidence}`, exactly the mechanism ADR-0007 released. There
+is no standalone collection kind or registry kind at `1.0`; listing continues to
+use the core sitemap/resource flow.
 
-### 2. Cạnh, cardinality và integrity
+### 2. Edges, cardinality and integrity
 
-- Cạnh duy nhất là `claim.evidence_refs[]` — **claim sở hữu cạnh**, evidence
-  không biết claim nào viện dẫn mình.
-- 1-50 reference cho mỗi claim. Không cho phép mảng rỗng: một claim không có
-  căn cứ nào thì không phải claim trong module này.
-- `evidence_refs[].target_type` là **hằng `evidence`**, không phải free token.
-- Reference không resolve được KHÔNG làm claim invalid. Nó tạo một entry có
-  status, theo đúng vocabulary `AnswerTargetResolutionStatus` đã phát hành
-  (`resolved` | `forbidden` | `not-found` | `invalid` | `budget-exhausted`) —
-  không tạo enum mới.
-- Chỉ `not-found` và `invalid` là **dangling**. `forbidden` (401/403 hoặc bị
-  URL/DNS policy chặn) là kết quả hợp lệ của một graph lành mạnh, không phải
-  graph gãy.
+- The only edge is `claim.evidence_refs[]` — **the claim owns the edge**;
+  evidence does not know which claims cite it.
+- 1-50 references per claim. An empty array is not allowed: a claim with no
+  grounds at all is not a claim in this module.
+- `evidence_refs[].target_type` is the **constant `evidence`**, not a free
+  token.
+- A reference that fails to resolve does NOT make the claim invalid. It produces
+  an entry with a status, using the released `AnswerTargetResolutionStatus`
+  vocabulary (`resolved` | `forbidden` | `not-found` | `invalid` |
+  `budget-exhausted`) — no new enum.
+- Only `not-found` and `invalid` count as **dangling**. `forbidden` (401/403, or
+  blocked by URL/DNS policy) is a valid outcome of a healthy graph, not a broken
+  one.
 
-### 3. Không có reverse edge — acyclic by construction
+### 3. No reverse edge — acyclic by construction
 
-Evidence `1.0` KHÔNG định nghĩa cạnh evidence → claim. Hệ quả: wire model
-**không biểu diễn được cycle nào**, nên module này KHÔNG có cycle policy, cycle
-guard, rule self-reference, hay cycle fixture — không phải vì cycle được cho
-phép, mà vì nó không tồn tại.
+Evidence `1.0` does NOT define an evidence → claim edge. Consequently the wire
+model **cannot express any cycle**, so this module has no cycle policy, no cycle
+guard, no self-reference rule and no cycle fixture — not because cycles are
+permitted, but because they do not exist.
 
-Nhiều claim cùng trỏ tới một evidence là **fan-in**, không phải cycle.
+Several claims pointing at one evidence is **fan-in**, not a cycle.
 
-Nếu một version sau thêm reverse edge thì version đó phải định nghĩa ownership
-của cạnh mới cùng cycle policy tương ứng, trong một ADR riêng.
+If a later version adds a reverse edge, that version must define the new edge's
+ownership together with its cycle policy, in its own ADR.
 
-### 4. Canonical identity và dedup
+### 4. Canonical identity and deduplication
 
-Canonical identity của một target tái sử dụng nguyên trạng Relations semantic
-identity `{id, normalizedUrl}`. Evidence KHÔNG định nghĩa identity rule mới.
+A target's canonical identity reuses the Relations semantic identity
+`{id, normalizedUrl}` exactly as released. Evidence defines no new identity
+rule.
 
-Dedup xảy ra ở hai tầng khác nhau và cả hai đều cần thiết:
+Deduplication happens at two distinct layers, and both are necessary:
 
-- `RelationsTraversalBudgetState.visitedTargets` cho **kế toán budget**;
-- shared canonical outcome cache (khoá theo budget) cho **tái dùng entity đã
-  fetch**.
+- `RelationsTraversalBudgetState.visitedTargets` for **budget accounting**;
+- the shared canonical outcome cache (keyed by budget) for **reusing an
+  already-fetched entity**.
 
-Trong một `evidence_refs`, hai phần tử MUST NOT có cùng canonical identity, kể
-cả khi `stance` khác nhau — hai stance cho cùng một evidence phải tách thành hai
-claim.
+Within one `evidence_refs`, two elements MUST NOT share a canonical identity,
+even with different `stance` values — two stances for the same evidence must be
+split into two claims.
 
-### 5. Provenance: ba timestamp, một quy tắc precedence
+### 5. Provenance: three timestamps, one precedence rule
 
-`published_at` và `retrieved_at` bắt buộc, `modified_at` optional; RFC 3339 UTC
-dạng `Z`, precision tối đa milliseconds, cùng profile với Answer `1.0`.
+`published_at` and `retrieved_at` are required, `modified_at` optional; RFC 3339
+UTC with a `Z` suffix, millisecond precision at most, the same profile as Answer
+`1.0`.
 
-Invariant: `published_at <= retrieved_at`, và khi có `modified_at` thì
+Invariant: `published_at <= retrieved_at`, and when `modified_at` is present,
 `published_at <= modified_at <= retrieved_at`.
 
-"Thời điểm của evidence" = `modified_at` nếu có, ngược lại `published_at`.
-`retrieved_at` mô tả thời điểm producer lấy source về và MUST NOT được dùng làm
-ngày của nội dung.
+"The date of the evidence" is `modified_at` when present, otherwise
+`published_at`. `retrieved_at` describes when the producer fetched the source
+and MUST NOT be used as the date of the content.
 
-Với entity `type: "evidence"`, quan hệ với core `updated_at` là **ordering, không
-phải equality**: `provenance.retrieved_at <= entity.updated_at`. Đây là khác
-biệt có chủ ý so với Answer `1.0` (nơi `freshness.updated_at === entity.updated_at`
-đúng vì cả hai mô tả cùng một sự kiện). Ở Evidence, hai timestamp mô tả hai sự
-kiện độc lập; ép chúng bằng nhau sẽ khiến mọi correction không kèm re-retrieval
-(sửa `summary`, `locale`, `excerpt`, `publisher.name`) tạo ra entity invalid, ép
-producer khai man provenance.
+For an entity of `type: "evidence"`, the relationship to the core `updated_at`
+is **ordering, not equality**: `provenance.retrieved_at <= entity.updated_at`.
+This is a deliberate difference from Answer `1.0` (where
+`freshness.updated_at === entity.updated_at` is right because both describe the
+same event). In Evidence the two timestamps describe two independent events;
+forcing them to be equal would make every correction without re-retrieval
+(fixing `summary`, `locale`, `excerpt`, `publisher.name`) produce an invalid
+entity, pushing producers to misstate provenance.
 
-`publisher` là assertion của producer về nơi xuất bản source, KHÔNG phải
-verified identity, KHÔNG phải chữ ký, và không tham gia bất kỳ quyết định
-authorization nào.
+`publisher` is a producer assertion about where the source was published — NOT a
+verified identity, NOT a signature, and not an input to any authorization
+decision.
 
-### 6. Freshness là client-computed, không phải publisher metadata
+### 6. Freshness is client-computed, not publisher metadata
 
-Evidence `1.0` KHÔNG có field `expires_at` và KHÔNG có field `freshness`.
-Phân loại `fresh`/`stale` là hàm thuần với injected clock ở client
-(`classifyEvidenceFreshness`), dựa trên precedence ở §5. Pure validator MUST NOT
-đọc wall clock.
+Evidence `1.0` has no `expires_at` field and no `freshness` field. The
+`fresh`/`stale` classification is a pure client-side function with an injected
+clock (`classifyEvidenceFreshness`), based on the precedence in §5. A pure
+validator MUST NOT read the wall clock.
 
-### 7. `stance` và `confidence` là assertion, không phải kết luận
+### 7. `stance` and `confidence` are assertions, not conclusions
 
-- `stance` là enum đóng `support` | `contradict` | `neutral`, mô tả **quan hệ
-  producer khẳng định giữa evidence và claim**, không phải truth value của claim.
-- `neutral` nghĩa "liên quan nhưng producer không khẳng định hướng" — KHÁC với
-  vắng mặt reference.
-- `confidence` là number trong `[0, 1]`, tối đa 2 chữ số thập phân, do producer
-  khai báo. Không có đơn vị thống kê, không so sánh được giữa hai publisher, và
-  client trong package này MUST NOT tính lại hay tổng hợp nó thành score.
-- Vắng `confidence` nghĩa "không khai báo" — không phải `0`, không phải `1`.
-- Validator MUST NOT suy luận stance từ free text và MUST NOT language-detect.
+- `stance` is the closed enum `support` | `contradict` | `neutral`, describing
+  **the relationship the producer asserts between evidence and claim**, not the
+  truth value of the claim.
+- `neutral` means "relevant, but the producer asserts no direction" — DIFFERENT
+  from the absence of a reference.
+- `confidence` is a number in `[0, 1]` with at most 2 decimal places, declared by
+  the producer. It has no statistical unit, is not comparable across publishers,
+  and clients in this package MUST NOT recompute or aggregate it into a score.
+- A missing `confidence` means "not declared" — not `0`, not `1`.
+- A validator MUST NOT infer stance from free text and MUST NOT language-detect.
 
-Schema validity của một Evidence document MUST NOT được diễn giải thành factual
-truth, authenticity hay legal validity. Module này không fact-check, không
-ranking, không trust score, không reputation của publisher.
+Schema validity of an Evidence document MUST NOT be interpreted as factual
+truth, authenticity or legal validity. This module does no fact-checking, no
+ranking, no trust scoring and no publisher reputation.
 
-### 8. `source.access` là presentation metadata, KHÔNG phải authorization
+### 8. `source.access` is presentation metadata, NOT authorization
 
-`source.access` (`public` | `authenticated` | `restricted`) là assertion của
-producer về **source nằm ngoài AADP** — thứ mà `1.0` không bao giờ fetch. Nó
-MUST NOT tham gia bất kỳ quyết định traversal, authorization hay conformance
-nào. Giá trị hợp lệ duy nhất của nó là hiển thị cho người đọc biết source có
-paywall/đăng nhập hay không.
+`source.access` (`public` | `authenticated` | `restricted`) is a producer
+assertion about the **source outside AADP** — something `1.0` never fetches. It
+MUST NOT take part in any traversal, authorization or conformance decision. Its
+only valid role is presentation: telling a reader whether the source is behind a
+paywall or a login.
 
-Hai lý do khiến nó không thể là input authorization:
+Two reasons it cannot be an authorization input:
 
-1. nó mô tả source URL lồng bên trong evidence, không mô tả security của chính
-   AADP evidence resource;
-2. khi target trả 401/403 thì client **không có** body để đọc `source.access` —
-   giá trị đó không tồn tại đúng lúc cần phân loại.
+1. it describes a source URL nested inside the evidence, not the security of the
+   AADP evidence resource itself;
+2. when a target returns 401/403 the client has **no body** from which to read
+   `source.access` — the value does not exist at the moment classification needs
+   it.
 
-Authorization của evidence resource do core/Relations authorization và manifest
-`security` declaration quyết định. Mọi 401/403 đều là `forbidden`, độc lập với
-`source.access`.
+Authorization of the evidence resource is decided by core/Relations
+authorization and the manifest `security` declaration. Every 401/403 is
+`forbidden`, independent of `source.access`.
 
-### 9. Answer integration không sửa `aadp:answer@1.0`
+### 9. Answer integration does not modify `aadp:answer@1.0`
 
-Answer `1.0` là released immutable contract và wrapper của nó không có extension
-point. Vì vậy:
+Answer `1.0` is a released immutable contract whose wrapper has no extension
+point. Therefore:
 
-- Answer liên kết tới claim/evidence **chỉ qua `related_entities`** đã có sẵn,
-  với `target_type` là `claim` hoặc `evidence`.
-- KHÔNG dùng `authorship.source_targets`: field đó có nghĩa hẹp là input source
-  của một generated summary; ép nó mang nghĩa citation sẽ làm sai provenance.
-- Integration chỉ thêm helper và conformance check **ở tầng Evidence**;
-  `AnswerValidationResult`, `AnswerEntityValidationResult` và tập payload hợp lệ
-  của Answer `1.0` không đổi.
-- Muốn thêm field citation vào Answer thì phải phát hành `aadp:answer@1.1` hoặc
-  `2.0` — KHÔNG sửa artifact `1.0`.
+- an Answer links to claims/evidence **only through the existing
+  `related_entities`**, with `target_type` of `claim` or `evidence`;
+- `authorship.source_targets` MUST NOT be used: that field narrowly means the
+  input sources of a generated summary, and forcing citation meaning onto it
+  would misstate provenance;
+- integration adds helpers and conformance checks **at the Evidence layer only**;
+  `AnswerValidationResult`, `AnswerEntityValidationResult` and the set of valid
+  Answer `1.0` payloads do not change;
+- adding a citation field to Answer would require releasing `aadp:answer@1.1` or
+  `2.0` — NOT editing the `1.0` artifact.
 
-### 10. Composition: shared canonical resolution layer, internal
+### 10. Composition: a shared canonical resolution layer, internal
 
-`resolveAnswerTargets` giữ per-budget resolution state
-(`WeakMap<budget, BudgetResolutionState>`) với canonical outcome, in-flight join
-và budget-stop replay. State đó là **shared infrastructure, không phải chi tiết
-riêng của Answer**: một canonical key mà Answer resolver chưa từng chạm tới —
-ví dụ được charge bởi một raw Relations step trên cùng budget — bị report là
-`invalid`. Nếu Evidence tự resolve bằng Relations resolver trên budget dùng
-chung, chính nó tạo ra false `invalid` cho Answer.
+`resolveAnswerTargets` keeps per-budget resolution state
+(`WeakMap<budget, BudgetResolutionState>`) with canonical outcomes, in-flight
+joins and budget-stop replay. That state is **shared infrastructure, not an
+Answer-private detail**: a canonical key the Answer resolver has never touched —
+charged, say, by a raw Relations step on the same budget — is reported as
+`invalid`. If Evidence resolved through the Relations resolver on a shared
+budget, it would itself manufacture false `invalid` results for Answer.
 
-Quyết định: **trích xuất tầng này thành shared internal layer khoá theo budget**
-(`src/modules/shared/canonical-resolution.ts`), Answer refactor để consume nó,
-Evidence dùng đúng nó cho mọi fetch.
+Decision: **extract that layer into a shared internal layer keyed by budget**
+(`src/modules/shared/canonical-resolution.ts`), refactor Answer to consume it,
+and have Evidence use exactly that layer for every fetch.
 
-- Layer này MUST NOT được export từ bất kỳ public subpath nào — cùng lý do
-  `releaseNode` của Relations được giữ module-internal: precondition của nó
-  không kiểm tra được từ ngoài.
-- Với Answer đây là **pure refactor**, patch-level theo ADR-0007: public API,
-  wire contract và normative semantic result không đổi. Bằng chứng regression là
-  toàn bộ test Answer hiện có pass mà không sửa một dòng nào.
-- Cache lưu **canonical outcome** (kết quả fetch/schema/checksum của một target),
-  KHÔNG lưu verdict theo reference. Verdict `target_type` được tính lại cho từng
-  occurrence, để một reference khai sai type không đầu độc reference khác trỏ
-  tới cùng target.
+- This layer MUST NOT be exported from any public subpath — the same reason
+  Relations keeps `releaseNode` module-internal: its precondition cannot be
+  checked from outside.
+- For Answer this is a **pure refactor**, patch-level under ADR-0007: public
+  API, wire contract and normative semantic results are unchanged. The
+  regression proof is that every existing Answer test passes without a single
+  line changed.
+- The cache stores the **canonical outcome** (the fetch/schema/checksum result
+  for a target), NOT a per-reference verdict. The `target_type` verdict is
+  recomputed per occurrence, so a reference declaring the wrong type cannot
+  poison another reference pointing at the same target.
 
-Ba đường thay thế đều bị loại: thêm selector vào `resolveAnswerTargets` là đổi
-public API của Answer; dựng synthetic Answer document để lách collection sẽ tạo
-document sai schema/checksum; tự viết lại orchestration là duplicate network
-stack.
+Three alternatives are rejected: adding a selector to `resolveAnswerTargets`
+changes Answer's public API; building a synthetic Answer document to bypass its
+collection step would produce a document with an invalid schema/checksum; and
+reimplementing the orchestration duplicates the network stack.
 
-### 11. Resolution context: kế thừa nguyên contract đã phát hành ở `1.3.1`
+### 11. Resolution context: inherit the contract released in `1.3.1`
 
-Ràng buộc "một budget = một request context bất biến, mismatch fail closed bằng
-`AadpClientError` với `code: "resolution_context_mismatch"`" **đã được phát hành
-ở `1.3.1`** như một security fix của Answer client. ADR này KHÔNG định nghĩa lại
-nó; nó chỉ chốt rằng shared canonical resolution layer kế thừa nguyên contract
-đó, và Evidence KHÔNG có entry point nào bỏ qua check này.
+The rule "one budget = one immutable request context, mismatch fails closed with
+`AadpClientError` and `code: "resolution_context_mismatch"`" **was released in
+`1.3.1`** as a security fix to the Answer client. This ADR does NOT redefine it;
+it only settles that the shared canonical resolution layer inherits that
+contract intact, and that Evidence has no entry point which bypasses the check.
 
 ## Consequences
 
-- Evidence có thể release mà không chạm vào artifact `aadp:answer@1.0` hay
-  `aadp:relations@1.0`; Answer consumer hiện tại không thấy khác biệt nào.
-- Không có cycle machinery nào phải viết, test hay audit — vì model không biểu
-  diễn được cycle. Đổi lại, thêm reverse edge sau này là một quyết định lớn cần
-  ADR riêng, không phải một minor bump.
-- Producer phải tính thêm một digest (`content_checksum`) cho `x_evidence`,
-  nhưng tái sử dụng 100% `checksumOf()` đã released — không thêm thuật toán mới
-  cần audit.
-- Answer client bị refactor để consume shared layer. Blast radius lớn dù public
-  API không đổi, nên test suite Answer hiện có trở thành gate regression bắt
-  buộc, không được sửa để làm refactor pass.
-- `source.access` sẽ trông như một security field với người đọc lướt qua. Rủi ro
-  đó được nhận diện và trả bằng tài liệu: spec, schema description và
-  conformance check `evidence.security` đều phải nói rõ nó không cấp quyền.
-- Nếu một version sau có API retrieval cho source thì `access` mới có thêm vai
-  trò, và vai trò đó phải do ADR mới định nghĩa.
+- Evidence can ship without touching the `aadp:answer@1.0` or
+  `aadp:relations@1.0` artifacts; existing Answer consumers see no difference.
+- There is no cycle machinery to write, test or audit — because the model cannot
+  express a cycle. In exchange, adding a reverse edge later is a large decision
+  requiring its own ADR, not a minor bump.
+- Producers compute one extra digest (`content_checksum`) for `x_evidence`, but
+  it reuses the released `checksumOf()` in full — no new algorithm to audit.
+- The Answer client is refactored to consume the shared layer. The blast radius
+  is large even though the public API does not change, so the existing Answer
+  test suite becomes a mandatory regression gate that MUST NOT be edited to make
+  the refactor pass.
+- `source.access` will look like a security field to a skimming reader. That
+  risk is acknowledged and paid for in documentation: the specification, the
+  schema description and the `evidence.security` conformance check all state
+  explicitly that it grants nothing.
+- If a later version adds a retrieval API for sources, `access` gains a further
+  role — and that role must be defined by a new ADR.
 
 ## References
 
-- [ADR-0001](0001-checksum-algorithm.md) (checksum và canonical JSON),
+- [ADR-0001](0001-checksum-algorithm.md) (checksum and canonical JSON),
   [ADR-0004](0004-backward-compatibility.md) (immutability),
   [ADR-0007](0007-module-versioning-and-discovery.md) (module versioning),
-  [ADR-0008](0008-module-traversal-and-authorization.md) (traversal budget và
+  [ADR-0008](0008-module-traversal-and-authorization.md) (traversal budget and
   authorization),
   [ADR-0009](0009-answer-module-terminology-and-security.md) (Answer/Evidence
   boundary).
 - [`docs/vi/plans/implementation-plan-v1.4.0.md`](../vi/plans/implementation-plan-v1.4.0.md)
-  — kế hoạch triển khai và nguồn của mọi quyết định ở trên.
+  — the implementation plan and the source of every decision above.
 - [`docs/vi/plans/implementation-plan-v1.3.1.md`](../vi/plans/implementation-plan-v1.3.1.md)
-  — resolution context binding đã phát hành.
+  — the released resolution context binding.
 - `spec/modules/evidence/v1.0/specification.md`,
-  `spec/modules/evidence/v1.0/conformance.md` (draft, chờ ADR này Accepted).
+  `spec/modules/evidence/v1.0/conformance.md` (drafts, pending acceptance of
+  this ADR).

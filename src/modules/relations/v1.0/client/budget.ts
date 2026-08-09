@@ -21,7 +21,7 @@ import {
 // traversal opt-in (this factory), never to the core-only client: core
 // `createDiscoveryBudget()` keeps its own pre-1.2.0 unbounded defaults for
 // `maxRequests`/`maxTotalBytes` so omitting Relations options never
-// changes core-only client behavior (ADR-0008 "Compatibility với 1.1.0").
+// changes core-only client behavior (ADR-0008 "Compatibility with 1.1.0").
 const DEFAULT_MAX_DEPTH = 3;
 const DEFAULT_MAX_NODES = 1_000;
 const DEFAULT_MAX_REQUESTS = 2_000;

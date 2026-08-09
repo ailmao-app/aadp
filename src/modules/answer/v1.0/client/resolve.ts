@@ -15,8 +15,8 @@
  * behavior, scheduler and the caller-owned `RelationsTraversalBudgetState`
  * of the traversal parent — this module does not create a child budget,
  * does not retry outside that policy, and does not guess an expected type
- * from `target.id`'s prefix (specification.md "Answer client chỉ resolve
- * target khi caller opt in").
+ * from `target.id`'s prefix (specification.md — "the Answer client resolves
+ * targets only when the caller opts in").
  */
 import {
   resolveRelationTarget,

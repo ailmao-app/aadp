@@ -1,6 +1,6 @@
 /**
  * Declarative AADP v1.0 server runtime (`defineAADP()` / `defineResource()`)
- * — see `docs/vi/plans/implementation-plan.md` §11 "Ưu tiên 2". Generalizes
+ * — see `docs/vi/plans/implementation-plan.md` §11, priority 2. Generalizes
  * the hand-written manifest/sitemap/entity builder + HTTP cache/error
  * plumbing that a single Next.js AADP adapter (Ailmao's) already
  * implements by hand, so a second implementer does not have to copy it.

@@ -264,8 +264,8 @@ describe("prompt-like free text is treated as data only", () => {
     const warning = issues.find((i) => i.code === "usage_guidance_looks_like_instruction");
     expect(warning?.level).toBe("warning");
     // The field itself is returned verbatim as inert data — this client
-    // never parses or acts on it (Phase 4 §"Không chèn usage_guidance vào
-    // system/developer prompt").
+    // never parses or acts on it (Phase 4, on never injecting
+    // usage_guidance into a system/developer prompt).
     expect(manifest.usage_guidance?.summary_preference).toBe(INSTRUCTION_LIKE_SUMMARY_PREFERENCE);
   });
 });

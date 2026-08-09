@@ -8,8 +8,8 @@
  * `RelationTargetV1` is reused, by reference, never redefined here).
  *
  * Unlike Relations, Answer `1.0` wrapper objects do NOT accept an `x_*`
- * vendor extension point (specification.md "Field contract" — "Extension
- * vendor trong Answer wrapper chưa được hỗ trợ ở 1.0"), so none of these
+ * vendor extension point (specification.md "Field contract" — "there is NO
+ * `x_*` extension point at the wrapper level"), so none of these
  * interfaces extend an `ExtensionFields` index signature.
  */
 import type { RelationTargetV1 } from "../../relations/v1.0/types.js";

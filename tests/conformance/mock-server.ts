@@ -4,7 +4,7 @@ import { checksumOf } from "../../src/canonical-json/checksum.js";
 /**
  * Minimal AADP v0.1 reference/mock server. Serves only fixtures generated
  * in-memory here — it does not read from or depend on Ailmao in any way,
- * per Phase A2 ("mock/reference server chỉ dùng fixtures AADP").
+ * per Phase A2 ("the mock/reference server uses AADP fixtures only").
  */
 
 const PAGE_SIZE = 2;

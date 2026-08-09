@@ -9,7 +9,7 @@
  * `resources[].type` vs the live sitemap index) are conformance-suite
  * concerns (Phase 5), not semantic-validator concerns — see ADR-0005
  * "Resource authority" and `docs/records/implementation-record-v1.0.md` §4
- * ("Validator không tự thực hiện HTTP request").
+ * ("the validator performs no HTTP requests itself").
  */
 
 export type SemanticIssueLevel = "error" | "warning";

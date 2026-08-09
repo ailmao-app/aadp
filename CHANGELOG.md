@@ -71,7 +71,7 @@ Module infrastructure and Relations Module pilot (`docs/adr/0007-module-versioni
 ### Added
 
 - Added a generic module registry engine (`ail-aadp/module-registry`, `src/module-registry/`): `registerModule`/`getModuleEntry`/`isModuleRegistered`/`validateModuleDocument`/`assertValidModuleDocument` let a concrete module (schema, types, semantic validator) register itself under a versioned module ID and be looked up/validated generically, without the core package knowing about any specific module. `MODULE_ID_PATTERN`/`isValidModuleId` enforce the module ID grammar from ADR-0007. This export is infrastructure only — no concrete module is re-exported from the package root; each module ships under its own versioned subpath.
-- Added the Relations Module v1.0 pilot (`ail-aadp/modules/relations/v1.0`, `src/modules/relations/v1.0/`): schema (`schemas/modules/relations/v1.0/*.schema.json`), types, semantic validator, and a client (`resolve`/`graph`/`fetch`/`budget`) for reading a resource's relation sets and paginated relation collections. Authorization, shared traversal budget, cursor and cycle semantics follow ADR-0008. `followers`/`follows` are intentionally not published in this pilot pending a separate privacy-policy decision (see the module's spec `spec/modules/relations/v1.0/specification.md` §"Ngoài phạm vi").
+- Added the Relations Module v1.0 pilot (`ail-aadp/modules/relations/v1.0`, `src/modules/relations/v1.0/`): schema (`schemas/modules/relations/v1.0/*.schema.json`), types, semantic validator, and a client (`resolve`/`graph`/`fetch`/`budget`) for reading a resource's relation sets and paginated relation collections. Authorization, shared traversal budget, cursor and cycle semantics follow ADR-0008. `followers`/`follows` are intentionally not published in this pilot pending a separate privacy-policy decision (see the module's spec `spec/modules/relations/v1.0/specification.md` §8 "Standard registry").
 - Added a Relations Module conformance profile (`src/modules/relations/v1.0/conformance/`) and fixture suite (`tests/fixtures/relations/v1.0/`) per `spec/modules/relations/v1.0/conformance.md`, exercised against an implementation independent of the reference client to demonstrate interoperability.
 - Added ADR-0007 (module versioning, discovery, and package export-path rules) and ADR-0008 (module traversal budget and authorization), formalizing the module version matrix and its relationship to `aadp_version: "1.0"`.
 - Added package export paths `./module-registry`, `./modules/relations/v1.0`, and `./schemas/modules/relations/v1.0/*`.
@@ -195,7 +195,7 @@ Compatibility and interoperability hardening (docs/vi/plans/implementation-plan-
 
 ### Changed
 
-- Yêu cầu Node.js 20.18.1 trở lên để tương thích với transport HTTP đã được tăng cường bảo mật.
+- Node.js 20.18.1 or newer is now required, for compatibility with the security-hardened HTTP transport.
 
 ## 1.0.1 - 2026-07-25
 
