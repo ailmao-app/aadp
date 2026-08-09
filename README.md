@@ -352,6 +352,51 @@ public resource gets), so an authorized response for one caller is never
 served to another from a shared cache — but the authorization check itself
 is always the resource's own responsibility.
 
+### Publishing a module
+
+A server can publish any AADP module — `aadp:relations`, `aadp:answer`, or one
+of your own — without the runtime knowing anything about it. Declare it in
+`modules`, and return its payload from `serialize()` under `extensions`:
+
+```ts
+const aadp = defineAADP({
+  // ...
+  modules: [
+    {
+      id: "vendor:example",
+      version: "1.0",
+      schema: "https://example.com/schemas/modules/example/v1.0/module.schema.json",
+    },
+  ],
+  resources: [
+    defineResource<Post>({
+      type: "post",
+      // ...
+      serialize: (post) => ({
+        id: `post:${post.slug}`,
+        updatedAt: post.updatedAt,
+        data: { title: post.title },
+        extensions: {
+          x_example: { module: "vendor:example", version: "1.0", note: post.note },
+        },
+      }),
+    }),
+  ],
+});
+```
+
+`modules` is published as the manifest's `modules[]` and validated against the
+core manifest schema at `defineAADP()` time. Each `extensions` key is emitted
+as a root-level field on the entity document; keys must match the core v1.0
+extension grammar `^x_[a-zA-Z0-9_]*$` (exported as `isExtensionKey()` from
+`ail-aadp/validator`), and a key that does not is rejected loudly rather than
+silently dropped.
+
+The entity `checksum` stays scoped to `data`, so adding an extension to an
+already-published entity never changes its checksum. Declare a module only once
+its resources and schema artifacts are actually served — the runtime does not
+verify that a declaration corresponds to anything.
+
 ### Custom routes
 
 `/ai/v1.0/...` is this SDK's default convention, not a routing contract the
@@ -406,8 +451,11 @@ to change where files land.
 neutral `defineAADP()` deployment on plain `node:http`, installed from a
 packed tarball rather than this repo's workspace — the same way a real
 third-party consumer would use the package. It demonstrates the default
-route convention and a custom `routes` configuration side by side. See its
-README for how to run it and check it with `aadp-conformance`.
+route convention and a custom `routes` configuration side by side, and
+publishes two resource types: a core-only `note` and an `answer` carrying an
+Answer Module `1.0` payload through `SerializedEntity.extensions`, declared as
+`aadp:answer@1.0` in the manifest. See its README for how to run it and check
+it with `aadp-conformance`.
 
 ## Run conformance tests
 

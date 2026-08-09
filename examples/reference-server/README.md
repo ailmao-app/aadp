@@ -8,10 +8,13 @@ tarball, not as a framework adapter or a starter template — it uses
 
 Layers, kept separate on purpose:
 
-- `src/data/example-repository.js` — sample data access. Stands in for a
-  database or internal API.
-- `src/resources/example-resource.js` — the resource's serializer, the one
-  allow-list boundary between a raw record and the published document.
+- `src/data/example-repository.js`, `src/data/answer-repository.js` — sample
+  data access. Stands in for a database or internal API.
+- `src/resources/example-resource.js` — the `note` resource's serializer, the
+  one allow-list boundary between a raw record and the published document.
+- `src/resources/answer-resource.js` — the `answer` resource, which publishes
+  the Answer Module `1.0` wrapper (`x_answer`) through the server's generic
+  extension support.
 - `src/aadp.js` — the `defineAADP()`/`defineResource()` composition.
 - `src/server.js` — the HTTP entry point. Only starts the server and maps
   `node:http` request/response to the Fetch `Request`/`Response` the runtime
@@ -49,7 +52,25 @@ never taken from an inbound request's `Host` header, which a caller
 controls: trusting it would let any request permanently repoint every
 published discovery URL at whatever origin it named. Without it, the
 published origin defaults to the address `listen()` actually bound
-(`http://127.0.0.1:<port>`), correct for local/dev use only.
+(`http://127.0.0.1:<port>`), correct for local/dev use only. When the two
+differ the server prints both — the origin it publishes, and the `Bound to`
+address it can actually be reached at.
+
+## Modules
+
+The deployment publishes two resource types:
+
+- `note` — core AADP only, no module payload.
+- `answer` — the same core entity plus an `x_answer` wrapper
+  ([Answer Module `1.0`](../../spec/modules/answer/v1.0/specification.md)),
+  emitted through `SerializedEntity.extensions`. The runtime never knows
+  which module produced it; the manifest declares `aadp:answer@1.0` in
+  `modules[]` only because this deployment actually serves it.
+
+Answer `1.0` requires an absolute **HTTPS** `canonical_url`, so run with
+`AADP_BASE_URL=https://…` when the answer entities are meant to validate.
+Over the plain-HTTP local default they still serve, but
+`validateAnswerEntityV1` will reject their canonical URL.
 
 ## Validate and check conformance
 

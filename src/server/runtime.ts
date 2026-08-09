@@ -23,6 +23,7 @@ import {
   preflightResponse,
   buildCorsAllowHeaders,
 } from "./http.js";
+import { EXTENSION_KEY_GRAMMAR, isExtensionKey } from "../validator/extension-keys.js";
 import { RESOURCE_TYPE_GRAMMAR } from "./types.js";
 import { compileAadpRoutes, WELL_KNOWN_PATH } from "./routes.js";
 import type {
@@ -113,20 +114,25 @@ function deepFreeze<T>(value: T): T {
  * sibling branches is fine — only a true cycle (an object containing
  * itself) is rejected.
  */
-function assertJsonSafe(value: unknown, path: string, seen: Set<object> = new Set()): void {
+function assertJsonSafe(
+  value: unknown,
+  path: string,
+  seen: Set<object> = new Set(),
+  subject: string = "manifest"
+): void {
   if (value === null) return;
   const t = typeof value;
   if (t === "string" || t === "boolean") return;
   if (t === "number") {
     if (!Number.isFinite(value as number)) {
-      throw new Error(`defineAADP(): manifest value at "${path || "/"}" is not JSON-safe: ${value} is not a finite number.`);
+      throw new Error(`defineAADP(): ${subject} value at "${path || "/"}" is not JSON-safe: ${value} is not a finite number.`);
     }
     return;
   }
   if (t === "object") {
     const obj = value as object;
     if (seen.has(obj)) {
-      throw new Error(`defineAADP(): manifest contains a circular reference at "${path || "/"}".`);
+      throw new Error(`defineAADP(): ${subject} contains a circular reference at "${path || "/"}".`);
     }
     seen.add(obj);
     if (Array.isArray(obj)) {
@@ -136,10 +142,10 @@ function assertJsonSafe(value: unknown, path: string, seen: Set<object> = new Se
       // the same way `canonical-json/canonicalize.ts` does.
       for (let i = 0; i < obj.length; i++) {
         if (!(i in obj)) {
-          throw new Error(`defineAADP(): manifest array at "${path || "/"}" has a hole at index ${i}, which is not JSON-safe.`);
+          throw new Error(`defineAADP(): ${subject} array at "${path || "/"}" has a hole at index ${i}, which is not JSON-safe.`);
         }
       }
-      obj.forEach((item, i) => assertJsonSafe(item, `${path}/${i}`, seen));
+      obj.forEach((item, i) => assertJsonSafe(item, `${path}/${i}`, seen, subject));
     } else {
       // `typeof` alone can't tell a plain object from a `Map`/`Set`/`Date`/
       // typed array/class instance — all report `"object"`, but each
@@ -152,17 +158,76 @@ function assertJsonSafe(value: unknown, path: string, seen: Set<object> = new Se
       if (proto !== Object.prototype && proto !== null) {
         const ctorName = (obj as { constructor?: { name?: string } }).constructor?.name ?? "non-plain object";
         throw new Error(
-          `defineAADP(): manifest value at "${path || "/"}" is a ${ctorName} instance, which is not JSON-safe — only plain objects and arrays are supported in x_* extension values.`
+          `defineAADP(): ${subject} value at "${path || "/"}" is a ${ctorName} instance, which is not JSON-safe — only plain objects and arrays are supported in x_* extension values.`
         );
       }
       for (const [key, v] of Object.entries(obj as Record<string, unknown>)) {
-        assertJsonSafe(v, `${path}/${key}`, seen);
+        assertJsonSafe(v, `${path}/${key}`, seen, subject);
       }
     }
     seen.delete(obj);
     return;
   }
-  throw new Error(`defineAADP(): manifest value at "${path || "/"}" is a ${t}, which is not JSON-safe.`);
+  throw new Error(`defineAADP(): ${subject} value at "${path || "/"}" is a ${t}, which is not JSON-safe.`);
+}
+
+/**
+ * Core entity field names (spec v1.0 §2). The `x_` prefix already excludes
+ * every one of them, so this set is defence in depth: it keeps a future
+ * relaxation of the extension grammar from silently opening a path where a
+ * serialized extension could overwrite `checksum`, `id` or `type`.
+ */
+const CORE_ENTITY_FIELDS = new Set([
+  "aadp_version",
+  "id",
+  "type",
+  "checksum",
+  "updated_at",
+  "canonical_url",
+  "locale",
+  "data",
+]);
+
+/**
+ * Validates a resource's `SerializedEntity.extensions` and returns a plain
+ * object of the root-level `x_*` fields to emit. Generic by construction —
+ * nothing here knows or branches on any particular module id.
+ *
+ * A key that fails the released core grammar throws rather than being
+ * silently dropped: a dropped module payload would produce an entity that
+ * schema-validates but is missing exactly the data a module client came for.
+ * `assertJsonSafe` runs before the value can reach `JSON.stringify`, for the
+ * same reason it already guards the manifest — extension values are typed
+ * `unknown`, so schema validation says nothing about them.
+ */
+function extensionFieldsOf(
+  type: string,
+  id: string,
+  extensions: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  if (extensions === undefined) return {};
+  const proto = Object.getPrototypeOf(extensions);
+  if (extensions === null || typeof extensions !== "object" || Array.isArray(extensions) || (proto !== Object.prototype && proto !== null)) {
+    throw upstreamUnavailable(
+      `Resource "${type}" serialize() returned an "extensions" value for "${id}" that is not a plain object.`
+    );
+  }
+  const fields: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(extensions)) {
+    if (!isExtensionKey(key)) {
+      throw upstreamUnavailable(
+        `Resource "${type}" serialize() returned extension key "${key}" for "${id}", which does not match the AADP v1.0 extension grammar ${EXTENSION_KEY_GRAMMAR}.`
+      );
+    }
+    if (CORE_ENTITY_FIELDS.has(key)) {
+      throw upstreamUnavailable(
+        `Resource "${type}" serialize() returned extension key "${key}" for "${id}", which collides with a core entity field.`
+      );
+    }
+    assertJsonSafe(value, `/${key}`, new Set(), `entity "${type}:${id}" extension`);
+    fields[key] = value;
+  }
+  return fields;
 }
 
 /** Validates the shape `resource.list()` MUST return before its `nextCursor` is ever encoded into a published wire cursor — a malformed result (missing/undefined/non-string `nextCursor`, non-array `items`) must fail loudly now, not two requests later when a client tries to decode a cursor that was never valid. */
@@ -357,6 +422,13 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
           }
         : {}),
       ...(config.securitySchemes ? { security_schemes: config.securitySchemes } : {}),
+      // Emitted only when the caller declared modules — an omitted
+      // `modules` must produce a byte-identical manifest to 1.3.0's, and
+      // the core manifest schema requires `minItems: 1` anyway. The
+      // declarations then go through the same schema + semantic validation
+      // as every other manifest field below; the runtime never inspects
+      // which module an entry names.
+      ...(config.modules ? { modules: config.modules } : {}),
       policies: config.policies,
       ...(config.usageGuidance ? { usage_guidance: config.usageGuidance } : {}),
     };
@@ -485,11 +557,17 @@ export function defineAADP(config: AadpServerConfig): AadpServer {
       aadp_version: version,
       id: serialized.id,
       type,
+      // Scoped to `data` only, deliberately: an entity that later gains a
+      // module extension must keep the checksum it was already published
+      // with, or every cached copy of it would look tampered with.
       checksum: checksumOf(serialized.data),
       updated_at: toIso(serialized.updatedAt),
       ...(serialized.canonicalUrl ? { canonical_url: resolveUrl(baseUrl, serialized.canonicalUrl) } : {}),
       ...(serialized.locale ? { locale: serialized.locale } : {}),
       data: serialized.data,
+      // Spread into a fresh object — `serialized.extensions` itself is never
+      // mutated, adopted or frozen.
+      ...extensionFieldsOf(type, serialized.id, serialized.extensions),
     };
     const result = validateDocument({ version, kind: "entity", data: doc });
     if (!result.valid) {

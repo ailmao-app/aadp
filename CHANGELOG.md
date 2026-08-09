@@ -4,6 +4,20 @@ All notable changes to `ail-aadp` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Protocol compatibility follows [ADR-0004](docs/adr/0004-backward-compatibility.md); released schemas are immutable and wire-breaking changes require a new protocol version.
 
+## Unreleased
+
+Phases 1 and 5 (item 1) of `1.4.0` (`docs/vi/plans/implementation-plan-v1.4.0.md`) — the generic module support and the reference Answer resource, both carried over from `1.3.0`. Additive only: AADP wire version stays `1.0`, no released schema changes, and a configuration that omits both new server fields produces byte-identical manifest and entity documents to `1.3.0`. The Evidence Module itself remains blocked on ADR-0010.
+
+### Added
+
+- `AadpServerConfig.modules` (`ail-aadp/server`) publishes module declarations in the manifest's `modules[]`, validated against the core manifest schema and semantic rules at `defineAADP()` time, on the same path as every other manifest field.
+- `SerializedEntity.extensions` (`ail-aadp/server`) emits root-level `x_*` extension fields on entity documents. Keys must match the released core entity grammar `^x_[a-zA-Z0-9_]*$`; a non-matching key, a key colliding with a core entity field, or a non-JSON-safe value fails loudly instead of being silently dropped. The caller's object is never mutated, frozen or adopted.
+- `isExtensionKey()` and `EXTENSION_KEY_GRAMMAR` (`ail-aadp/validator`) expose that grammar as a single shared predicate, so no layer can drift into a stricter copy of it.
+
+- `examples/reference-server` now publishes an `answer` resource alongside `note`: a real Answer Module `1.0` entity (`x_answer` with `authorship`, `freshness`, `related_entities` pointing at the deployment's own note entities, and a `content_checksum` computed with the public `ail-aadp/canonical-json` `checksumOf()`), served through `SerializedEntity.extensions` and declared as `aadp:answer@1.0` in the manifest's `modules[]`. The example still imports nothing but public subpaths. Its interop test asserts the served entity passes `validateAnswerEntityV1` end to end and that every related target actually resolves — closing the reference-resource gate deferred from `1.3.0`. Answer `1.0` requires an absolute HTTPS `canonical_url`, so answers validate when the example runs under an HTTPS `AADP_BASE_URL`; the server now also prints the local address it bound when that differs from the origin it publishes.
+
+Both server fields are generic: the runtime never inspects, imports or branches on a specific module id, and the entity `checksum` stays scoped to `data` so adding an extension to an already-published entity does not change it.
+
 ## 1.3.1 - 2026-08-08
 
 Security patch for the Answer client's per-budget canonical resolution cache (`docs/vi/plans/implementation-plan-v1.3.1.md`). Does not change AADP wire version `1.0`, any released schema, the Answer Module `1.0` wire contract, or the package's public export surface — no export was added, changed or removed.
