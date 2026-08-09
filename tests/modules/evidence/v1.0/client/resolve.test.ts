@@ -277,6 +277,43 @@ describe("dangling classification (specification.md §10.2)", () => {
     expect(server.requestLog).toEqual([]);
   });
 
+  it("does not follow a redirect chain into an address the policy refuses", async () => {
+    // The cited URL itself is allowed; only the REDIRECT target is refused.
+    // Both test servers necessarily live on 127.0.0.1, so a strict policy
+    // would reject the first hop and prove nothing — this policy allows
+    // exactly the first origin instead, which is what makes the redirect hop
+    // the only thing under test. Evidence adds no networking of its own, so
+    // the inherited per-hop URL policy is what has to catch this, and the
+    // walk must report it rather than throw.
+    const forbiddenTarget = await startDeployment({ evidence: ["report"] });
+    try {
+      server = await startServer((_req, res, url) => {
+        if (url.pathname === evidencePath("report")) {
+          res.writeHead(302, { Location: `${forbiddenTarget.baseUrl}${evidencePath("report")}` });
+          return res.end();
+        }
+        sendJson(res, 404, { error: "not_found" });
+      });
+      const allowedOrigin = new URL(server.baseUrl).origin;
+      const firstHopOnly = {
+        check: (url: URL) => (url.origin === allowedOrigin ? undefined : "resolves to a private address"),
+      };
+      const claim = buildClaimWrapper([
+        { id: "evidence:report", url: `${server.baseUrl}${evidencePath("report")}` },
+      ]) as unknown as EvidenceClaimDocumentV1;
+
+      const graph = await resolveClaimEvidenceV1(claim, { urlPolicy: firstHopOnly, budget: budget() });
+
+      expect(graph.edges.map((e) => e.status)).toEqual(["forbidden"]);
+      // The first hop WAS made — so the block genuinely happened on the
+      // redirect, not before the request started.
+      expect(server.requestLog).toEqual([evidencePath("report")]);
+      expect(forbiddenTarget.requestLog).toEqual([]);
+    } finally {
+      await forbiddenTarget.close();
+    }
+  });
+
   it("keeps the edge even when its target node did not resolve", async () => {
     server = await startDeployment({ claims: { uptime: ["missing"] }, evidence: [] });
     const answer = answerCiting([{ type: "claim", id: "claim:uptime", url: `${server.baseUrl}${claimPath("uptime")}` }]);

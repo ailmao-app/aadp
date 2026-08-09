@@ -39,6 +39,8 @@ contract. Such a change requires a new protocol version and an ADR.
 - [Relations Module v1.0 conformance contract](../spec/modules/relations/v1.0/conformance.md)
 - [Answer Module v1.0 specification](../spec/modules/answer/v1.0/specification.md)
 - [Answer Module v1.0 conformance contract](../spec/modules/answer/v1.0/conformance.md)
+- [Evidence Module v1.0 specification](../spec/modules/evidence/v1.0/specification.md)
+- [Evidence Module v1.0 conformance contract](../spec/modules/evidence/v1.0/conformance.md)
 - [AADP v0.1 schemas](../schemas/v0.1/)
 - [AADP v1.0 schemas](../schemas/v1.0/)
 
@@ -55,8 +57,6 @@ contract. Such a change requires a new protocol version and an ADR.
 | [Agent-discovery integrations proposal](design/agent-discovery-integrations-proposal.md) | Design memo | Proposed |
 | [Relations Module design](design/relations-module-design.md) | Design memo | Superseded |
 | [AEO/GEO integration plan](design/aeo-geo-integration-plan.md) | Design plan | Draft |
-| [Evidence Module v1.0 specification](../spec/modules/evidence/v1.0/specification.md) | Wire contract draft | Draft — non-normative until ADR-0010 is Accepted |
-| [Evidence Module v1.0 conformance contract](../spec/modules/evidence/v1.0/conformance.md) | Conformance draft | Draft — non-normative until ADR-0010 is Accepted |
 | [Historical AADP draft](archive/aadp-draft.md) | Archive | Superseded |
 
 ## 4. Architecture Decision Records
@@ -70,7 +70,7 @@ contract. Such a change requires a new protocol version and an ADR.
 - [ADR-0007: Module versioning and discovery](adr/0007-module-versioning-and-discovery.md)
 - [ADR-0008: Module traversal and authorization](adr/0008-module-traversal-and-authorization.md)
 - [ADR-0009: Answer Module terminology and security boundary](adr/0009-answer-module-terminology-and-security.md)
-- [ADR-0010: Evidence Module citation, provenance and security boundary](adr/0010-evidence-citation-provenance-and-security.md) — **Proposed**, not yet Accepted
+- [ADR-0010: Evidence Module citation, provenance and security boundary](adr/0010-evidence-citation-provenance-and-security.md)
 
 ADRs retain the Context/Decision/Consequences format. They are not rewritten as
 protocol specifications.
