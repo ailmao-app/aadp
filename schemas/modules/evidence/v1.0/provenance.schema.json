@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/modules/evidence/v1.0/provenance.schema.json",
+  "title": "AADP Evidence Module v1.0 — Provenance",
+  "description": "Component schema (not a top-level module document kind). Shape only — the ordering invariants (`published_at <= modified_at <= retrieved_at`), the precedence rule for \"the date of the evidence\", and the `retrieved_at <= entity.updated_at` relationship with the core envelope are pure/entity-context semantic rules, not expressible here (specification.md §8). `retrieved_at` records when the producer fetched the source and MUST NOT be presented as the date of the content.",
+  "type": "object",
+  "required": ["published_at", "retrieved_at"],
+  "properties": {
+    "published_at": { "type": "string", "format": "date-time" },
+    "retrieved_at": { "type": "string", "format": "date-time" },
+    "modified_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

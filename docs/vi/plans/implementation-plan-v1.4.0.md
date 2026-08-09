@@ -19,13 +19,21 @@ cho document có delivery state hỗn hợp.
 
 | # | Work package | Trạng thái | Điều kiện mở khóa |
 |---:|---|---|---|
-| 0 | ADR-0010 + Evidence specification/conformance | `Draft` — cả ba artifact đã viết xong, ADR ở trạng thái **Proposed**, chờ maintainer | Maintainer accept ADR |
-| 1 | Generic server module support (nợ `1.3.0`) | `Implemented` — chờ release ở Phase 6 | — |
-| 2 | Evidence schemas/types/fixtures | `Blocked` | Phase 0 Accepted |
-| 3 | Registry + graph semantic validator | `Blocked` | Phase 0 + Phase 2 |
-| 4 | Client traversal + Answer integration | `Blocked` | Phase 0 + Phase 3 |
-| 5 | Reference resources (nợ `1.3.0`) | Item 1 (Answer resource) `Implemented` — chờ release ở Phase 6; item 2-3 phần Evidence `Blocked` | Phase 0 + Phase 2 cho phần Evidence |
-| 6 | Conformance + external interoperability | `Blocked` | Phase 1-5 |
+| 0 | ADR-0010 + Evidence specification/conformance | `Draft` — cả ba artifact đã viết xong, ADR vẫn **Proposed**, chờ maintainer | Maintainer accept ADR |
+| 1 | Generic server module support (nợ `1.3.0`) | `Implemented` | — |
+| 2 | Evidence schemas/types/fixtures | `Implemented` | — |
+| 3 | Registry + graph semantic validator | `Implemented` | — |
+| 4 | Client traversal + Answer integration | `Implemented` | — |
+| 5 | Reference resources (nợ `1.3.0`) | `Implemented` — cả Answer, claim và evidence | — |
+| 6 | Conformance + package exports | `Implemented`; external interoperability run vẫn `Blocked` | Deployment thật + owner (xem [implementation record](../../records/implementation-record-v1.4.0.md)) |
+
+> **Phase 2-6 đã được triển khai TRƯỚC khi ADR-0010 được Accept**, theo chỉ đạo
+> trực tiếp. Điều đó có nghĩa: lớp bảo vệ "quyết định xong mới đóng băng" của
+> ADR-0004/ADR-0007 đã bị tiêu trước. Hệ quả thực tế — nếu maintainer đổi bất kỳ
+> quyết định nào khi accept, artifact dưới `schemas/modules/evidence/v1.0/` phải
+> được sửa **trước khi** tag `ail-aadp@1.4.0`, không phải sau. Không được coi
+> thư mục đó là immutable cho tới khi tag tồn tại, và không được publish
+> `1.4.0` khi ADR còn ở trạng thái Proposed.
 
 Các quyết định contract trong kế hoạch này ở trạng thái **đề xuất, chưa
 normative**. Chúng là input cho ADR-0010; module ID, version, field và ví dụ

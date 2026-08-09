@@ -14,7 +14,7 @@ import { listAnswers, findAnswerBySlug } from "../data/answer-repository.js";
  * URL depends on the deployment's `baseUrl` and route configuration, both of
  * which live in `aadp.js`. `serialize()` receives only the record.
  */
-export function createAnswerResource({ noteEntityUrl }) {
+export function createAnswerResource({ noteEntityUrl, claimEntityUrl }) {
   return defineResource({
     type: "answer",
     list: ({ cursor, limit }) => listAnswers({ cursor, limit }),
@@ -44,10 +44,20 @@ export function createAnswerResource({ noteEntityUrl }) {
           published_at: new Date(answer.publishedAt).toISOString(),
           updated_at: updatedAt,
         },
-        related_entities: answer.relatedNoteSlugs.map((slug) => ({
-          target_type: "note",
-          target: { id: `note:${slug}`, url: noteEntityUrl(slug) },
-        })),
+        // Citations ride on the released `related_entities` field with a
+        // `target_type` of `claim` — Answer 1.0 is immutable, so linking to
+        // the Evidence module adds no field to `x_answer`, and
+        // `authorship.source_targets` is deliberately not reused for it.
+        related_entities: [
+          ...answer.relatedNoteSlugs.map((slug) => ({
+            target_type: "note",
+            target: { id: `note:${slug}`, url: noteEntityUrl(slug) },
+          })),
+          ...(answer.citedClaimSlugs ?? []).map((slug) => ({
+            target_type: "claim",
+            target: { id: `claim:${slug}`, url: claimEntityUrl(slug) },
+          })),
+        ],
       };
 
       return {

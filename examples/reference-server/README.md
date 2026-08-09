@@ -8,13 +8,23 @@ tarball, not as a framework adapter or a starter template — it uses
 
 Layers, kept separate on purpose:
 
-- `src/data/example-repository.js`, `src/data/answer-repository.js` — sample
-  data access. Stands in for a database or internal API.
+- `src/data/example-repository.js`, `src/data/answer-repository.js`,
+  `src/data/evidence-repository.js` — sample data access. Stands in for a
+  database or internal API.
 - `src/resources/example-resource.js` — the `note` resource's serializer, the
   one allow-list boundary between a raw record and the published document.
 - `src/resources/answer-resource.js` — the `answer` resource, which publishes
   the Answer Module `1.0` wrapper (`x_answer`) through the server's generic
   extension support.
+- `src/resources/evidence-resource.js` — the `claim` and `evidence` resources,
+  publishing Evidence Module `1.0` wrappers (`x_evidence`) through the same
+  generic support. One evidence record is served only to an authorized caller,
+  which is how a citation walk produces a `forbidden` outcome rather than a
+  dangling reference.
+- `src/resources/module-schemas.js` — serves the Evidence `1.0` schema
+  artifacts this deployment's manifest points at. A manifest must never
+  advertise a `modules[].schema` an agent cannot fetch, and Evidence `1.0` is
+  not published on `aadp.dev` yet.
 - `src/aadp.js` — the `defineAADP()`/`defineResource()` composition.
 - `src/server.js` — the HTTP entry point. Only starts the server and maps
   `node:http` request/response to the Fetch `Request`/`Response` the runtime
@@ -58,19 +68,41 @@ address it can actually be reached at.
 
 ## Modules
 
-The deployment publishes two resource types:
+The deployment publishes four resource types:
 
 - `note` — core AADP only, no module payload.
 - `answer` — the same core entity plus an `x_answer` wrapper
-  ([Answer Module `1.0`](../../spec/modules/answer/v1.0/specification.md)),
-  emitted through `SerializedEntity.extensions`. The runtime never knows
-  which module produced it; the manifest declares `aadp:answer@1.0` in
-  `modules[]` only because this deployment actually serves it.
+  ([Answer Module `1.0`](../../spec/modules/answer/v1.0/specification.md)).
+- `claim` and `evidence` — core entities plus an `x_evidence` wrapper
+  ([Evidence Module `1.0`](../../spec/modules/evidence/v1.0/specification.md)).
 
-Answer `1.0` requires an absolute **HTTPS** `canonical_url`, so run with
-`AADP_BASE_URL=https://…` when the answer entities are meant to validate.
-Over the plain-HTTP local default they still serve, but
-`validateAnswerEntityV1` will reject their canonical URL.
+Every one of them is emitted through the same `SerializedEntity.extensions`
+field. The runtime never knows which module produced a payload; the manifest
+declares `aadp:answer@1.0` and `aadp:evidence@1.0` in `modules[]` only because
+this deployment actually serves them.
+
+The citation graph is deliberately more than one happy path:
+
+- the answer `what-uptime-did-orbit-report` cites the claim
+  `orbit-uptime-2026` through `related_entities` — two hops, answer → claim →
+  evidence, with `x_answer` itself unchanged;
+- that claim cites two evidence documents with **opposing stances**
+  (`support` and `contradict`);
+- a second claim cites one of the same evidence documents (**fan-in**): one
+  canonical node, two edges, one fetch per walk;
+- `orbit-status-report` was **retrieved before it was last updated**, which
+  exercises `retrieved_at <= updated_at` as an ordering rather than an
+  equality;
+- `orbit-embargoed-filing` is served only to an authorized caller, so a walk
+  reaching it reports `forbidden` — a valid outcome of a healthy graph, not a
+  dangling reference. It is deliberately absent from the sitemap, which
+  advertises only what an anonymous agent can fetch.
+
+Both modules require an absolute **HTTPS** `canonical_url`, so run with
+`AADP_BASE_URL=https://…` when the answer, claim and evidence entities are
+meant to validate. Over the plain-HTTP local default they still serve, but
+`validateAnswerEntityV1`/`validateEvidenceEntityV1` will reject their
+canonical URL.
 
 ## Validate and check conformance
 

@@ -8,11 +8,14 @@
 | Gate | [ADR-0010](../../../../docs/adr/0010-evidence-citation-provenance-and-security.md) must be Accepted |
 | Module ID | `aadp:evidence` (proposed, not allocated) |
 | Module version | `1.0` (proposed) |
-| Runner | `runEvidenceConformance` (`ail-aadp/modules/evidence/v1.0`) — does not exist yet |
+| Runner | `runEvidenceConformance` (`ail-aadp/modules/evidence/v1.0`) — implemented in `1.4.0` |
 | Specification | [`specification.md`](specification.md) |
 
-> **Draft.** The check IDs below are proposals and are not yet stable. Do not
-> implement the runner before ADR-0010 is Accepted.
+> **Draft.** The check IDs below are implemented but do not become stable until
+> ADR-0010 is Accepted. The runner was built ahead of that gate at explicit
+> maintainer direction — see the note under "Document metadata" in
+> [`specification.md`](specification.md) and the open gates in
+> [implementation record 1.4.0](../../../../docs/records/implementation-record-v1.4.0.md).
 
 ## 1. Purpose
 

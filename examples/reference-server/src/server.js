@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { buildAadpServer } from "./aadp.js";
+import { handleModuleSchemaRequest } from "./resources/module-schemas.js";
 
 /**
  * `defineAADP()` returns a plain `(Request) => Promise<Response>` — no
@@ -55,6 +56,10 @@ export function startReferenceServer({
         const url = new URL(request.url);
         if (url.pathname === "/robots.txt") return staticText("User-agent: *\nAllow: /\n");
         if (url.pathname === "/terms") return staticText("Example terms of use.\n");
+        // Served by this deployment because its manifest advertises them —
+        // see `handleModuleSchemaRequest`.
+        const schema = await handleModuleSchemaRequest(url);
+        if (schema) return schema;
         return aadp.handleRequest(request);
       })
       .then((response) => writeFetchResponse(response, res))

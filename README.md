@@ -452,10 +452,16 @@ neutral `defineAADP()` deployment on plain `node:http`, installed from a
 packed tarball rather than this repo's workspace — the same way a real
 third-party consumer would use the package. It demonstrates the default
 route convention and a custom `routes` configuration side by side, and
-publishes two resource types: a core-only `note` and an `answer` carrying an
-Answer Module `1.0` payload through `SerializedEntity.extensions`, declared as
-`aadp:answer@1.0` in the manifest. See its README for how to run it and check
-it with `aadp-conformance`.
+publishes four resource types through the one generic extension mechanism: a
+core-only `note`, an `answer` carrying an Answer Module `1.0` payload, and a
+`claim`/`evidence` pair carrying Evidence Module `1.0` payloads — all through
+`SerializedEntity.extensions`, with `aadp:answer@1.0` and `aadp:evidence@1.0`
+declared in the manifest. Its citation graph is deliberately non-trivial: an
+answer cites a claim, the claim cites two evidence documents with opposing
+stances, a second claim shares one of them (fan-in), and one evidence record
+is served only to an authorized caller so a walk produces a `forbidden`
+outcome rather than a dangling reference. See its README for how to run it and
+check it with `aadp-conformance`.
 
 ## Run conformance tests
 
@@ -573,10 +579,12 @@ AADP_BASE_URL=https://example.com \
 | `ail-aadp/canonical-json` | Canonicalization and checksum utilities |
 | `ail-aadp/modules/relations/v1.0` | Relations Module v1.0 — types, schema/semantic validation, client/traversal, conformance |
 | `ail-aadp/modules/answer/v1.0` | Answer Module v1.0 — types, schema/semantic validation, entity-context validator, client, conformance |
+| `ail-aadp/modules/evidence/v1.0` | Evidence & Provenance Module v1.0 — claim/evidence types, schema/semantic validation, entity-context validator, graph client, conformance |
 | `ail-aadp/schemas/v1.0/*` | v1.0 JSON Schemas |
 | `ail-aadp/schemas/v0.1/*` | v0.1 JSON Schemas |
 | `ail-aadp/schemas/modules/relations/v1.0/*` | Relations Module v1.0 JSON Schemas |
 | `ail-aadp/schemas/modules/answer/v1.0/*` | Answer Module v1.0 JSON Schemas |
+| `ail-aadp/schemas/modules/evidence/v1.0/*` | Evidence Module v1.0 JSON Schemas |
 
 Binaries: `aadp-validate`, `aadp-conformance`, `aadp` (`aadp init` / `aadp add-resource`).
 

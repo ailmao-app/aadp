@@ -31,6 +31,19 @@ const ANSWERS = [
     updatedAt: "2026-02-05T00:00:00.000Z",
     relatedNoteSlugs: ["discovery", "custom-routes"],
   },
+  {
+    slug: "what-uptime-did-orbit-report",
+    question: "What uptime did Orbit report for 2026?",
+    conciseAnswer: "Orbit reported 99.9% uptime for 2026, with one incident review disputing the figure.",
+    answer:
+      "The 2026 status report states 99.9% availability. A separate post-incident review covering the March outage contradicts that figure. Both are published as evidence behind the claim this answer cites, so an agent can follow the citation graph rather than take the summary on trust.",
+    author: "AADP Reference Server Example",
+    publishedAt: "2026-04-06T00:00:00.000Z",
+    updatedAt: "2026-04-06T00:00:00.000Z",
+    relatedNoteSlugs: [],
+    // The two-hop root: answer -> claim -> evidence.
+    citedClaimSlugs: ["orbit-uptime-2026"],
+  },
 ];
 
 export function listAnswers({ cursor, limit }) {

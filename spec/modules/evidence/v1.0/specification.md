@@ -14,11 +14,20 @@
 | Package target | `ail-aadp@1.4.0` |
 
 > **Draft.** Every field, constant and example here is a **proposal**, per
-> [document conventions §5](../../../../docs/document-conventions.md). The module
-> ID and version are not allocated by appearing here, and no schema artifact may
-> be created under `schemas/modules/evidence/v1.0/` before ADR-0010 is Accepted —
-> released schemas are immutable under
-> [ADR-0004](../../../../docs/adr/0004-backward-compatibility.md).
+> [document conventions §5](../../../../docs/document-conventions.md), until
+> ADR-0010 is Accepted. The module ID and version are not allocated by appearing
+> here.
+>
+> **The implementation now exists ahead of that gate**, at explicit maintainer
+> direction: `schemas/modules/evidence/v1.0/*`, `src/modules/evidence/v1.0/**`
+> and the conformance runner are all built, and the schema digests are recorded
+> in [implementation record 1.4.0](../../../../docs/records/implementation-record-v1.4.0.md).
+> The protection ADR-0004 and
+> [ADR-0007](../../../../docs/adr/0007-module-versioning-and-discovery.md) provide
+> — deciding before freezing — has therefore been spent in advance. Nothing under
+> that schema directory may be treated as immutable until `ail-aadp@1.4.0` is
+> tagged: if acceptance changes a decision, the artifacts MUST be edited before
+> the tag, not after.
 
 ## Abstract
 
@@ -541,7 +550,9 @@ src/modules/evidence/v1.0/
 └── conformance/ (types, checks, report, runner, index)
 ```
 
-None of the files above may be created before ADR-0010 is Accepted.
+Every file above now exists (`1.4.0`), with `entity.ts` carrying the
+entity-context validator. Their contract stays non-normative until ADR-0010 is
+Accepted — see the note under "Document metadata".
 
 ## 19. Compatibility
 

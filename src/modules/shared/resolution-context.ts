@@ -1,6 +1,11 @@
 /**
  * Resolution context binding for the per-budget canonical resolution state
- * (`resolve.ts`'s `BudgetResolutionState`).
+ * (`./canonical-resolution.ts`'s `BudgetResolutionState`).
+ *
+ * Released in `1.3.1` as a security fix to the Answer client and moved here
+ * unchanged in `1.4.0` when the canonical resolution layer became shared
+ * infrastructure (ADR-0010 §11). There is deliberately only ONE copy: an
+ * Evidence-side fork of this check would be an entry point that bypasses it.
  *
  * That state caches a canonical target's settled outcome — and joins an
  * in-flight fetch — keyed by `{budget, canonical target key}` alone. Every
@@ -83,8 +88,8 @@ const DEFAULT_RETRY_MAX_DELAY_MS = 10_000;
 /**
  * The subset of resolution options that can change the shared request or
  * the outcome replayed from it. Declared structurally rather than importing
- * `AnswerResolveOptions` to keep this module free of a cycle back into
- * `resolve.ts`.
+ * a module's own options type, so this module stays free of a cycle back
+ * into either resolver.
  *
  * `signal` is deliberately absent: it is caller-local waiting state, never
  * forwarded to the shared fetch (see `resolveCanonicalTarget`), so two calls

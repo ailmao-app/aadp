@@ -1,0 +1,36 @@
+{
+  "module": "aadp:evidence",
+  "version": "1.0",
+  "kind": "claim",
+  "statement": "Two independent reports disagree about Orbit's 2026 uptime.",
+  "locale": "en",
+  "evidence_refs": [
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:orbit-status-report-2026",
+        "url": "https://example.com/ai/v1.0/entities/evidence/orbit-status-report-2026.json"
+      },
+      "stance": "support",
+      "confidence": 1
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:orbit-incident-review-2026",
+        "url": "https://example.com/ai/v1.0/entities/evidence/orbit-incident-review-2026.json"
+      },
+      "stance": "contradict",
+      "confidence": 0.05
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:orbit-third-party-audit-2026",
+        "url": "https://example.com/ai/v1.0/entities/evidence/orbit-third-party-audit-2026.json"
+      },
+      "stance": "neutral"
+    }
+  ],
+  "content_checksum": "sha256:06680b977720bcdda64f861d3688bfaa3f5acd25cc2a0bf899c494f405531b74"
+}
