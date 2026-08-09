@@ -20,6 +20,7 @@
 import { checksumOf } from "../../../canonical-json/checksum.js";
 import { canonicalTargetKey } from "../../relations/v1.0/client/budget.js";
 import { checkUrlPolicy, isValidAnswerLocale } from "../../answer/v1.0/semantic.js";
+import { checkNonPublicIpLiteral } from "../../../client/url-policy.js";
 import type { ModuleSemanticIssue } from "../../../module-registry/index.js";
 import type { EvidenceClaimDocumentV1, EvidenceDocumentV1, EvidenceReferenceV1 } from "./types.js";
 
@@ -222,7 +223,12 @@ function checkDuplicateReferences(refs: EvidenceReferenceV1[], issues: ModuleSem
 
 function checkSourceUrl(url: unknown, path: string, field: string, issues: ModuleSemanticIssue[]): void {
   if (!isString(url)) return;
-  const reason = checkUrlPolicy(url);
+  const baseReason = checkUrlPolicy(url);
+  let literalAddressReason: string | undefined;
+  if (!baseReason) {
+    literalAddressReason = checkNonPublicIpLiteral(new URL(url).hostname);
+  }
+  const reason = baseReason ?? literalAddressReason;
   if (reason) {
     issues.push({
       level: "error",

@@ -187,6 +187,12 @@ describe("evidence semantics", () => {
     expect(
       codes(checkEvidenceSemantics(evidence({ source: { ...base, publisher: { name: "Example Orbit", url: "https://a:b@example.com" } } })))
     ).toContain("evidence.semantic.source_url_policy_violation");
+    expect(codes(checkEvidenceSemantics(evidence({ source: { ...base, url: "https://127.0.0.1/report" } })))).toContain(
+      "evidence.semantic.source_url_policy_violation"
+    );
+    expect(
+      codes(checkEvidenceSemantics(evidence({ source: { ...base, publisher: { name: "Example Orbit", url: "https://[fe80::1]/" } } })))
+    ).toContain("evidence.semantic.source_url_policy_violation");
   });
 
   it("does not require excerpt to be trimmed — a verbatim quotation may carry its own whitespace", () => {

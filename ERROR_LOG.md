@@ -159,3 +159,10 @@
 - **Triệu chứng:** Link ADR trỏ vào dấu đóng của JSON example thay vì quy tắc discovery/schema dispatch; link conformance trỏ vào dòng trống thay vì mapping fixture `relations-invalid-wrapper-version`.
 - **Nguyên nhân (root cause):** Bản dịch và reflow tài liệu làm thay đổi số dòng, nhưng các target `#L...` trong audit record vẫn giữ số dòng cũ.
 - **Fix:** Cập nhật link ADR tới quy tắc module advertisement/discovery tại [docs/adr/0007-module-versioning-and-discovery.md:51](docs/adr/0007-module-versioning-and-discovery.md#L51) và link conformance tới mapping fixture hiện hành tại [spec/modules/relations/v1.0/conformance.md:97](spec/modules/relations/v1.0/conformance.md#L97).
+
+## 2026-08-09 - Evidence validator bỏ lọt URL metadata dùng địa chỉ IP không công khai
+
+- **Nơi xảy ra:** Kiểm tra semantic `source.url`/`publisher.url` của Evidence `1.0`, phát hiện qua review `.claude/review/review-20260809-232131.md`.
+- **Triệu chứng:** Evidence wrapper có URL như `https://127.0.0.1/source` vẫn được báo valid, dù catalog conformance normative phân loại URL trỏ tới private/link-local/reserved address là invalid.
+- **Nguyên nhân (root cause):** `checkSourceUrl()` chỉ dùng URL-policy của Answer (HTTPS tuyệt đối, không userinfo, không fragment). Phần phân loại IP literal không công khai chỉ nằm bên trong strict client URL policy, nên pure Evidence validator không tái sử dụng được và fixture inventory cũng thiếu case bắt buộc.
+- **Fix:** Tách phép phân loại IP literal thuần, không DNS/fetch thành helper dùng chung tại [src/client/url-policy.ts:285](src/client/url-policy.ts#L285), gọi helper đó từ Evidence semantic validator tại [src/modules/evidence/v1.0/semantic.ts:224](src/modules/evidence/v1.0/semantic.ts#L224), đồng thời thêm fixture private IPv4 và regression cho private/link-local IPv4/IPv6 tại [tests/modules/evidence/v1.0/semantic.test.ts:182](tests/modules/evidence/v1.0/semantic.test.ts#L182). `source.url` và `publisher.url` vẫn chỉ là metadata và không bao giờ được resolve DNS hoặc fetch.

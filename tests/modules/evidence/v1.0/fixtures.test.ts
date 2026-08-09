@@ -67,6 +67,7 @@ const EXPECTED_INVALID: Record<string, string | null> = {
   "evidence-invalid-missing-source.json": null,
   "evidence-invalid-publisher-url-malformed.json": null,
   "evidence-invalid-source-url-http.json": null,
+  "evidence-invalid-source-url-private.json": "evidence.semantic.source_url_policy_violation",
   "evidence-invalid-timestamp-format.json": null,
   "evidence-invalid-content-checksum-excerpt.json": "evidence.semantic.content_checksum_mismatch",
   "evidence-invalid-content-checksum-provenance.json": "evidence.semantic.content_checksum_mismatch",
