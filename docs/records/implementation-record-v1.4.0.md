@@ -142,9 +142,9 @@ person willing to own the result.
 | Field | Value |
 |---|---|
 | Origin | `https://ailmao.com` |
-| Ran at | 2026-08-10T12:58:03Z – 12:58:05Z |
+| Ran at | 2026-08-10T13:15:55Z – 13:15:57Z |
 | Node | `v20.18.1` (the `engines.node` floor; the repo's own test matrix cannot use it — see `.github/workflows/ci.yml` — but this run never invokes the dev toolchain) |
-| Package | `ail-aadp@1.4.0`, packed from commit `2edd14e`, tarball `sha256:1ce46d429905f1f45ffeafed2a04651787d6da7513024b4150236131ef4cb727` |
+| Package | `ail-aadp@1.4.0`, 259 files / 277.1 kB, tarball `sha256:933ccdafe715b6fb48610685abb02775ea3d74791c0f2620d781a5f66c82a47e`. Re-packed and re-run after the packaging fix below, so the evidence is about the tarball that would actually be published |
 | URL policy | Default (strict). No `allowPrivateNetwork`, no custom policy — so `answer.security`/`evidence.security` pass outright instead of warning |
 | Answer sample | `https://ailmao.com/ai/v1.0/entities/answer/can-a-user-control-an-ailon.json` |
 | Claim sample | `https://ailmao.com/ai/v1.0/entities/claim/ailons-are-fictional.json` |
@@ -177,19 +177,32 @@ on the exact commit to be tagged is the ordinary pre-tag step, not a gate.
 
 ```bash
 npm run build
-npm test                        # 59 files, 1038 tests, pass
+npm test                        # 60 files, 1058 tests, pass
 npm run docs:check              # all relative links resolve
+npm run check:iana-ipv6
 npm run check:release-consistency
+npm pack --dry-run              # 259 files, no node_modules entry
 ```
 
 The whole Answer test suite (12 files, 174 tests) passes **without a single line
 changed**, which is the regression proof required for the shared-layer refactor.
 
 `npm pack --dry-run` alone is not evidence that public exports work; the packed
-tarball suite in `tests/package/*` is what exercises them locally, and the
-external run recorded in open gate 1 is what proves interoperability — a clean
-tarball install on the engines floor, driving a deployment this repository does
-not control, over real HTTPS.
+tarball suite in `tests/package/*` is what exercises them locally, and the run
+recorded under [External interoperability evidence](#external-interoperability-evidence-closed-2026-08-10)
+is what proves interoperability — a clean tarball install on the engines floor,
+driving a deployment this repository does not control, over real HTTPS.
+
+It is, however, evidence about what gets *shipped*, and that is a separate
+failure mode: `files` names `examples`, and npm's built-in "never pack
+node_modules" rule does not apply inside a directory the allow-list names, so
+installing the example's own dependencies locally silently grew the release
+candidate to 1,294 files with a recursive copy of the package inside it. Fixed
+with a `!**/node_modules` negation and pinned by
+`tests/package/tarball-contents.test.ts`, which asserts the real `npm pack`
+output rather than the config. Worth recording because nothing failed: `npm
+pack` exited `0`, and a clean CI checkout has no such directory — the defect
+was only ever visible on the machine that would have published.
 
 ## Decisions worth recording
 

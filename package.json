@@ -91,6 +91,7 @@
     "schemas",
     "spec",
     "examples",
+    "!**/node_modules",
     "scripts",
     "CHANGELOG.md",
     "README.md",

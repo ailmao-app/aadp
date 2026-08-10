@@ -11,9 +11,9 @@
     "name": "aadp-answer-conformance",
     "version": "1.4.0"
   },
-  "started_at": "2026-08-10T12:58:03.686Z",
-  "finished_at": "2026-08-10T12:58:04.473Z",
-  "duration_ms": 788,
+  "started_at": "2026-08-10T13:15:55.313Z",
+  "finished_at": "2026-08-10T13:15:56.374Z",
+  "duration_ms": 1062,
   "status": "passed",
   "summary": {
     "total": 9,
@@ -38,21 +38,21 @@
       "group": "discovery",
       "title": "Manifest declares aadp:answer@1.0 with {id, version, schema}",
       "status": "passed",
-      "duration_ms": 415
+      "duration_ms": 661
     },
     {
       "id": "answer.resource",
       "group": "resource",
       "title": "Sample Answer entity is reachable through the core discovery/entity flow",
       "status": "passed",
-      "duration_ms": 107
+      "duration_ms": 123
     },
     {
       "id": "answer.schema",
       "group": "schema",
       "title": "Sample x_answer wrapper passes the Answer 1.0 schema",
       "status": "passed",
-      "duration_ms": 4
+      "duration_ms": 3
     },
     {
       "id": "answer.semantic",
@@ -66,7 +66,7 @@
       "group": "context",
       "title": "Entity type, x_answer presence, canonical_url policy and updated_at equality are green",
       "status": "passed",
-      "duration_ms": 0
+      "duration_ms": 1
     },
     {
       "id": "answer.authorship",
@@ -80,14 +80,14 @@
       "group": "references",
       "title": "related_entities and generated-summary source_targets resolve via the Relations resolver/shared budget",
       "status": "passed",
-      "duration_ms": 260
+      "duration_ms": 272
     },
     {
       "id": "answer.freshness",
       "group": "freshness",
       "title": "Timestamp semantics and injected-clock classification are correct",
       "status": "passed",
-      "duration_ms": 1
+      "duration_ms": 0
     },
     {
       "id": "answer.security",
