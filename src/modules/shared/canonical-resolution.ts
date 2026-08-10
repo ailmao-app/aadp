@@ -292,6 +292,77 @@ export interface BudgetResolutionState {
 const budgetState = new WeakMap<RelationsTraversalBudgetState, BudgetResolutionState>();
 
 /**
+ * One LOGICAL resolution of one canonical `{id, normalizedUrl}` target, as
+ * decided at this layer's cache boundary — deliberately NOT an HTTP attempt.
+ * One logical resolution covers the whole of a target's resolution including
+ * every retry and redirect hop inside it (`client/http.ts` restarts an
+ * attempt from the original URL, so a retried request records that URL twice
+ * at `onBeforeAttempt`), which is exactly the distinction a fan-in dedup
+ * assertion needs: "this target was resolved twice" is a defect, "this target
+ * was resolved once, over two HTTP attempts" is ordinary transient behavior.
+ *
+ * `context` is the traversal decision point that asked for the target (e.g.
+ * `evidence.evidence_refs[0]`) — request provenance recorded where the
+ * decision is made, rather than inferred afterwards from a flat URL list.
+ */
+export interface CanonicalResolutionEvent {
+  /** `canonicalTargetKey(id, url)` — the key this layer dedups on. */
+  key: string;
+  id: string;
+  /** The reference's raw URL. Normalize with `normalizeTargetUrl` before comparing it to anything. */
+  url: string;
+  /**
+   * - `fetch`: this resolution started the single real fetch for the key.
+   * - `join`: joined a fetch already in flight for it.
+   * - `cache`: replayed an already-settled outcome.
+   * - `stopped`: ended in a global stop (budget exhaustion or this caller's own abort) instead of an outcome.
+   */
+  kind: "fetch" | "join" | "cache" | "stopped";
+  context: string;
+}
+
+export type CanonicalResolutionObserver = (event: CanonicalResolutionEvent) => void;
+
+/**
+ * Observers keyed by the caller-owned budget — instrumentation, never
+ * behavior. Kept here rather than as an option on
+ * `CanonicalResolutionOptions` for two reasons: this layer is internal by
+ * design (see the module docstring), so no module's PUBLIC resolve options
+ * grow a hook; and an option would join the resolution-context digest, where
+ * merely observing a walk would change which calls may share a budget.
+ */
+const observers = new WeakMap<RelationsTraversalBudgetState, CanonicalResolutionObserver>();
+
+/**
+ * Registers `observer` for every canonical resolution made on `budget`, and
+ * returns a function that removes it again. One observer per budget — the
+ * budget owner is the only party that can meaningfully instrument its own
+ * walk. Used by the Evidence conformance runner, which must prove fan-in
+ * dedup and metadata-traversal absence, neither of which is observable from
+ * the outside at HTTP-attempt granularity.
+ */
+export function observeCanonicalResolutions(
+  budget: RelationsTraversalBudgetState,
+  observer: CanonicalResolutionObserver
+): () => void {
+  observers.set(budget, observer);
+  return () => {
+    if (observers.get(budget) === observer) observers.delete(budget);
+  };
+}
+
+/** An observer that throws must never change a resolution's outcome — the same reasoning as the runner's `onCheck`. */
+function emitResolution(budget: RelationsTraversalBudgetState, event: CanonicalResolutionEvent): void {
+  const observer = observers.get(budget);
+  if (!observer) return;
+  try {
+    observer(event);
+  } catch {
+    // Instrumentation is never allowed to decide a verdict.
+  }
+}
+
+/**
  * Returns the budget's resolution state, binding `options`' resolution
  * context to it on first use.
  *
@@ -375,6 +446,8 @@ export async function resolveCanonicalTarget(
 ): Promise<CanonicalResolution> {
   const { outcomes, pending, globalStops } = state;
   const key = canonicalTargetKey(target.id, target.url);
+  const observe = (kind: CanonicalResolutionEvent["kind"]): void =>
+    emitResolution(options.budget, { key, id: target.id, url: target.url, kind, context });
 
   const priorStop = globalStops.get(key);
   if (priorStop) {
@@ -384,11 +457,15 @@ export async function resolveCanonicalTarget(
     // would only see Relations' bare `duplicate` (chargeNode already marked
     // the key visited before the throw) and misreport it `invalid`. See
     // `BudgetResolutionState.globalStops`.
+    observe("stopped");
     return { status: "stopped", message: priorStop.message };
   }
 
   const settled = outcomes.get(key);
-  if (settled) return { status: "outcome", outcome: settled };
+  if (settled) {
+    observe("cache");
+    return { status: "outcome", outcome: settled };
+  }
 
   // No settled outcome yet. Join an in-flight fetch for this canonical key
   // if one is already running (this call or a concurrent one over the same
@@ -401,8 +478,10 @@ export async function resolveCanonicalTarget(
   // also being in `pending`.
   let entry = pending.get(key);
   if (!entry && options.signal?.aborted) {
+    observe("stopped");
     return { status: "stopped", message: new AbortedError(target.url, options.signal.reason).message };
   }
+  observe(entry ? "join" : "fetch");
   if (!entry) {
     const controller = new AbortController();
     const promise = fetchCanonicalTarget(target, seedTargetType, options, controller.signal, context);

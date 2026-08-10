@@ -10,13 +10,15 @@ import { createStrictUrlPolicy, createPermissiveUrlPolicy } from "../../../../cl
 import { AbortedError } from "../../../../client/http.js";
 import { AadpDiscoveryBudgetExceededError } from "../../../../client/discovery-budget.js";
 import type { ClientOptions } from "../../../../client/v1.0/index.js";
-import { createRelationsTraversalBudget } from "../../../relations/v1.0/client/budget.js";
+import { createRelationsTraversalBudget, normalizeTargetUrl } from "../../../relations/v1.0/client/budget.js";
+import { observeCanonicalResolutions } from "../../../shared/canonical-resolution.js";
 import {
   EVIDENCE_CHECKS,
   EvidenceCheckSignal,
   type EvidenceCheck,
   type EvidenceCheckContext,
   type EvidenceCheckOutcome,
+  type EvidenceRequestPurpose,
   type EvidenceRunState,
 } from "./checks.js";
 import {
@@ -218,18 +220,20 @@ export async function runEvidenceConformance(options: EvidenceConformanceOptions
     }
   }
 
-  const state: EvidenceRunState = { requestedUrls: [] };
+  const state: EvidenceRunState = { requests: [], resolutions: [], purpose: "unattributed" };
 
   const client: ClientOptions = {
     urlPolicy: options.urlPolicy ?? (options.allowPrivateNetwork ? createPermissiveUrlPolicy() : createStrictUrlPolicy()),
-    // Run-wide request log. It must be ONE object for the whole run: the
+    // Run-wide request log, one HTTP attempt per entry, tagged with the
+    // phase that initiated it. It must be ONE object for the whole run: the
     // shared per-budget resolution state binds to the request options on
     // first use, so a per-check hook would fail closed with
-    // `resolution_context_mismatch`. `evidence.graph` uses the log to prove
-    // fan-in dedup and `evidence.security` to prove no metadata URL was
-    // fetched — neither is observable any other way.
+    // `resolution_context_mismatch`. See `./checks.ts`'s module docstring for
+    // why the checks read this log together with `state.resolutions` rather
+    // than drawing verdicts from attempted URLs alone.
     onBeforeAttempt: (url: URL) => {
-      state.requestedUrls.push(url.toString());
+      const href = url.toString();
+      state.requests.push({ url: href, normalizedUrl: normalizeTargetUrl(href), purpose: state.purpose });
     },
     ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
     ...(options.maxRedirects !== undefined ? { maxRedirects: options.maxRedirects } : {}),
@@ -263,7 +267,29 @@ export async function runEvidenceConformance(options: EvidenceConformanceOptions
     maxPages: budget.maxPages,
   };
 
-  const ctxBase: Omit<EvidenceCheckContext, "skip" | "inconclusive" | "warn" | "fail"> = { options, client, budget, state };
+  // Request provenance: whatever `fn` fetches — directly or through the
+  // traversal helpers — is attributed to `purpose`. Restoring the previous
+  // value rather than clearing it keeps nesting honest, and the checks run
+  // sequentially, so a phase is never open while another one records.
+  const withPurpose = async <T>(purpose: EvidenceRequestPurpose, fn: () => Promise<T>): Promise<T> => {
+    const previous = state.purpose;
+    state.purpose = purpose;
+    try {
+      return await fn();
+    } finally {
+      state.purpose = previous;
+    }
+  };
+
+  // Logical resolutions, as decided at the shared canonical resolution
+  // layer's cache boundary — one entry per resolution of a canonical target,
+  // NOT per HTTP attempt (see `./checks.ts`'s module docstring). Registered
+  // on this run's own budget, and removed again when the run ends.
+  const stopObserving = observeCanonicalResolutions(budget, (event) => {
+    state.resolutions.push({ ...event, normalizedUrl: normalizeTargetUrl(event.url), purpose: state.purpose });
+  });
+
+  const ctxBase: Omit<EvidenceCheckContext, "skip" | "inconclusive" | "warn" | "fail"> = { options, client, budget, state, withPurpose };
 
   const startedAt = new Date();
   const startedMs = Date.now();
@@ -282,32 +308,36 @@ export async function runEvidenceConformance(options: EvidenceConformanceOptions
     }
   };
 
-  for (const check of EVIDENCE_CHECKS) {
-    if (options.signal?.aborted) {
-      record({
-        id: check.id,
-        group: check.group,
-        title: check.title,
-        status: "skipped",
-        duration_ms: 0,
-        message: "Run aborted by caller (options.signal)",
-        inconclusive: true,
-      });
-      continue;
+  try {
+    for (const check of EVIDENCE_CHECKS) {
+      if (options.signal?.aborted) {
+        record({
+          id: check.id,
+          group: check.group,
+          title: check.title,
+          status: "skipped",
+          duration_ms: 0,
+          message: "Run aborted by caller (options.signal)",
+          inconclusive: true,
+        });
+        continue;
+      }
+      const blocking = unmetPrerequisite(check, statusById);
+      if (blocking) {
+        record({
+          id: check.id,
+          group: check.group,
+          title: check.title,
+          status: "skipped",
+          duration_ms: 0,
+          message: `Prerequisite "${blocking.id}" ${blocking.reason}`,
+        });
+        continue;
+      }
+      record(await runCheck(check, ctxBase));
     }
-    const blocking = unmetPrerequisite(check, statusById);
-    if (blocking) {
-      record({
-        id: check.id,
-        group: check.group,
-        title: check.title,
-        status: "skipped",
-        duration_ms: 0,
-        message: `Prerequisite "${blocking.id}" ${blocking.reason}`,
-      });
-      continue;
-    }
-    record(await runCheck(check, ctxBase));
+  } finally {
+    stopObserving();
   }
 
   const finishedAt = new Date();

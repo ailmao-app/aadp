@@ -32,7 +32,7 @@ Relations `RELATIONS_CHECKS` or the Answer check IDs
 | `evidence.schema` | schema | The `x_evidence` wrapper passes the Evidence `1.0` schema | Required |
 | `evidence.semantic` | semantic | Pure wrapper semantic invariants (including `content_checksum`) are green | Required |
 | `evidence.context` | context | Entity type, `x_evidence` presence, canonical URL policy, and the **ordering** `provenance.retrieved_at <= entity.updated_at` (NOT equality) | Required |
-| `evidence.graph` | graph | Claim → evidence resolves; no `not-found`/`invalid`; fan-in deduplication is correct (one evidence fetched once per walk) | Required when a sample claim exists |
+| `evidence.graph` | graph | Claim → evidence resolves; no `not-found`/`invalid`; fan-in deduplication is correct (one **logical resolution** per canonical target per walk — see §5) | Required when a sample claim exists |
 | `evidence.stance` | stance | Stance/confidence semantics; a missing `confidence` is not inferred as `0`/`1` | Required |
 | `evidence.provenance` | provenance | Timestamp ordering, precedence and freshness classification | Required |
 | `evidence.answer_link` | integration | Answer `related_entities` to claim/evidence resolve, a claim expands to evidence (two hops), `x_answer` is unchanged | Required when a sample answer exists |
@@ -71,6 +71,22 @@ valid outcome and does NOT fail the gate**. This classification MUST NOT read
 `source.access` ([specification.md §12](specification.md)): when a target
 returns 401/403 there is no body from which to read that field.
 
+### Fan-in dedup is counted per logical resolution
+
+The dedup assertion is about **logical resolutions of a canonical
+`{id, normalizedUrl}` target**, not about HTTP attempts. A retry or a redirect
+hop happens INSIDE one resolution, and a runner MUST NOT report a target as
+re-fetched because a configured retry recovered a transient `429`/`503` — a
+conforming deployment would then fail the gate for ordinary transient
+behaviour. Equivalent URL spellings are folded with the same canonicalizer the
+traversal itself deduplicates on, so `https://example.com` and
+`https://example.com/` are one target on both sides of the comparison.
+
+Within one claim, two references to the same canonical target are already
+invalid (`evidence.semantic.duplicate_target`), so genuine fan-in is asserted
+where it can legally occur: two claims of one answer citing one evidence
+document, which `evidence.answer_link` requires to resolve exactly once.
+
 ## 6. Options boundary
 
 The runner supports authenticated servers under the same option boundary as
@@ -102,7 +118,16 @@ which a static scan alone cannot prove; any substring found is reported as a
 
 The check must also assert that:
 
-- `source.url`/`publisher.url` are NOT fetched in any run;
+- `source.url`/`publisher.url` are NOT **traversed** in any run. The failing
+  condition is a request the run made *because of* a metadata field, decided
+  from recorded request provenance — which decision point asked for the URL —
+  and never from URL equality against a flat list of everything the run
+  requested. A metadata URL may legitimately be requested in another role (it
+  can be the very URL supplied as `sampleEvidenceUrl`, or a declared
+  `evidence_refs`/`related_entities` target), and that is not a traversal.
+  Where a URL comparison is used as secondary evidence, both sides MUST be
+  canonicalized with the same canonicalizer, so equivalent spellings can
+  neither evade the check nor fail a conforming run;
 - an evidence document with `access: authenticated` is NOT treated differently
   from a `public` one in any traversal decision or verdict;
 - a run using a non-default URL policy (`allowPrivateNetwork`/custom

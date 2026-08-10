@@ -9,14 +9,33 @@
  * `ConformanceOptions.negativeTargets`.
  *
  * Every request this run makes passes through one shared `ClientOptions`
- * object whose `onBeforeAttempt` records the URL (`EvidenceRunState.
- * requestedUrls`). One object, run-wide, is required rather than
- * per-check: the shared per-budget resolution context is bound to the
- * request options on first use, so a check resolving with a different
- * options object would fail closed with `resolution_context_mismatch`.
- * Recording every attempt is also what lets `evidence.graph` prove fan-in
- * dedup and `evidence.security` prove `source.url` was never fetched — both
- * of which are otherwise unobservable from the outside.
+ * object whose `onBeforeAttempt` records the attempt (`EvidenceRunState.
+ * requests`). One object, run-wide, is required rather than per-check: the
+ * shared per-budget resolution context is bound to the request options on
+ * first use, so a check resolving with a different options object would fail
+ * closed with `resolution_context_mismatch`.
+ *
+ * That attempt log alone cannot carry a verdict, and two checks here depend
+ * on more than it can prove, so both read a second, coarser log
+ * (`EvidenceRunState.resolutions`) fed by the shared canonical resolution
+ * layer's own cache boundary:
+ *
+ * - `evidence.graph` proves fan-in dedup by counting LOGICAL resolutions of
+ *   a canonical target, not HTTP attempts. `client/http.ts` restarts a retry
+ *   from the original URL, so one resolution that transiently retried
+ *   records that URL twice — counting attempts would report a conforming
+ *   deployment's ordinary transient behavior as a dedup defect.
+ * - `evidence.security` proves `source.url`/`publisher.url` were never
+ *   traversed from request PROVENANCE — which decision point asked for a URL
+ *   — instead of from URL equality against a flat run-wide list, where a
+ *   metadata URL that legitimately equals an explicitly supplied sample URL
+ *   is indistinguishable from one the run followed out of metadata.
+ *
+ * Every request is attributed to the phase that initiated it
+ * (`EvidenceCheckContext.withPurpose`), so a check can exclude requests it
+ * itself asked for, and both sides of any URL comparison are canonicalized
+ * with `normalizeTargetUrl` — the same canonicalizer the traversal's own
+ * dedup key uses.
  */
 import { fetchEntity, discover, type ClientOptions, type EntityV1 } from "../../../../client/v1.0/index.js";
 import { checksumOf } from "../../../../canonical-json/checksum.js";
@@ -27,7 +46,8 @@ import { validateEvidenceEntityV1, type EvidenceEntityValidationResult } from ".
 import { classifyEvidenceFreshness, evidenceContentDate } from "../client/freshness.js";
 import { resolveAnswerEvidenceV1, resolveClaimEvidenceV1 } from "../client/resolve.js";
 import type { EvidenceGraph } from "../client/types.js";
-import type { RelationsTraversalBudgetState } from "../../../relations/v1.0/client/budget.js";
+import { normalizeTargetUrl, canonicalTargetKey, type RelationsTraversalBudgetState } from "../../../relations/v1.0/client/budget.js";
+import type { CanonicalResolutionEvent } from "../../../shared/canonical-resolution.js";
 import type { EvidenceClaimDocumentV1, EvidenceDocumentV1, EvidenceAccessV1 } from "../types.js";
 import type { EvidenceConformanceOptions, CheckResult, CheckStatus } from "./types.js";
 
@@ -54,6 +74,48 @@ export class EvidenceCheckSignal extends Error {
   }
 }
 
+/**
+ * What this run was doing when it initiated a request — recorded at the call
+ * site that starts the work, never inferred afterwards. `unattributed` is a
+ * request made outside any phase this runner opened, which is a bug in the
+ * runner rather than a verdict about the deployment.
+ */
+export type EvidenceRequestPurpose =
+  | "discovery"
+  | "sample-claim"
+  | "sample-evidence"
+  | "sample-answer"
+  | "claim-graph"
+  | "answer-graph"
+  | "unattributed";
+
+/** One HTTP attempt (original, retry or redirect hop — ADR-0008 granularity). */
+export interface EvidenceRequestRecord {
+  url: string;
+  /** `url` under the traversal's own canonicalizer — the only form ever compared against a document-supplied URL. */
+  normalizedUrl: string;
+  purpose: EvidenceRequestPurpose;
+}
+
+/** One logical canonical-target resolution, with the phase that asked for it. */
+export interface EvidenceResolutionRecord extends CanonicalResolutionEvent {
+  normalizedUrl: string;
+  purpose: EvidenceRequestPurpose;
+}
+
+/** Phases in which a request can only have come from walking document references. */
+const TRAVERSAL_PURPOSES = new Set<EvidenceRequestPurpose>(["claim-graph", "answer-graph"]);
+
+/**
+ * The decision points an Evidence walk is allowed to resolve a target from —
+ * the `context` strings `resolve.ts` passes to the shared canonical resolver,
+ * i.e. a DECLARED reference. Any other context resolving a `source.url` /
+ * `publisher.url` means the walk followed metadata (specification.md §13).
+ * A declared reference that happens to name the same URL as some document's
+ * metadata is a reference, not a metadata traversal.
+ */
+const REFERENCE_CONTEXT = /^evidence\.(evidence_refs|related_entities)\[\d+\]$/;
+
 export interface EvidenceRunState {
   moduleDeclaration?: { id: string; version: string; schema: string };
   claimEntity?: EntityV1;
@@ -63,8 +125,12 @@ export interface EvidenceRunState {
   evidenceValidation?: EvidenceEntityValidationResult;
   claimWrapperValidation?: ModuleValidationResult;
   evidenceWrapperValidation?: ModuleValidationResult;
-  /** Every URL this run attempted, in order — see module docstring. */
-  requestedUrls: string[];
+  /** Every HTTP attempt this run made, in order, with its purpose — see module docstring. */
+  requests: EvidenceRequestRecord[];
+  /** Every logical canonical-target resolution this run made, in order — see module docstring. */
+  resolutions: EvidenceResolutionRecord[];
+  /** The phase currently initiating requests. Maintained by `EvidenceCheckContext.withPurpose`. */
+  purpose: EvidenceRequestPurpose;
 }
 
 export interface EvidenceCheckContext {
@@ -72,6 +138,8 @@ export interface EvidenceCheckContext {
   client: ClientOptions;
   budget: RelationsTraversalBudgetState;
   state: EvidenceRunState;
+  /** Runs `fn` with every request it initiates attributed to `purpose` — request provenance, recorded at the decision point. */
+  withPurpose: <T>(purpose: EvidenceRequestPurpose, fn: () => Promise<T>) => Promise<T>;
   skip: (message: string, details?: string[]) => never;
   inconclusive: (message: string, details?: string[]) => never;
   warn: (message: string, details?: string[]) => never;
@@ -94,7 +162,7 @@ async function ensureClaimEntity(ctx: EvidenceCheckContext): Promise<EntityV1> {
   if (ctx.state.claimEntity) return ctx.state.claimEntity;
   const url = ctx.options.sampleClaimUrl;
   if (!url) return ctx.inconclusive("options.sampleClaimUrl was not supplied; cannot exercise this check against a live target.");
-  const entity = await fetchEntity(url, ctx.client, ctx.budget);
+  const entity = await ctx.withPurpose("sample-claim", () => fetchEntity(url, ctx.client, ctx.budget));
   ctx.state.claimEntity = entity;
   return entity;
 }
@@ -103,7 +171,7 @@ async function ensureEvidenceEntity(ctx: EvidenceCheckContext): Promise<EntityV1
   if (ctx.state.evidenceEntity) return ctx.state.evidenceEntity;
   const url = ctx.options.sampleEvidenceUrl;
   if (!url) return ctx.inconclusive("options.sampleEvidenceUrl was not supplied; cannot exercise this check against a live target.");
-  const entity = await fetchEntity(url, ctx.client, ctx.budget);
+  const entity = await ctx.withPurpose("sample-evidence", () => fetchEntity(url, ctx.client, ctx.budget));
   ctx.state.evidenceEntity = entity;
   return entity;
 }
@@ -146,14 +214,31 @@ function danglingEntries(graph: EvidenceGraph): string[] {
   return bad;
 }
 
-/** URLs this run attempted more than once — the observable form of "one fetch per canonical target per walk". */
-function refetched(urls: string[], candidates: Iterable<string>): string[] {
-  const counts = new Map<string, number>();
-  for (const url of urls) counts.set(url, (counts.get(url) ?? 0) + 1);
+/**
+ * Canonical targets that one walk resolved from scratch more than once — the
+ * observable form of "one fetch per canonical target per walk".
+ *
+ * Counts `kind: "fetch"` resolutions only: `cache`/`join` are dedup WORKING
+ * (a second reference replaying a settled outcome, or joining the one
+ * in-flight fetch), and both are expected for a fan-in graph. Retries and
+ * redirects are invisible here by construction — they happen inside a single
+ * `fetch` resolution — so a transient failure that a configured retry
+ * recovered from can never be reported as a dedup defect.
+ */
+function reresolved(resolutions: EvidenceResolutionRecord[], candidateKeys: Set<string>): string[] {
+  const counts = new Map<string, { url: string; count: number }>();
+  for (const resolution of resolutions) {
+    if (resolution.kind !== "fetch" || !candidateKeys.has(resolution.key)) continue;
+    // Counted per canonical key, not per URL: two references declaring
+    // DIFFERENT ids for one URL are two different targets, and resolving both
+    // is correct, not a dedup defect.
+    const seen = counts.get(resolution.key);
+    if (seen) seen.count++;
+    else counts.set(resolution.key, { url: resolution.url, count: 1 });
+  }
   const offenders: string[] = [];
-  for (const candidate of candidates) {
-    const count = counts.get(candidate) ?? 0;
-    if (count > 1) offenders.push(`${candidate} fetched ${count} times`);
+  for (const { url, count } of counts.values()) {
+    if (count > 1) offenders.push(`${url} resolved ${count} times`);
   }
   return offenders;
 }
@@ -165,7 +250,7 @@ export const EVIDENCE_CHECKS: EvidenceCheck[] = [
     title: "Manifest declares aadp:evidence@1.0 with {id, version, schema}",
     async run(ctx) {
       if (!ctx.options.baseUrl) return ctx.inconclusive("options.baseUrl was not supplied.");
-      const manifest = await discover(ctx.options.baseUrl, ctx.client, ctx.budget);
+      const manifest = await ctx.withPurpose("discovery", () => discover(ctx.options.baseUrl!, ctx.client, ctx.budget));
       const declared = manifest.modules?.find((m) => m.id === MODULE_ID);
       if (!declared) return ctx.inconclusive(`Manifest at ${ctx.options.baseUrl} does not declare module "${MODULE_ID}".`);
       if (declared.version !== MODULE_VERSION) {
@@ -277,9 +362,9 @@ export const EVIDENCE_CHECKS: EvidenceCheck[] = [
         return ctx.inconclusive("Sample claim's x_evidence is not itself valid; skipping graph resolution.");
       }
       const claim = xEvidenceOf(ctx.state.claimEntity!) as EvidenceClaimDocumentV1;
-      const before = ctx.state.requestedUrls.length;
-      const graph = await resolveClaimEvidenceV1(claim, { ...ctx.client, budget: ctx.budget });
-      const attempted = ctx.state.requestedUrls.slice(before);
+      const before = ctx.state.resolutions.length;
+      const graph = await ctx.withPurpose("claim-graph", () => resolveClaimEvidenceV1(claim, { ...ctx.client, budget: ctx.budget }));
+      const resolved = ctx.state.resolutions.slice(before);
 
       const bad = danglingEntries(graph);
       if (bad.length > 0) return ctx.fail(`${bad.length} reference(s) in the claim's graph are dangling (not-found/invalid).`, bad);
@@ -288,11 +373,13 @@ export const EVIDENCE_CHECKS: EvidenceCheck[] = [
       }
 
       // Fan-in: several refs may name one evidence target — it must be
-      // fetched exactly once per walk. Distinct target URLs are the
-      // observable proxy for the canonical keys the walk deduplicated on.
-      const targetUrls = new Set(claim.evidence_refs.map((ref) => ref.target.url));
-      const offenders = refetched(attempted, targetUrls);
-      if (offenders.length > 0) return ctx.fail("An evidence target was fetched more than once in one walk (fan-in dedup failed).", offenders);
+      // resolved exactly once per walk. Compared on the walk's own canonical
+      // `{id, normalizedUrl}` keys, and counted per LOGICAL resolution, so
+      // neither an equivalent URL spelling nor a retried HTTP attempt can
+      // change the verdict (see `reresolved`).
+      const targetKeys = new Set(claim.evidence_refs.map((ref) => canonicalTargetKey(ref.target.id, ref.target.url)));
+      const offenders = reresolved(resolved, targetKeys);
+      if (offenders.length > 0) return ctx.fail("An evidence target was resolved more than once in one walk (fan-in dedup failed).", offenders);
     },
   },
   {
@@ -351,7 +438,7 @@ export const EVIDENCE_CHECKS: EvidenceCheck[] = [
     async run(ctx) {
       const url = ctx.options.sampleAnswerUrl;
       if (!url) return ctx.inconclusive("options.sampleAnswerUrl was not supplied; there is no Answer to link from.");
-      const entity = await fetchEntity(url, ctx.client, ctx.budget);
+      const entity = await ctx.withPurpose("sample-answer", () => fetchEntity(url, ctx.client, ctx.budget));
       ctx.state.answerEntity = entity;
 
       // Evidence integration must not change what Answer 1.0 accepts: the
@@ -370,16 +457,24 @@ export const EVIDENCE_CHECKS: EvidenceCheck[] = [
         return ctx.inconclusive("Sample answer's related_entities cite no claim or evidence target.");
       }
 
-      const sourceTargetUrls =
-        answer.authorship.kind === "generated-summary" ? answer.authorship.source_targets.map((t) => t.target.url) : [];
-      const before = ctx.state.requestedUrls.length;
-      const graph = await resolveAnswerEvidenceV1(answer, { ...ctx.client, budget: ctx.budget });
-      const attempted = ctx.state.requestedUrls.slice(before);
+      // A source target that is ALSO a cited claim/evidence reference is
+      // legitimately resolved through that reference — excluded, so this
+      // check cannot fail an answer that happens to cite one of its own
+      // generation sources.
+      const citedUrls = new Set(cited.map((r) => normalizeTargetUrl(r.target.url)));
+      const sourceTargetUrls = (answer.authorship.kind === "generated-summary" ? answer.authorship.source_targets : [])
+        .map((t) => normalizeTargetUrl(t.target.url))
+        .filter((target) => !citedUrls.has(target));
+      const before = ctx.state.resolutions.length;
+      const graph = await ctx.withPurpose("answer-graph", () => resolveAnswerEvidenceV1(answer, { ...ctx.client, budget: ctx.budget }));
+      const walkResolutions = ctx.state.resolutions.slice(before);
+      const resolvedUrls = new Set(walkResolutions.map((r) => r.normalizedUrl));
 
       // `authorship.source_targets` is out of scope for Evidence and must
-      // never be fetched by this helper (specification.md §15) — a
-      // verifiable consequence, not a note.
-      const leaked = sourceTargetUrls.filter((target) => attempted.includes(target));
+      // never be resolved by this helper (specification.md §15) — a
+      // verifiable consequence, not a note. Read from what the walk decided
+      // to resolve, canonicalized on both sides.
+      const leaked = sourceTargetUrls.filter((target) => resolvedUrls.has(target));
       if (leaked.length > 0) {
         return ctx.fail("resolveAnswerEvidenceV1 fetched authorship.source_targets, which are out of scope for Evidence.", leaked);
       }
@@ -387,6 +482,15 @@ export const EVIDENCE_CHECKS: EvidenceCheck[] = [
       const bad = danglingEntries(graph);
       if (bad.length > 0) return ctx.fail(`${bad.length} reference(s) in the answer's citation graph are dangling.`, bad);
       if (graph.partial) return ctx.inconclusive("Answer expansion stopped early (budget exhausted or aborted).");
+
+      // This is where fan-in actually happens: one claim may not list the
+      // same canonical target twice (`evidence.semantic.duplicate_target`),
+      // but two claims cited by one answer may both cite one evidence
+      // document — and it must still be resolved exactly once per walk.
+      const refetchedTargets = reresolved(walkResolutions, new Set(walkResolutions.map((r) => r.key)));
+      if (refetchedTargets.length > 0) {
+        return ctx.fail("A target was resolved more than once in one answer walk (fan-in dedup failed).", refetchedTargets);
+      }
 
       const resolvedClaims = graph.nodes.filter((n) => n.status === "resolved" && n.kind === "claim");
       if (resolvedClaims.length > 0 && graph.edges.length === 0) {
@@ -397,7 +501,7 @@ export const EVIDENCE_CHECKS: EvidenceCheck[] = [
   {
     id: "evidence.security",
     group: "security",
-    title: "Free text is inert, source URLs are never fetched, and access grants nothing",
+    title: "Free text is inert, source URLs are never traversed, and access grants nothing",
     requires: ["evidence.resource"],
     async run(ctx) {
       const offending: string[] = [];
@@ -405,14 +509,48 @@ export const EVIDENCE_CHECKS: EvidenceCheck[] = [
       const evidence = ctx.state.evidenceEntity ? (xEvidenceOf(ctx.state.evidenceEntity) as EvidenceDocumentV1 | undefined) : undefined;
       if (!claim && !evidence) return ctx.inconclusive("No sample x_evidence document to scan.");
 
-      // `source.url`/`publisher.url` are metadata: no run may ever request
-      // them (specification.md §13). This is a hard failure, not a warning —
-      // it would be an SSRF vector driven by document content.
+      // `source.url`/`publisher.url` are metadata: traversing them is
+      // forbidden (specification.md §13). A hard failure, not a warning — it
+      // would be an SSRF vector driven by document content.
+      //
+      // The failing condition is a request the run made BECAUSE of a
+      // metadata field, which is why both signals below are provenance-based
+      // rather than "this URL appears somewhere in the request log": a
+      // metadata URL may legitimately be requested for another role (it can
+      // be the very URL supplied as `options.sampleEvidenceUrl`), and that is
+      // not a traversal. Every comparison canonicalizes both sides with the
+      // traversal's own `normalizeTargetUrl`, so equivalent spellings
+      // (`https://example.com` vs `https://example.com/`) cannot evade it.
       if (evidence) {
-        const metadataUrls = [evidence.source.url, evidence.source.publisher.url].filter((u): u is string => typeof u === "string");
-        const fetched = metadataUrls.filter((u) => ctx.state.requestedUrls.includes(u));
-        if (fetched.length > 0) {
-          return ctx.fail("A source/publisher metadata URL was fetched; those are never traversed.", fetched);
+        const metadataFields: Array<[string, string]> = [
+          ["source.url", evidence.source.url],
+          ["source.publisher.url", evidence.source.publisher.url],
+        ].filter((entry): entry is [string, string] => typeof entry[1] === "string");
+        const metadataUrls = new Map(metadataFields.map(([field, url]) => [normalizeTargetUrl(url), field]));
+
+        // 1. The traversal resolved a metadata URL from somewhere that is not
+        //    a declared reference — the decision point itself, recorded where
+        //    the decision was made rather than inferred afterwards.
+        const traversed = ctx.state.resolutions
+          .filter((resolution) => metadataUrls.has(resolution.normalizedUrl) && !REFERENCE_CONTEXT.test(resolution.context))
+          .map((resolution) => `${metadataUrls.get(resolution.normalizedUrl)} (${resolution.url}) resolved by ${resolution.context}`);
+
+        // 2. A request made DURING a graph walk that no canonical resolution
+        //    accounts for — the path a resolver bypassing the shared layer
+        //    would take. Requests this runner itself initiated (discovery,
+        //    the sample fetches) are excluded by purpose, and a metadata URL
+        //    that is also a legitimately resolved graph target is accounted
+        //    for by that resolution.
+        const resolvedUrls = new Set(ctx.state.resolutions.map((resolution) => resolution.normalizedUrl));
+        const unaccounted = ctx.state.requests
+          .filter(
+            (request) =>
+              TRAVERSAL_PURPOSES.has(request.purpose) && metadataUrls.has(request.normalizedUrl) && !resolvedUrls.has(request.normalizedUrl)
+          )
+          .map((request) => `${metadataUrls.get(request.normalizedUrl)} (${request.url}) requested during ${request.purpose}`);
+
+        if (traversed.length > 0 || unaccounted.length > 0) {
+          return ctx.fail("A source/publisher metadata URL was traversed; those are metadata, never edges.", [...traversed, ...unaccounted]);
         }
 
         // `access` is presentation metadata and must change no outcome

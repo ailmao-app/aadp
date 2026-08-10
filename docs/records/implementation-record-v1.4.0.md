@@ -203,5 +203,20 @@ in open gate 2 is what would prove interoperability.
 - **The Evidence conformance runner installs one run-wide request log.** It must
   be a single `ClientOptions` object for the whole run, because the shared
   per-budget state binds to the request options on first use — a per-check hook
-  would fail closed with `resolution_context_mismatch`. That log is also what
-  makes fan-in dedup and "no metadata URL was ever fetched" observable at all.
+  would fail closed with `resolution_context_mismatch`.
+- **Two verdicts read a second, coarser log than that one.** An HTTP-attempt log
+  cannot carry either of them. `evidence.graph`/`evidence.answer_link` must
+  count LOGICAL resolutions of a canonical target: `client/http.ts` restarts a
+  retry from the original URL, so counting attempts would report a conforming
+  deployment whose target transiently returned `429`/`503` as a fan-in dedup
+  defect. And `evidence.security` must decide metadata traversal from
+  PROVENANCE — which decision point asked for a URL — since a `source.url` that
+  equals the supplied `sampleEvidenceUrl` is requested legitimately, while URL
+  equality alone would both reject that conforming run and miss a real
+  traversal spelled differently. Both read
+  `observeCanonicalResolutions` (the shared resolution layer's own cache
+  boundary, instrumentation-only and keyed by the caller-owned budget, so no
+  module's public resolve options grow a hook and the resolution-context digest
+  is untouched) plus a `purpose` recorded around each phase the runner opens.
+  Every URL comparison canonicalizes both sides with `normalizeTargetUrl`, the
+  canonicalizer behind `canonicalTargetKey`.
