@@ -155,7 +155,8 @@ export async function runRelationsConformance(options: RelationsConformanceOptio
   // document, mirroring core `ConformanceOptions`' "omitting profile is
   // exactly core" (`../../../../conformance/types.js`).
   const profile: RelationsConformanceProfile = options.profile ?? "relations-core";
-  // "relations-authenticated: full với explicit test credential provider"
+  // "relations-authenticated: the full profile with an explicit test
+  // credential provider"
   // (spec/modules/relations/v1.0/conformance.md §"Profiles") — without
   // `headers`, this profile has nothing distinguishing it from
   // `relations-full`, so treat it as a configuration error rather than

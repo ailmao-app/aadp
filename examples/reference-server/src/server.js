@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { buildAadpServer } from "./aadp.js";
+import { handleModuleSchemaRequest } from "./resources/module-schemas.js";
 
 /**
  * `defineAADP()` returns a plain `(Request) => Promise<Response>` — no
@@ -55,6 +56,10 @@ export function startReferenceServer({
         const url = new URL(request.url);
         if (url.pathname === "/robots.txt") return staticText("User-agent: *\nAllow: /\n");
         if (url.pathname === "/terms") return staticText("Example terms of use.\n");
+        // Served by this deployment because its manifest advertises them —
+        // see `handleModuleSchemaRequest`.
+        const schema = await handleModuleSchemaRequest(url);
+        if (schema) return schema;
         return aadp.handleRequest(request);
       })
       .then((response) => writeFetchResponse(response, res))
@@ -75,9 +80,13 @@ export function startReferenceServer({
       // An explicit `baseUrl` (e.g. the public domain a reverse proxy
       // fronts this server with) always wins; otherwise fall back to the
       // address actually bound, for local/dev use.
-      publishedBaseUrl = baseUrl ?? `http://${host}:${resolvedPort}`;
+      const boundUrl = `http://${host}:${resolvedPort}`;
+      publishedBaseUrl = baseUrl ?? boundUrl;
       aadp = buildAadpServer(publishedBaseUrl, { useCustomRoutes });
-      resolve({ server, baseUrl: publishedBaseUrl });
+      // `boundUrl` is where this process can actually be reached; behind a
+      // reverse proxy that is never the origin it publishes, so callers
+      // (and the log line below) need both.
+      resolve({ server, baseUrl: publishedBaseUrl, boundUrl });
     });
   });
 }
@@ -88,7 +97,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // Set this when running behind a reverse proxy or under a real domain —
   // otherwise the published origin defaults to the address bound above.
   const baseUrl = process.env.AADP_BASE_URL;
-  const { baseUrl: resolvedBaseUrl } = await startReferenceServer({ port, useCustomRoutes, baseUrl });
+  const { baseUrl: resolvedBaseUrl, boundUrl } = await startReferenceServer({ port, useCustomRoutes, baseUrl });
   console.log(`AADP reference server listening on ${resolvedBaseUrl}`);
+  if (boundUrl !== resolvedBaseUrl) console.log(`Bound to ${boundUrl}`);
   console.log(`Manifest: ${resolvedBaseUrl}/.well-known/ai-manifest.json`);
 }

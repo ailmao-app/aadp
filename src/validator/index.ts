@@ -23,6 +23,7 @@ export {
   type SemanticIssue,
   type SemanticIssueLevel,
 } from "./semantic.js";
+export { EXTENSION_KEY_GRAMMAR, isExtensionKey } from "./extension-keys.js";
 
 export interface ValidationResult {
   valid: boolean;

@@ -12,7 +12,7 @@
  * and picks an exit code. Every conformance decision lives in
  * `./checks.ts` / `./runner.ts`, so the CLI and a programmatic caller can
  * never disagree about what "conformant" means
- * (`docs/vi/plans/implementation-plan.md` §11 "Ưu tiên 1").
+ * (`docs/vi/plans/implementation-plan.md` §11, priority 1).
  */
 import { writeFileSync } from "node:fs";
 import { Command, CommanderError, InvalidArgumentError } from "commander";

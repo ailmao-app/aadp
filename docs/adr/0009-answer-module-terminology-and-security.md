@@ -1,113 +1,119 @@
-# ADR-0009: Answer Module terminology và security boundary
+# ADR-0009: Answer Module terminology and security boundary
 
 ## Status
 
-Accepted — áp dụng từ Answer Module `1.0` và package `ail-aadp@1.3.0`.
+Accepted — applies from Answer Module `1.0` and package `ail-aadp@1.3.0`.
 
 ## Context
 
-Design draft trước đó cho Answer dùng thuật ngữ `short_answer` và một field
-`x_answer.canonical_url` riêng, và chưa chốt: (a) tên field chính thức cho câu
-trả lời ngắn, (b) integrity digest nào bảo vệ nội dung Answer khi core checksum
-chỉ bao phủ `data`, (c) URL human-facing của một Answer entity dùng field nào,
-và (d) ranh giới rõ ràng giữa Answer `1.0` và Evidence & Provenance Module
-`1.4.0` (claim/citation) để tránh Answer `1.0` âm thầm gánh trách nhiệm evidence.
+An earlier design draft for Answer used the term `short_answer` and a separate
+`x_answer.canonical_url` field, and had not settled: (a) the official field name
+for the short answer, (b) which integrity digest protects Answer content given
+that the core checksum only covers `data`, (c) which field carries the
+human-facing URL of an Answer entity, and (d) a clear boundary between Answer
+`1.0` and the Evidence & Provenance Module `1.4.0` (claim/citation), so that
+Answer `1.0` does not quietly take on evidence responsibilities.
 
-Implementation không được bắt đầu cho tới khi các quyết định contract này được
-Accepted, vì chúng ảnh hưởng trực tiếp field bắt buộc, discriminator và
-reference model của wire schema.
+Implementation was not allowed to start until these contract decisions were
+Accepted, because they directly affect the wire schema's required fields,
+discriminator and reference model.
 
 ## Decision
 
-### Thuật ngữ `concise_answer`
+### The term `concise_answer`
 
-Field câu trả lời ngắn chính thức là `concise_answer`, không phải
-`short_answer`. Design draft/document cũ dùng `short_answer` MUST được cập nhật;
-wire schema Answer `1.0` KHÔNG hỗ trợ alias `short_answer` — một document dùng
-alias này bị từ chối bởi `additionalProperties: false` (thiếu field bắt buộc
-`concise_answer`).
+The official field for the short answer is `concise_answer`, not
+`short_answer`. Older design drafts and documents using `short_answer` MUST be
+updated; the Answer `1.0` wire schema does NOT support the alias — a document
+using it is rejected by `additionalProperties: false` (and by the missing
+required `concise_answer`).
 
-### `content_checksum` — integrity digest riêng cho `x_answer`
+### `content_checksum` — a dedicated integrity digest for `x_answer`
 
-Core checksum chỉ tính trên `data`; vì mọi field normative của Answer nằm trong
-`x_answer`, core checksum không phát hiện được thay đổi nội dung Answer. Answer
-Module `1.0` định nghĩa `x_answer.content_checksum` làm digest bổ sung:
+The core checksum is computed over `data` only; since every normative Answer
+field lives in `x_answer`, the core checksum cannot detect a change to Answer
+content. Answer Module `1.0` therefore defines `x_answer.content_checksum` as an
+additional digest:
 
-- Phạm vi hash: `x_answer` sau khi loại bỏ chính field `content_checksum`.
-- Thuật toán/canonicalization tái sử dụng nguyên trạng ADR-0001 và
-  `ail-aadp/canonical-json` (`canonicalize()`/`checksumOf()`) — không định nghĩa
-  canonicalization rule mới.
-- Đây là bổ sung cho, không thay thế, core checksum; một entity Answer hợp lệ
-  phải pass cả hai.
-- `content_checksum` không phải chữ ký chống producer gian dối và không thay
-  thế transport integrity (TLS) — nó chỉ phát hiện tampering trên field nằm
-  trong phạm vi hash.
+- Hash scope: `x_answer` with the `content_checksum` field itself removed.
+- Algorithm and canonicalization reuse ADR-0001 and `ail-aadp/canonical-json`
+  (`canonicalize()`/`checksumOf()`) as released — no new canonicalization rule
+  is defined.
+- It is in addition to, not a replacement for, the core checksum; a valid Answer
+  entity MUST pass both.
+- `content_checksum` is not a signature against a dishonest producer and does
+  not replace transport integrity (TLS) — it only detects tampering with fields
+  inside the hash scope.
 
-### Tái sử dụng `entity.canonical_url`, không có field riêng trong `x_answer`
+### Reuse `entity.canonical_url`; no separate field in `x_answer`
 
-Answer `1.0` KHÔNG định nghĩa `x_answer.canonical_url`. Answer entity dùng lại
-core `entity.canonical_url` làm URL human-facing duy nhất cho mọi consumer,
-core-only lẫn Answer-aware — loại bỏ khả năng hai consumer cite hai URL khác
-nhau cho cùng entity. `entity.canonical_url` trở thành bắt buộc đối với entity
-`type: "answer"` ở entity-context validator (không phải core schema, vốn giữ
-field này optional cho mọi entity type khác). Vì core v1.0 chỉ validate
-`format: uri`, entity-context validator tự thực thi URL policy chặt hơn (§ dưới)
-dùng chung với `author.url`.
+Answer `1.0` does NOT define `x_answer.canonical_url`. An Answer entity reuses
+the core `entity.canonical_url` as the single human-facing URL for every
+consumer, core-only and Answer-aware alike — removing any possibility of two
+consumers citing two different URLs for the same entity. `entity.canonical_url`
+becomes mandatory for entities of `type: "answer"` at the entity-context
+validator (not in the core schema, which keeps the field optional for every
+other entity type). Because core v1.0 only validates `format: uri`, the
+entity-context validator enforces a stricter URL policy itself (see below),
+shared with `author.url`.
 
-### Shared URL policy: absolute HTTPS, không userinfo, không fragment
+### Shared URL policy: absolute HTTPS, no userinfo, no fragment
 
-`entity.canonical_url` và `authorship.author.url` dùng cùng một pure-parsing
-policy: scheme phải là `https:`, không có userinfo, không có fragment. Đây là
-Answer entity/wrapper-context rule, không phải core v1.0 policy — core
-schema/validator giữ nguyên permissive cho entity type khác. Vi phạm dùng mã
-`answer.semantic.canonical_url_policy_violation` /
+`entity.canonical_url` and `authorship.author.url` use one pure-parsing policy:
+the scheme MUST be `https:`, with no userinfo and no fragment. This is an Answer
+entity/wrapper-context rule, not a core v1.0 policy — the core schema and
+validator stay permissive for other entity types. Violations use the codes
+`answer.semantic.canonical_url_policy_violation` and
 `answer.semantic.author_url_policy_violation`.
 
-### Ranh giới với Evidence & Provenance Module
+### Boundary with the Evidence & Provenance Module
 
-Answer `1.0` KHÔNG có field `evidence`, `claims` hay `citations`. `source_targets`
-trong `generated-summary` chỉ biểu thị input source của bản tóm tắt — nó KHÔNG
-chứng minh factual truth, support hay citation validity. Rule "fact kiểm chứng
-được phải có evidence" là content governance advisory cho rollout Evidence
-Module `1.4.0`, KHÔNG phải Answer `1.0` schema/semantic invariant. Evidence
-Module `1.4.0` sẽ liên kết bằng module riêng/Relations contract và KHÔNG được
-âm thầm thêm field vào Answer `1.0` đã release.
+Answer `1.0` has no `evidence`, `claims` or `citations` field. `source_targets`
+inside `generated-summary` denotes only the input sources of the summary — it
+does NOT prove factual truth, support, or citation validity. The rule "a
+verifiable fact must carry evidence" is content-governance advice for the
+Evidence Module `1.4.0` rollout, NOT an Answer `1.0` schema or semantic
+invariant. Evidence Module `1.4.0` will link through its own module and the
+Relations contract, and MUST NOT quietly add fields to the released Answer
+`1.0`.
 
-### Security: free text luôn là untrusted data
+### Security: free text is always untrusted data
 
-`question`, `concise_answer`, `answer`, author name và applicability `notes` là
-untrusted text. Package KHÔNG render, execute, interpolate vào system
-prompt/shell/HTML/executable template, không parse instruction từ chúng, và
-không dereference URL xuất hiện bên trong free text. Đây là behavior bắt buộc
-kiểm chứng ở conformance check `answer.security` (advisory scan, không phải
-absence proof — xem `spec/modules/answer/v1.0/conformance.md` §7) và ở test
-suite (`prompt-injection-shaped` fixture PHẢI vẫn schema/semantic-valid, không
-bị coi là invalid nội dung).
+`question`, `concise_answer`, `answer`, author names and applicability `notes`
+are untrusted text. The package does NOT render, execute or interpolate them
+into a system prompt, shell, HTML or executable template; does not parse
+instructions out of them; and does not dereference URLs that appear inside free
+text. This behaviour is verified by the conformance check `answer.security` (an
+advisory scan, not an absence proof — see
+`spec/modules/answer/v1.0/conformance.md` §7) and by the test suite (the
+`prompt-injection-shaped` fixture MUST remain schema- and semantically valid,
+never treated as invalid because of its content).
 
-### Authorship là provenance assertion, không phải chữ ký
+### Authorship is a provenance assertion, not a signature
 
-`authorship` (kể cả `reviewed_by`) là assertion của producer, không phải chữ ký,
-identity verification hay endorsement. Schema/semantic validity không chứng
-minh assertion trung thực; client KHÔNG tự suy luận `source-authored` khi thiếu
-metadata và KHÔNG tự chuyển `kind` sau khi fetch target.
+`authorship` (including `reviewed_by`) is an assertion by the producer, not a
+signature, identity verification or endorsement. Schema and semantic validity do
+not prove the assertion is truthful; a client MUST NOT infer `source-authored`
+from missing metadata, and MUST NOT rewrite `kind` after fetching a target.
 
 ## Consequences
 
-- Wire schema/type/semantic validator/client/conformance đều dùng
-  `concise_answer`, `content_checksum`, và `entity.canonical_url` nhất quán —
-  không còn hai lựa chọn cạnh tranh nhau cho producer.
-- Một implementation cũ gửi `x_answer.canonical_url` hoặc `short_answer` bị từ
-  chối rõ ràng (unknown field / missing required field) thay vì được chấp nhận
-  âm thầm với ngữ nghĩa mơ hồ.
-- `content_checksum` thêm một bước tính digest cho producer, nhưng tái sử dụng
-  100% `checksumOf()` đã released — không thêm thuật toán mới cần audit riêng.
-- Evidence/citation vẫn ngoài phạm vi Answer `1.0`; Answer `1.0` có thể release
-  độc lập với tiến độ Evidence Module `1.4.0`.
+- Wire schema, types, semantic validator, client and conformance all use
+  `concise_answer`, `content_checksum` and `entity.canonical_url` consistently —
+  producers no longer face two competing options.
+- An older implementation sending `x_answer.canonical_url` or `short_answer` is
+  rejected explicitly (unknown field / missing required field) rather than
+  silently accepted with ambiguous meaning.
+- `content_checksum` adds one digest step for producers, but reuses the released
+  `checksumOf()` in full — no new algorithm to audit separately.
+- Evidence and citation stay out of scope for Answer `1.0`, so Answer `1.0` can
+  ship independently of the Evidence Module `1.4.0` schedule.
 
 ## References
 
 - ADR-0001 (checksum algorithm), ADR-0007 (module versioning and discovery),
   ADR-0008 (module traversal and authorization).
-- `docs/vi/plans/implementation-plan-v1.3.0.md` — kế hoạch triển khai gốc, các
-  quyết định trong ADR này copy nguyên trạng "Quyết định contract đã chốt".
+- `docs/vi/plans/implementation-plan-v1.3.0.md` — the original implementation
+  plan; the decisions in this ADR are taken verbatim from its "locked contract
+  decisions" section.
 - `spec/modules/answer/v1.0/specification.md`, `conformance.md`.

@@ -57,6 +57,21 @@ export interface SerializedEntity<T = unknown> {
    * is mandatory rather than defaulting to the raw record.
    */
   data: T;
+  /**
+   * Root-level `x_*` extension fields (module payloads) emitted alongside
+   * the core entity fields. Keys MUST match the released core entity grammar `^x_[a-zA-Z0-9_]*$`
+   * (`isExtensionKey()`); anything else makes `entity()` fail loudly rather
+   * than silently dropping the field.
+   *
+   * A named field rather than arbitrary properties on `SerializedEntity`:
+   * arbitrary properties would turn every typo into a wire field and would
+   * block ever adding a new core field to this interface.
+   *
+   * Extensions never take part in the core `checksum`, which stays scoped to
+   * `data` — adding an extension to an already-published entity MUST NOT
+   * change its checksum.
+   */
+  extensions?: Record<string, unknown>;
 }
 
 export interface ResourceConfig<T> {
@@ -108,6 +123,14 @@ export interface AadpServerConfig {
   policies: ManifestV1["policies"];
   usageGuidance?: ManifestV1["usage_guidance"];
   securitySchemes?: ManifestV1["security_schemes"];
+  /**
+   * Module declarations published in the manifest's `modules[]`, e.g.
+   * `[{ id: "vendor:example", version: "1.0", schema: "https://..." }]`.
+   * Generic: the runtime never inspects which module an entry names, and
+   * never registers or imports a module implementation. Declare a module
+   * only once its resources and schema artifacts are actually served.
+   */
+  modules?: ManifestV1["modules"];
   resources: ResourceDefinition<any>[];
   /** `Cache-Control: max-age` for manifest, sitemap and entity responses. Default 300. */
   cacheMaxAgeSeconds?: number;

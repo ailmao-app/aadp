@@ -1,7 +1,7 @@
 /**
  * Injected-clock freshness classifier (specification.md "Freshness
- * contract" — "Client helper phân loại fresh hoặc stale dựa trên injected
- * clock; không dùng wall clock trong pure validator"). Pure: takes `now`
+ * contract" — "the client helper classifies fresh/stale using an injected
+ * clock; the pure validator never uses the wall clock"). Pure: takes `now`
  * as a parameter rather than reading `Date.now()` itself.
  */
 import type { AnswerDocumentV1 } from "../types.js";

@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/modules/evidence/v1.0/module.schema.json",
+  "title": "AADP Evidence Module v1.0 — Module schema dispatch",
+  "description": "The schema URL a manifest's `modules[]` entry points at (specification.md §2). Evidence `1.0` has exactly two top-level document kinds, `claim` and `evidence`, discriminated by their `kind` constants. This schema MUST NOT be used to validate the manifest discovery entry `{id, version, schema}` itself, which is validated by the core manifest schema v1.0.",
+  "oneOf": [{ "$ref": "claim.schema.json" }, { "$ref": "evidence.schema.json" }]
+}

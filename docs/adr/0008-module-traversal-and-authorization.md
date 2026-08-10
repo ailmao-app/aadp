@@ -1,20 +1,22 @@
-# ADR-0008: Shared module traversal budget và authorization boundary
+# ADR-0008: Shared module traversal budget and authorization boundary
 
 ## Status
 
-Accepted — áp dụng từ Relations Module `1.0` và package `ail-aadp@1.2.0`.
+Accepted — applies from Relations Module `1.0` and package `ail-aadp@1.2.0`.
 
 ## Context
 
-ADR-0006 chưa có request counter, graph depth, node count hoặc cross-origin count.
-Module traversal còn phải xử lý authorization, cursor cycle, canonical-target
-deduplication và partial results mà không tạo HTTP/budget riêng cho mỗi module.
+ADR-0006 has no request counter, graph depth, node count or cross-origin count.
+Module traversal additionally has to handle authorization, cursor cycles,
+canonical-target deduplication and partial results — without giving each module
+its own HTTP stack or budget.
 
 ## Decision
 
 ### Shared traversal state
 
-Một traversal tree MUST dùng cùng budget state từ root tới mọi core/module request:
+One traversal tree MUST use the same budget state from the root through every
+core and module request:
 
 ```ts
 interface TraversalBudgetState {
@@ -32,26 +34,28 @@ interface TraversalBudgetState {
 }
 ```
 
-Mỗi HTTP attempt, retry và redirect hop charge request trước network. Byte charge
-khi stream body. Canonical target mới charge node; duplicate target không charge
-node lần hai. Root depth là `0`; follow một edge tăng depth một đơn vị.
+Every HTTP attempt, retry and redirect hop charges a request before touching the
+network. Bytes are charged while streaming the body. A new canonical target
+charges a node; a duplicate target does not charge one a second time. Root depth
+is `0`; following an edge increases depth by one.
 
-### Compatibility với 1.1.0
+### Compatibility with 1.1.0
 
-Public `DiscoveryBudgetState` không đổi nghĩa. Implementation MAY tạo generic
-state kèm adapter hoặc thêm optional dimensions có defaults tương thích. Không
-alias `maxPages`/`maxEntities` thành `maxRequests`.
+The public `DiscoveryBudgetState` does not change meaning. An implementation MAY
+introduce a generic state with an adapter, or add optional dimensions with
+compatible defaults. Do not alias `maxPages`/`maxEntities` onto `maxRequests`.
 
-### Cycle và cursor
+### Cycles and cursors
 
-Canonical key là `{id, normalizedUrl}`. Client MUST phát hiện cursor lặp,
-deduplicate target, dừng cycle branch và ghi issue provenance. Cursor MUST bind với
-source, relation, target type, ordering và filter; cursor sai context bị từ chối.
+The canonical key is `{id, normalizedUrl}`. A client MUST detect repeated
+cursors, deduplicate targets, stop a cyclic branch and record issue provenance.
+A cursor MUST be bound to its source, relation, target type, ordering and
+filters; a cursor presented in the wrong context is rejected.
 
 ### Authorization
 
-Credential provider nằm ở application boundary. Core/module không lưu credential
-và không tự login/OAuth:
+The credential provider lives at the application boundary. Core and module code
+never stores credentials and never performs login/OAuth itself:
 
 ```text
 validate manifest/security metadata
@@ -62,14 +66,17 @@ validate manifest/security metadata
 → trust discovered URLs only after validation
 ```
 
-Credential MUST bị loại khi đổi origin trừ explicit allow-list. Query credential
-MUST không forward qua redirect. `unauthorized`/`forbidden` không fallback scraping.
+Credentials MUST be dropped when the origin changes, unless an explicit
+allow-list says otherwise. Query-string credentials MUST NOT be forwarded across
+a redirect. `unauthorized`/`forbidden` MUST NOT fall back to scraping.
 
 ### Partial results
 
-Budget, policy, unsupported module/version/kind, cancellation và broken optional
-edge tạo partial result có provenance và MUST NOT được báo complete. Pure validator
-không gọi network; resolution/traversal service dùng shared HTTP/budget.
+Budget exhaustion, policy blocks, an unsupported module/version/kind,
+cancellation and a broken optional edge all produce a partial result with
+provenance, and MUST NOT be reported as complete. Pure validators make no
+network calls; the resolution/traversal service uses the shared HTTP stack and
+budget.
 
 ### Reference defaults
 
@@ -79,18 +86,19 @@ không gọi network; resolution/traversal service dùng shared HTTP/budget.
 | `maxNodes` | 1,000 |
 | `maxRequests` | 2,000 |
 | `maxTotalBytes` | 64 MiB |
-| `deadlineMs` | 5 phút |
+| `deadlineMs` | 5 minutes |
 | `maxCrossOriginRequests` | 100 |
 
-Defaults là client policy, không phải wire contract. Report MUST ghi effective
-limits. Omitting options mới MUST giữ default behavior 1.1.0 cho core-only client.
+Defaults are client policy, not wire contract. A report MUST record the
+effective limits. Omitting the new options MUST preserve 1.1.0 default behaviour
+for a core-only client.
 
 ## Consequences
 
-- HTTP layer cần charge hook trước mỗi network attempt.
-- Relations traversal nằm trong service riêng; pure validators không fetch.
-- Client và conformance dùng chung budget/cycle semantics.
-- Application sở hữu credential, visibility và business mapping.
+- The HTTP layer needs a charge hook before every network attempt.
+- Relations traversal lives in its own service; pure validators do not fetch.
+- The client and the conformance runner share budget and cycle semantics.
+- The application owns credentials, visibility and business mapping.
 
 ## References
 

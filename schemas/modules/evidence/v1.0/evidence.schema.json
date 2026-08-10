@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/modules/evidence/v1.0/evidence.schema.json",
+  "title": "AADP Evidence Module v1.0 — Evidence",
+  "description": "Top-level module document kind `evidence`: the value of an AADP v1.0 entity's `x_evidence` field, on an entity with `type: \"evidence\"` (specification.md §4). An evidence document has NO field pointing back at a claim — the claim owns the only edge (ADR-0010 §2-3) — and `source.url` is metadata that is never traversed, which together make the model acyclic by construction. `summary` and `excerpt` are untrusted free text. Timestamp ordering, `content_checksum` and the `provenance.retrieved_at <= entity.updated_at` ordering are semantic rules, not expressible here.",
+  "type": "object",
+  "required": ["module", "version", "kind", "summary", "locale", "source", "provenance", "content_checksum"],
+  "properties": {
+    "module": { "const": "aadp:evidence" },
+    "version": { "const": "1.0" },
+    "kind": { "const": "evidence" },
+    "summary": { "type": "string", "minLength": 1 },
+    "locale": {
+      "type": "string",
+      "maxLength": 63,
+      "pattern": "^[a-z]{2,3}(-[A-Z][a-z]{3})?(-(?:[A-Z]{2}|[0-9]{3}))?(-(?:[a-z0-9]{5,8}|[0-9][a-z0-9]{3}))*$"
+    },
+    "source": { "$ref": "source.schema.json" },
+    "provenance": { "$ref": "provenance.schema.json" },
+    "content_checksum": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "excerpt": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false
+}

@@ -278,6 +278,25 @@ function isIPv6Literal(hostname: string): boolean {
 }
 
 /**
+ * Checks only an IP literal as written, without resolving DNS or treating a
+ * hostname such as `localhost` specially. This keeps pure metadata validators
+ * aligned with the client's address classification without performing I/O.
+ */
+export function checkNonPublicIpLiteral(hostname: string): string | undefined {
+  if (isIPv6Literal(hostname)) {
+    if (isPrivateIPv6(hostname)) {
+      return `IPv6 address "${hostname}" is not a global-unicast address`;
+    }
+    return undefined;
+  }
+  const ipv4 = parseIPv4(hostname);
+  if (ipv4 && isPrivateIPv4(ipv4)) {
+    return `IPv4 address "${hostname}" is private, loopback, link-local, or reserved`;
+  }
+  return undefined;
+}
+
+/**
  * Default client policy: HTTP(S) only, blocks private/loopback/
  * link-local/CGNAT/multicast destinations. This is what `discover()` and
  * friends use unless a caller supplies a different `UrlPolicy`.
@@ -293,17 +312,7 @@ export function createStrictUrlPolicy(options: StrictUrlPolicyOptions = {}): Url
       if (isLocalHostname(hostname)) {
         return `hostname "${hostname}" resolves to a local/loopback name`;
       }
-      if (isIPv6Literal(hostname)) {
-        if (isPrivateIPv6(hostname)) {
-          return `IPv6 address "${hostname}" is not a global-unicast address`;
-        }
-        return undefined;
-      }
-      const ipv4 = parseIPv4(hostname);
-      if (ipv4 && isPrivateIPv4(ipv4)) {
-        return `IPv4 address "${hostname}" is private, loopback, link-local, or reserved`;
-      }
-      return undefined;
+      return checkNonPublicIpLiteral(hostname);
     },
     checkResolvedAddress(address: string, family: 4 | 6): string | undefined {
       if (family === 6) {

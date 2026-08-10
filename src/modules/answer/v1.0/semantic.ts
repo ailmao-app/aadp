@@ -9,7 +9,7 @@
  * `author.url` policy, and `content_checksum` verification.
  *
  * All error codes use the `answer.semantic.*` prefix (specification.md
- * "Validation result dùng stable machine-readable codes với prefix
+ * "Validation results use stable machine-readable codes with the prefix
  * answer.semantic.*"). Message text is not a stable API.
  */
 import { checksumOf } from "../../../canonical-json/checksum.js";
@@ -61,7 +61,7 @@ export function checkUrlPolicy(url: string): string | undefined {
   return undefined;
 }
 
-/** Unicode code-point length — deliberately not `.length` (UTF-16 code units), per specification.md "not dùng UTF-16 length sai lệch". */
+/** Unicode code-point length — deliberately not `.length` (UTF-16 code units), per specification.md, which counts code points rather than UTF-16 length. */
 function codePointLength(value: string): number {
   return Array.from(value).length;
 }

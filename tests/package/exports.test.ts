@@ -53,7 +53,7 @@ describe("published package: every public entry point resolves from the tarball"
     "client": ["discover", "fetchSitemapIndex", "fetchSitemap", "iterateSitemap", "fetchEntity", "discoverAllEntities", "v1"],
     "client/v0.1": ["discover", "fetchSitemapIndex", "fetchSitemap", "iterateSitemap", "fetchEntity", "discoverAllEntities"],
     "client/v1.0": ["discover", "fetchSitemapIndex", "fetchSitemap", "iterateSitemap", "fetchEntity", "discoverAllEntities", "AadpSemanticValidationError"],
-    "validator": ["validateDocument", "validate", "validateManifest", "UnsupportedAadpVersionError", "SUPPORTED_VERSIONS", "KINDS", "checkManifestSemantics", "hasSemanticErrors"],
+    "validator": ["validateDocument", "validate", "validateManifest", "UnsupportedAadpVersionError", "SUPPORTED_VERSIONS", "KINDS", "checkManifestSemantics", "hasSemanticErrors", "isExtensionKey", "EXTENSION_KEY_GRAMMAR"],
     "module-registry": [
       "registerModule",
       "getModuleEntry",
@@ -137,6 +137,40 @@ describe("published package: every public entry point resolves from the tarball"
       "ANSWER_CHECKS",
       "InvalidAnswerConformanceOptionsError",
     ],
+    "modules/evidence/v1.0": [
+      "registerEvidenceModule",
+      "validateEvidenceV1",
+      "validateEvidenceEntityV1",
+      "parseEvidenceEntityV1",
+      "EvidenceEntityValidationError",
+      "checkEvidenceClaimSemantics",
+      "checkEvidenceSemantics",
+      "isValidEvidenceLocale",
+      "checkUrlPolicy",
+      "claimSchema",
+      "evidenceSchema",
+      "evidenceReferenceSchema",
+      "sourceSchema",
+      "provenanceSchema",
+      "moduleDispatchSchema",
+      "evidenceSchemasByKind",
+      "EVIDENCE_DOCUMENT_KINDS",
+      // Client (fetch / freshness / graph resolution)
+      "fetchEvidenceEntityV1",
+      "classifyEvidenceFreshness",
+      "evidenceContentDate",
+      "resolveClaimEvidenceV1",
+      "resolveAnswerEvidenceV1",
+      "EvidenceEntityFetchValidationError",
+      // Conformance
+      "runEvidenceConformance",
+      "renderEvidenceTextReport",
+      "renderEvidenceJsonReport",
+      "renderEvidenceJUnitReport",
+      "evidenceExitCodeFor",
+      "EVIDENCE_CHECKS",
+      "InvalidEvidenceConformanceOptionsError",
+    ],
     "conformance": ["runConformance", "renderTextReport", "renderJsonReport", "renderJUnitReport", "exitCodeFor", "CHECKS", "collectAdvertisedUrls", "InvalidConformanceOptionsError", "UnsupportedConformanceVersionError", "SUPPORTED_CONFORMANCE_VERSIONS"],
     "server": ["defineAADP", "defineResource", "AadpServerError", "notFound", "invalidRequest", "unsupportedType", "upstreamUnavailable", "rateLimited", "unauthorized", "forbidden"],
     "scaffold": ["scaffoldInit", "scaffoldAddResource", "ScaffoldFileExistsError", "initTemplate", "resourceTemplate", "toCamelCase"],
@@ -207,6 +241,17 @@ describe("published package: every public entry point resolves from the tarball"
       "applicability.schema.json",
     ]) {
       const schemaFile = path.join(tarball.packageDir, "schemas", "modules", "answer", "v1.0", file);
+      expect(existsSync(schemaFile), schemaFile).toBe(true);
+    }
+    for (const file of [
+      "module.schema.json",
+      "claim.schema.json",
+      "evidence.schema.json",
+      "evidence-reference.schema.json",
+      "source.schema.json",
+      "provenance.schema.json",
+    ]) {
+      const schemaFile = path.join(tarball.packageDir, "schemas", "modules", "evidence", "v1.0", file);
       expect(existsSync(schemaFile), schemaFile).toBe(true);
     }
   });
@@ -297,6 +342,83 @@ describe("published package: every public entry point resolves from the tarball"
     expect(report.module).toEqual({ id: "aadp:answer", version: "1.0" });
     expect(report.status).toBe("inconclusive");
     expect(report.checks.length).toBeGreaterThan(5);
+  });
+
+  it("resolves ail-aadp/modules/evidence/v1.0 from a clean tarball install and validates both document kinds", async () => {
+    const mod = await importFromTarball("modules/evidence/v1.0");
+    const checksumOf = (await importFromTarball("canonical-json")).checksumOf as (v: unknown) => string;
+    const sealed = (wrapper: Record<string, unknown>) => ({ ...wrapper, content_checksum: checksumOf(wrapper) });
+    const claim = sealed({
+      module: "aadp:evidence",
+      version: "1.0",
+      kind: "claim",
+      statement: "Orbit reported 99.9% uptime in 2026.",
+      locale: "en",
+      evidence_refs: [
+        {
+          target_type: "evidence",
+          target: { id: "evidence:report", url: "https://example.com/ai/v1.0/entities/evidence/report.json" },
+          stance: "support",
+        },
+      ],
+    });
+    const evidence = sealed({
+      module: "aadp:evidence",
+      version: "1.0",
+      kind: "evidence",
+      summary: "Annual status report published by Example Orbit.",
+      locale: "en",
+      source: {
+        title: "Orbit 2026 Status Report",
+        url: "https://example.com/reports/2026-status",
+        publisher: { name: "Example Orbit" },
+        access: "public",
+      },
+      provenance: { published_at: "2026-01-15T00:00:00Z", retrieved_at: "2026-08-01T09:00:00Z" },
+    });
+    const validateEvidenceV1 = mod.validateEvidenceV1 as (data: unknown) => { valid: boolean };
+    expect(validateEvidenceV1(claim).valid).toBe(true);
+    expect(validateEvidenceV1(evidence).valid).toBe(true);
+    // A claim may not cite another claim — the constant `target_type` is
+    // what makes the released model acyclic.
+    expect(
+      validateEvidenceV1({ ...claim, evidence_refs: [{ ...(claim.evidence_refs as never[])[0], target_type: "claim" }] }).valid
+    ).toBe(false);
+  });
+
+  it("runs runEvidenceConformance from a clean tarball install (neutral implementation gate)", async () => {
+    const mod = await importFromTarball("modules/evidence/v1.0");
+    const runEvidenceConformance = mod.runEvidenceConformance as (options: unknown) => Promise<{
+      module: unknown;
+      status: string;
+      checks: unknown[];
+    }>;
+    // No baseUrl/sample URLs supplied: every check must reach a verdict of
+    // its own (skipped/inconclusive), not throw — proving the packaged
+    // runner is self-contained.
+    const report = await runEvidenceConformance({});
+    expect(report.module).toEqual({ id: "aadp:evidence", version: "1.0" });
+    expect(report.status).toBe("inconclusive");
+    expect(report.checks.length).toBeGreaterThan(5);
+  });
+
+  it("does not re-export Evidence-specific names from the root entry point (ADR-0007 'Package exports')", async () => {
+    const mod = await importFromTarball(".");
+    for (const name of ["validateEvidenceV1", "registerEvidenceModule", "claimSchema", "runEvidenceConformance", "resolveAnswerEvidenceV1"]) {
+      expect(mod, `"${name}" must not be re-exported from the package root`).not.toHaveProperty(name);
+    }
+  });
+
+  it("does not expose the shared canonical resolution layer from any public subpath", async () => {
+    // Internal by contract (ADR-0010 §10): its preconditions cannot be
+    // checked from outside, and a caller holding the raw per-budget state
+    // could replay an outcome under a request context it never used.
+    for (const subpath of ["modules/answer/v1.0", "modules/evidence/v1.0", "modules/relations/v1.0", "client/v1.0", "."]) {
+      const mod = await importFromTarball(subpath);
+      for (const name of ["resolveCanonicalTarget", "budgetResolutionStateFor", "resolutionContextDigest"]) {
+        expect(mod, `"${name}" must stay internal (leaked from ${subpath})`).not.toHaveProperty(name);
+      }
+    }
   });
 
   it("resolves package.json itself as a subpath export", () => {

@@ -21,7 +21,7 @@ import {
 // traversal opt-in (this factory), never to the core-only client: core
 // `createDiscoveryBudget()` keeps its own pre-1.2.0 unbounded defaults for
 // `maxRequests`/`maxTotalBytes` so omitting Relations options never
-// changes core-only client behavior (ADR-0008 "Compatibility với 1.1.0").
+// changes core-only client behavior (ADR-0008 "Compatibility with 1.1.0").
 const DEFAULT_MAX_DEPTH = 3;
 const DEFAULT_MAX_NODES = 1_000;
 const DEFAULT_MAX_REQUESTS = 2_000;
@@ -99,13 +99,26 @@ export function createRelationsTraversalBudget(limits: RelationsTraversalLimits 
  * so it's a safe, unambiguous separator against a URL.
  */
 export function canonicalTargetKey(id: string, url: string): string {
-  let normalizedUrl: string;
+  return `${id}\0${normalizeTargetUrl(url)}`;
+}
+
+/**
+ * The URL half of `canonicalTargetKey`, on its own — so anything that has to
+ * compare a raw, document-supplied URL string against a URL this package
+ * actually requested (the Evidence conformance runner's metadata-traversal
+ * check) canonicalizes BOTH sides with the one canonicalizer the dedup key
+ * itself uses. Comparing a raw string against a `URL.toString()` would make
+ * `https://example.com` and `https://example.com/` two different URLs.
+ *
+ * An unparseable URL is returned unchanged rather than throwing: it is never
+ * fetched anyway, and returning it keeps a bad string comparable to itself.
+ */
+export function normalizeTargetUrl(url: string): string {
   try {
-    normalizedUrl = new URL(url).href;
+    return new URL(url).href;
   } catch {
-    normalizedUrl = url;
+    return url;
   }
-  return `${id}\0${normalizedUrl}`;
 }
 
 /**

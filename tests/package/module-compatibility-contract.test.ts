@@ -179,3 +179,135 @@ describe("opt-in consumer surfaces unsupported Answer versions (ADR-0007)", () =
     expect(result.semanticIssues.some((i: { code: string }) => i.code === "answer.semantic.content_checksum_mismatch")).toBe(true);
   });
 });
+
+/**
+ * The same two halves for Evidence `1.0`
+ * (`spec/modules/evidence/v1.0/conformance.md` §6: an unsupported Evidence
+ * version is NOT a remote deployment check — a runner cannot require a
+ * conforming server to advertise a fake version — so it is exercised here,
+ * with a synthetic entity, against the packaged export surface).
+ */
+const ENTITY_WITH_X_EVIDENCE = {
+  aadp_version: "1.0",
+  id: "claim:orbit-uptime-2026",
+  type: "claim",
+  checksum: "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  updated_at: "2026-08-06T09:00:00Z",
+  canonical_url: "https://example.com/claims/orbit-uptime-2026",
+  data: {},
+  x_evidence: {
+    module: "aadp:evidence",
+    version: "1.0",
+    kind: "claim",
+    statement: "Orbit reported 99.9% uptime in 2026.",
+    locale: "en",
+    evidence_refs: [
+      {
+        target_type: "evidence",
+        target: { id: "evidence:orbit-report", url: "https://example.com/ai/v1.0/entities/evidence/orbit-report.json" },
+        stance: "support",
+      },
+    ],
+    // Placeholder — see the dispatch test at the end of this block.
+    content_checksum: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  },
+};
+
+const EVIDENCE_ENTITY_JSON = JSON.stringify(ENTITY_WITH_X_EVIDENCE);
+
+describe("core-only consumer is unaffected by the Evidence module (ADR-0007)", () => {
+  it("validates an entity carrying x_evidence, and the same entity without it, identically", async () => {
+    const { validateDocument } = await importFromTarball("validator");
+    const { x_evidence: _dropped, ...withoutEvidence } = ENTITY_WITH_X_EVIDENCE;
+
+    expect(validateDocument({ version: "1.0", kind: "entity", data: ENTITY_WITH_X_EVIDENCE })).toEqual({
+      valid: true,
+      errors: [],
+    });
+    expect(validateDocument({ version: "1.0", kind: "entity", data: withoutEvidence })).toEqual({ valid: true, errors: [] });
+  });
+
+  it("still validates when x_evidence is structurally nonsense — core never dispatches on it", async () => {
+    const { validateDocument } = await importFromTarball("validator");
+    const result = validateDocument({
+      version: "1.0",
+      kind: "entity",
+      data: { ...ENTITY_WITH_X_EVIDENCE, x_evidence: { not: "an evidence document" } },
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("does not load or register the Evidence module, in a process that only imports core", () => {
+    const probe = runInPackage(`
+      import { validateDocument } from "./dist/validator/index.js";
+      import { isModuleRegistered } from "./dist/module-registry/index.js";
+      const valid = validateDocument({ version: "1.0", kind: "entity", data: ${EVIDENCE_ENTITY_JSON} }).valid;
+      console.log(JSON.stringify({ valid, evidenceRegistered: isModuleRegistered("aadp:evidence") }));
+    `);
+    expect(probe.valid).toBe(true);
+    expect(probe.evidenceRegistered).toBe(false);
+  });
+
+  it("does not pull the Evidence module in through the Answer subpath", () => {
+    // Evidence imports Answer (it resolves an Answer's citations); the
+    // reverse MUST NOT hold, or every existing Answer consumer would
+    // silently start registering a module it never asked for.
+    const probe = runInPackage(`
+      import "./dist/modules/answer/v1.0/index.js";
+      import { isModuleRegistered } from "./dist/module-registry/index.js";
+      console.log(JSON.stringify({
+        answerRegistered: isModuleRegistered("aadp:answer"),
+        evidenceRegistered: isModuleRegistered("aadp:evidence"),
+      }));
+    `);
+    expect(probe.answerRegistered).toBe(true);
+    expect(probe.evidenceRegistered).toBe(false);
+  });
+});
+
+describe("opt-in consumer surfaces unsupported Evidence versions (ADR-0007)", () => {
+  it("registers aadp:evidence at exactly {1.0, claim} and {1.0, evidence} when the subpath is imported", async () => {
+    await importFromTarball("modules/evidence/v1.0");
+    const { isModuleRegistered, getModuleEntry } = await importFromTarball("module-registry");
+    expect(isModuleRegistered("aadp:evidence")).toBe(true);
+    expect(getModuleEntry({ moduleId: "aadp:evidence", moduleVersion: "1.0", kind: "claim" })).toBeDefined();
+    expect(getModuleEntry({ moduleId: "aadp:evidence", moduleVersion: "1.0", kind: "evidence" })).toBeDefined();
+  });
+
+  it.each(["1.1", "2.0"])("throws unsupported_module_version for Evidence %s, with no fallback to 1.0", async (version) => {
+    await importFromTarball("modules/evidence/v1.0");
+    const { validateModuleDocument, UnsupportedModuleVersionError } = await importFromTarball("module-registry");
+    const other = { moduleId: "aadp:evidence", moduleVersion: version, kind: "claim" };
+
+    expect(() => validateModuleDocument(other, ENTITY_WITH_X_EVIDENCE.x_evidence)).toThrow(UnsupportedModuleVersionError);
+    try {
+      validateModuleDocument(other, ENTITY_WITH_X_EVIDENCE.x_evidence);
+      expect.unreachable("validateModuleDocument should have thrown");
+    } catch (err) {
+      expect((err as { code: string }).code).toBe("unsupported_module_version");
+      expect((err as { moduleVersion: string }).moduleVersion).toBe(version);
+    }
+  });
+
+  it("throws unsupported_module_kind for `source`, which is a nested object rather than a document kind", async () => {
+    await importFromTarball("modules/evidence/v1.0");
+    const { validateModuleDocument, UnsupportedModuleKindError } = await importFromTarball("module-registry");
+    expect(() =>
+      validateModuleDocument({ moduleId: "aadp:evidence", moduleVersion: "1.0", kind: "source" }, {})
+    ).toThrow(UnsupportedModuleKindError);
+  });
+
+  it("dispatches a well-formed claim document to schema+semantic validation at the supported version", async () => {
+    await importFromTarball("modules/evidence/v1.0");
+    const { validateModuleDocument } = await importFromTarball("module-registry");
+    const result = validateModuleDocument(
+      { moduleId: "aadp:evidence", moduleVersion: "1.0", kind: "claim" },
+      ENTITY_WITH_X_EVIDENCE.x_evidence
+    );
+    // Same layer split as the Answer case: `content_checksum` is a
+    // placeholder, so the schema matched and the semantic pass is what
+    // caught it — not a version/dispatch failure.
+    expect(result.errors).toEqual([]);
+    expect(result.semanticIssues.some((i: { code: string }) => i.code === "evidence.semantic.content_checksum_mismatch")).toBe(true);
+  });
+});

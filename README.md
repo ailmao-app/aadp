@@ -352,6 +352,51 @@ public resource gets), so an authorized response for one caller is never
 served to another from a shared cache — but the authorization check itself
 is always the resource's own responsibility.
 
+### Publishing a module
+
+A server can publish any AADP module — `aadp:relations`, `aadp:answer`, or one
+of your own — without the runtime knowing anything about it. Declare it in
+`modules`, and return its payload from `serialize()` under `extensions`:
+
+```ts
+const aadp = defineAADP({
+  // ...
+  modules: [
+    {
+      id: "vendor:example",
+      version: "1.0",
+      schema: "https://example.com/schemas/modules/example/v1.0/module.schema.json",
+    },
+  ],
+  resources: [
+    defineResource<Post>({
+      type: "post",
+      // ...
+      serialize: (post) => ({
+        id: `post:${post.slug}`,
+        updatedAt: post.updatedAt,
+        data: { title: post.title },
+        extensions: {
+          x_example: { module: "vendor:example", version: "1.0", note: post.note },
+        },
+      }),
+    }),
+  ],
+});
+```
+
+`modules` is published as the manifest's `modules[]` and validated against the
+core manifest schema at `defineAADP()` time. Each `extensions` key is emitted
+as a root-level field on the entity document; keys must match the core v1.0
+extension grammar `^x_[a-zA-Z0-9_]*$` (exported as `isExtensionKey()` from
+`ail-aadp/validator`), and a key that does not is rejected loudly rather than
+silently dropped.
+
+The entity `checksum` stays scoped to `data`, so adding an extension to an
+already-published entity never changes its checksum. Declare a module only once
+its resources and schema artifacts are actually served — the runtime does not
+verify that a declaration corresponds to anything.
+
 ### Custom routes
 
 `/ai/v1.0/...` is this SDK's default convention, not a routing contract the
@@ -406,8 +451,17 @@ to change where files land.
 neutral `defineAADP()` deployment on plain `node:http`, installed from a
 packed tarball rather than this repo's workspace — the same way a real
 third-party consumer would use the package. It demonstrates the default
-route convention and a custom `routes` configuration side by side. See its
-README for how to run it and check it with `aadp-conformance`.
+route convention and a custom `routes` configuration side by side, and
+publishes four resource types through the one generic extension mechanism: a
+core-only `note`, an `answer` carrying an Answer Module `1.0` payload, and a
+`claim`/`evidence` pair carrying Evidence Module `1.0` payloads — all through
+`SerializedEntity.extensions`, with `aadp:answer@1.0` and `aadp:evidence@1.0`
+declared in the manifest. Its citation graph is deliberately non-trivial: an
+answer cites a claim, the claim cites two evidence documents with opposing
+stances, a second claim shares one of them (fan-in), and one evidence record
+is served only to an authorized caller so a walk produces a `forbidden`
+outcome rather than a dangling reference. See its README for how to run it and
+check it with `aadp-conformance`.
 
 ## Run conformance tests
 
@@ -525,10 +579,12 @@ AADP_BASE_URL=https://example.com \
 | `ail-aadp/canonical-json` | Canonicalization and checksum utilities |
 | `ail-aadp/modules/relations/v1.0` | Relations Module v1.0 — types, schema/semantic validation, client/traversal, conformance |
 | `ail-aadp/modules/answer/v1.0` | Answer Module v1.0 — types, schema/semantic validation, entity-context validator, client, conformance |
+| `ail-aadp/modules/evidence/v1.0` | Evidence & Provenance Module v1.0 — claim/evidence types, schema/semantic validation, entity-context validator, graph client, conformance |
 | `ail-aadp/schemas/v1.0/*` | v1.0 JSON Schemas |
 | `ail-aadp/schemas/v0.1/*` | v0.1 JSON Schemas |
 | `ail-aadp/schemas/modules/relations/v1.0/*` | Relations Module v1.0 JSON Schemas |
 | `ail-aadp/schemas/modules/answer/v1.0/*` | Answer Module v1.0 JSON Schemas |
+| `ail-aadp/schemas/modules/evidence/v1.0/*` | Evidence Module v1.0 JSON Schemas |
 
 Binaries: `aadp-validate`, `aadp-conformance`, `aadp` (`aadp init` / `aadp add-resource`).
 

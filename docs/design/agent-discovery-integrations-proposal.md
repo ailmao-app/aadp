@@ -1,196 +1,215 @@
-# Đề xuất tích hợp các cơ chế agent discovery liền kề AADP
+# Proposal: integrating agent-discovery mechanisms adjacent to AADP
 
-## Metadata tài liệu
+## Document metadata
 
-| Thuộc tính | Giá trị |
+| Field | Value |
 |---|---|
-| Trạng thái | Proposed |
-| Đối tượng | Maintainer AADP, implementer và reviewer tích hợp discovery |
-| Phạm vi | Các chuẩn/cơ chế agent discovery nằm cạnh AADP nhưng không mặc định thuộc AADP core |
-| Tính chuẩn tắc | Informational; chưa thay đổi specification hoặc JSON Schema đã phát hành |
-| Nguồn phát hiện | Tích hợp `ailmao-landing` với external agent-readiness scanner |
+| Status | Proposed |
+| Audience | AADP maintainers, and implementers and reviewers of discovery integrations |
+| Scope | Agent-discovery standards and mechanisms that sit next to AADP but are not part of AADP core by default |
+| Normativity | Informational; changes no released specification or JSON Schema |
+| Origin | Integrating `ailmao-landing` with an external agent-readiness scanner |
 
-## Tóm tắt
+## Abstract
 
-Khi kết nối `ailmao-landing`, implementation tham chiếu của AADP, với một external
-agent-readiness scanner, project phải xử lý nhiều cơ chế chưa thuộc AADP v1.0:
-RFC 8288 Link header, `Accept: text/markdown`, RFC 9727 API Catalog, DNS-AID SVCB,
-WebMCP, MCP Server Card, OAuth/OIDC discovery và `auth.md`.
+Connecting `ailmao-landing`, AADP's reference implementation, to an external
+agent-readiness scanner forced the project to handle several mechanisms that are
+not part of AADP v1.0: RFC 8288 Link headers, `Accept: text/markdown`, RFC 9727
+API Catalog, DNS-AID SVCB, WebMCP, MCP Server Card, OAuth/OIDC discovery and
+`auth.md`.
 
-Một số phần lặp lại giữa mọi AADP publisher và có thể được đưa vào `ail-aadp`; các
-phần khác giải quyết vấn đề khác và phải tiếp tục nằm ngoài core. Đặc biệt,
-DNS-AID là lớp discovery/trust liền kề: DNS operator công bố record, authoritative
-DNS ký RRset bằng DNSSEC, còn client hoặc validating resolver xác minh trước khi
-chuyển endpoint hay descriptor đã khám phá cho AADP client. Memo này ghi rõ ranh
-giới đó, đồng thời dẫn tới các proposal chuyên sâu khi một mục cần thiết kế wire
-contract hoặc semantics mới.
+Some of these repeat across every AADP publisher and could move into
+`ail-aadp`; others solve a different problem and must stay outside core. DNS-AID
+in particular is an adjacent discovery/trust layer: the DNS operator publishes
+the record, authoritative DNS signs the RRset with DNSSEC, and the client or a
+validating resolver verifies it before handing the discovered endpoint or
+descriptor to an AADP client. This memo draws that boundary and points to
+focused proposals wherever an item needs a new wire contract or new semantics.
 
-## 1. Trạng thái của memo
+## 1. Status of this memo
 
-Memo này tuân theo [quy ước tài liệu AADP](../document-conventions.md). Các ví dụ,
-tên API helper và field được nêu đều là non-normative ở trạng thái Proposed.
+This memo follows the [AADP documentation conventions](../document-conventions.md).
+The examples, helper API names and fields mentioned here are all non-normative
+while the memo is Proposed.
 
-Memo MUST NOT được dùng để tuyên bố một capability đã thuộc AADP hoặc đã được cấp
-version chỉ vì capability đó xuất hiện trong tài liệu. Mọi thay đổi wire contract
-phải đi qua ADR, specification và schema theo chính sách tương thích.
+This memo MUST NOT be used to claim that a capability is part of AADP, or has
+been assigned a version, merely because it appears in this document. Any wire
+contract change goes through an ADR, the specification and the schemas, under
+the compatibility policy.
 
-## 2. Phạm vi và non-goals
+## 2. Scope and non-goals
 
-Memo này:
+This memo:
 
-- phân loại integration nào có thể tái sử dụng trong package;
-- ghi lại integration nào thuộc application, browser hoặc infrastructure;
-- tránh việc publisher tạo discovery metadata giả chỉ để tăng scanner score;
-- cung cấp đầu vào cho ADR/proposal chuyên sâu.
+- classifies which integrations could be reused inside the package;
+- records which integrations belong to the application, the browser or the
+  infrastructure;
+- discourages publishers from fabricating discovery metadata purely to raise a
+  scanner score;
+- provides input for focused ADRs and proposals.
 
-Memo này không:
+This memo does not:
 
-- biến AADP thành OpenAPI, OAuth/OIDC server hoặc MCP runtime;
-- biến AADP core/client thành DNS resolver, DNSSEC validator hoặc DNS-AID client;
-- yêu cầu publisher hỗ trợ mọi chuẩn mà scanner biết;
-- thay đổi schema v1.0 đã phát hành;
-- coi scanner score là protocol conformance.
+- turn AADP into OpenAPI, an OAuth/OIDC server or an MCP runtime;
+- turn AADP core or its client into a DNS resolver, DNSSEC validator or DNS-AID
+  client;
+- require publishers to support every standard a scanner knows about;
+- change the released v1.0 schemas;
+- treat a scanner score as protocol conformance.
 
-## 3. Các phần nên đưa vào `ail-aadp`
+## 3. Parts that could move into `ail-aadp`
 
-### 3.1 Helper tạo `Link` header
+### 3.1 A `Link` header helper
 
-`ailmao-landing/middleware.ts` hiện phải tự khai báo:
+`ailmao-landing/middleware.ts` currently has to declare this itself:
 
 ```text
 </.well-known/ai-manifest.json>; rel="api-catalog"
 ```
 
-Mọi AADP publisher cần cùng giá trị và well-known path đã có thể suy ra từ config
-được truyền vào `defineAADP()`. Package SHOULD cung cấp helper như
-`aadp.linkHeader()` hoặc export constant well-known path từ `ail-aadp/server` để
-publisher không phải lặp chuỗi và tránh typo.
+Every AADP publisher needs the same value, and the well-known path is already
+derivable from the config passed to `defineAADP()`. The package SHOULD provide a
+helper such as `aadp.linkHeader()`, or export the well-known path constant from
+`ail-aadp/server`, so publishers do not repeat the string and risk typos.
 
-Tên helper cuối cùng cần được chốt theo public API convention của package.
+The final helper name should follow the package's public API conventions.
 
-### 3.2 Sinh RFC 9727 API Catalog
+### 3.2 Generating an RFC 9727 API Catalog
 
-`ailmao-landing` đang tự phục vụ `/.well-known/api-catalog` với media type
-`application/linkset+json`. Catalog hiện chỉ có một entry trung thực:
-`service-desc` trỏ đến AADP manifest. Các field `links`, `policies` và `resources`
-trong `defineAADP()` chưa map trực tiếp, đầy đủ sang `service-doc` hoặc `status`.
+`ailmao-landing` serves `/.well-known/api-catalog` itself, with the media type
+`application/linkset+json`. The catalog currently has exactly one honest entry:
+a `service-desc` pointing at the AADP manifest. The `links`, `policies` and
+`resources` fields of `defineAADP()` do not map directly or completely onto
+`service-doc` or `status`.
 
-Package có thể:
+The package could:
 
-1. sinh entry `service-desc` cho AADP manifest;
-2. chỉ sinh `status` khi publisher cấu hình một health endpoint thật;
-3. cung cấp helper như `aadp.buildApiCatalogLinkset()` thay vì bắt mỗi application
-   viết lại cùng Linkset shape.
+1. generate the `service-desc` entry for the AADP manifest;
+2. generate `status` only when the publisher configures a real health endpoint;
+3. provide a helper such as `aadp.buildApiCatalogLinkset()` instead of making
+   every application rewrite the same Linkset shape.
 
-Một field tùy chọn như `healthCheck` chỉ nên được thêm sau khi xác định đúng layer
-và compatibility impact; publisher MUST NOT quảng cáo endpoint chưa deploy.
+An optional field such as `healthCheck` should only be added once the right
+layer and the compatibility impact are settled; a publisher MUST NOT advertise
+an endpoint that is not deployed.
 
-### 3.3 Markdown rendering cho AADP resource
+### 3.3 Markdown rendering for AADP resources
 
-`ailmao-landing/lib/markdown/homepage.ts` được viết riêng để đáp ứng
-`Accept: text/markdown`, nhưng nó đọc từ cùng data source đang cấp dữ liệu cho
-`characterResource` và `postResource`.
+`ailmao-landing/lib/markdown/homepage.ts` was written specifically to serve
+`Accept: text/markdown`, but it reads from the same data source that already
+feeds `characterResource` and `postResource`.
 
-AADP resource đã có bước `serialize()`. Package có thể khảo sát hai hướng:
+An AADP resource already has a `serialize()` step. The package could explore two
+directions:
 
-- callback `markdown: (record) => string` trong `defineResource()`;
-- generic JSON-to-Markdown renderer chạy trên serialized shape.
+- a `markdown: (record) => string` callback in `defineResource()`;
+- a generic JSON-to-Markdown renderer over the serialized shape.
 
-Hướng callback cho publisher kiểm soát nội dung nhưng mở rộng public server API;
-hướng generic giảm code nhưng khó đảm bảo semantic và presentation ổn định. Cần
-design memo riêng trước khi chọn một trong hai.
+The callback gives publishers control of the content but widens the public
+server API; the generic renderer reduces code but makes stable semantics and
+presentation hard to guarantee. This needs its own design memo before either is
+chosen.
 
-## 4. Các phần phải tiếp tục nằm ngoài AADP core
+## 4. Parts that must stay outside AADP core
 
-### 4.1 DNS-AID discovery, DNSSEC validation và descriptor digest
+### 4.1 DNS-AID discovery, DNSSEC validation and descriptor digests
 
-DNS-AID và AADP giải quyết hai bài toán khác nhau. DNS-AID khám phá agent/service
-endpoint cùng metadata kết nối qua DNS; AADP khám phá, liệt kê và truy xuất dữ liệu
-ứng dụng read-only qua HTTP. Record `_index._agents.<domain>` thuộc registrar/DNS
-provider. Authoritative DNS tạo DNSSEC signature; client hoặc validating resolver
-xác minh signature và áp dụng trust policy. Không bên nào trong chuỗi này là trách
-nhiệm của AADP core/runtime.
+DNS-AID and AADP solve two different problems. DNS-AID discovers agent/service
+endpoints and their connection metadata over DNS; AADP discovers, lists and
+retrieves read-only application data over HTTP. The `_index._agents.<domain>`
+record belongs to the registrar/DNS provider. Authoritative DNS produces the
+DNSSEC signature; the client or a validating resolver verifies it and applies
+trust policy. No link in that chain is the responsibility of AADP core or its
+runtime.
 
-ADR-0001 chỉ định checksum `sha256:<hex>` cho `entity.data` và `sitemap.items` để
-cache, dedupe và phát hiện thay đổi. Checksum tự công bố cùng payload không phải chữ
-ký, không chứng minh nguồn và không định nghĩa checksum cho toàn bộ AADP manifest.
-Vì vậy `cap-sha256` của DNS-AID MUST NOT được gọi là "AADP manifest checksum" hoặc
-được suy ra từ checksum AADP hiện có mà không có integration profile riêng.
+ADR-0001 specifies a `sha256:<hex>` checksum over `entity.data` and
+`sitemap.items` for caching, deduplication and change detection. A checksum
+self-published alongside its payload is not a signature, does not prove origin,
+and does not define a checksum for the AADP manifest as a whole. DNS-AID's
+`cap-sha256` therefore MUST NOT be called an "AADP manifest checksum", nor
+derived from an existing AADP checksum, without a dedicated integration profile.
 
-Nếu một deployment muốn dùng AADP manifest làm DNS-AID capability descriptor, một
-profile/adapter độc lập phải chốt ít nhất:
+If a deployment wants to use an AADP manifest as a DNS-AID capability
+descriptor, an independent profile/adapter must settle at least:
 
-- locator, media type và AADP version được chấp nhận;
-- tập field được hash và canonicalization chính xác;
-- DNSSEC validation, redirect/origin và URL/SSRF policy phía client;
-- hành vi khi digest mismatch, record unsigned hoặc draft key không được hỗ trợ;
-- conformance vectors giữa DNS publisher, resolver và AADP consumer.
+- the locator, media type and accepted AADP versions;
+- the exact set of hashed fields and the canonicalization;
+- client-side DNSSEC validation, redirect/origin and URL/SSRF policy;
+- behaviour on a digest mismatch, an unsigned record, or an unsupported draft
+  key;
+- conformance vectors spanning the DNS publisher, the resolver and the AADP
+  consumer.
 
-Profile có thể phụ thuộc DNS-AID và AADP, nhưng `ail-aadp` MUST NOT phụ thuộc ngược
-lại. Không thêm `aadp.dnsAidCapChecksum()` vào public API. Nếu use case production
-và interoperability được chứng minh, implementation SHOULD nằm trong package như
-`aadp-dnsaid-profile` hoặc application adapter, với lifecycle/version riêng.
+Such a profile may depend on both DNS-AID and AADP, but `ail-aadp` MUST NOT
+depend on it in return. Do not add `aadp.dnsAidCapChecksum()` to the public API.
+If a production use case and interoperability are demonstrated, the
+implementation SHOULD live in a package such as `aadp-dnsaid-profile`, or in an
+application adapter, with its own lifecycle and version.
 
-Với `ailmao.com`, Cloudflare dashboard không chấp nhận unregistered SvcParamKey name
-và cần numeric `keyNNNNN` theo private-use range cho đến khi draft ổn định. Đây là
-runbook infrastructure, không phải AADP wire behavior. `cap-sha256` và private-use
-numeric key vẫn là cơ chế draft/experimental, không phải allocation của AADP.
+For `ailmao.com`, the Cloudflare dashboard rejects unregistered SvcParamKey
+names and needs a numeric `keyNNNNN` from the private-use range until the draft
+stabilises. That is an infrastructure runbook, not AADP wire behaviour.
+`cap-sha256` and private-use numeric keys remain draft/experimental mechanisms,
+not AADP allocations.
 
 ### 4.2 WebMCP
 
-`document.modelContext.registerTool()` và legacy
-`navigator.modelContext.provideContext()` expose hành động UI cho in-browser agent.
-Đây là browser interaction API, khác với server-side resource discovery của AADP.
+`document.modelContext.registerTool()` and the legacy
+`navigator.modelContext.provideContext()` expose UI actions to in-browser
+agents. That is a browser interaction API, distinct from AADP's server-side
+resource discovery.
 
-WebMCP implementation nên ở application component tương ứng, ví dụ
-`ailmao-landing/components/WebMcpTools.tsx`, không nằm trong AADP core.
+A WebMCP implementation belongs in the corresponding application component —
+for example `ailmao-landing/components/WebMcpTools.tsx` — not in AADP core.
 
-### 4.3 OAuth/OIDC discovery, OAuth Protected Resource Metadata và `auth.md`
+### 4.3 OAuth/OIDC discovery, OAuth Protected Resource Metadata and `auth.md`
 
-Các discovery document này chỉ áp dụng khi tồn tại authorization server, protected
-resource hoặc agent registration flow thật. AADP v1.0 đã mô tả được security scheme
-`none`, `api_key` và `oauth2`; vì vậy khoảng trống không phải là “AADP chưa biết
-protected resource”. Khoảng trống thực tế là:
+These discovery documents apply only when a real authorization server, protected
+resource or agent registration flow exists. AADP v1.0 can already describe the
+`none`, `api_key` and `oauth2` security schemes, so the gap is not "AADP does
+not know about protected resources". The real gaps are:
 
-- application-level profile để tuyên bố đây là content site;
-- default access và resource/interface override;
-- semantics rõ ràng để scanner phân biệt `not_applicable` với `missing`;
-- runtime phải giữ public cache semantics khi scheme được tham chiếu có
+- an application-level profile for declaring that this is a content site;
+- default access, with resource/interface overrides;
+- clear semantics so a scanner can distinguish `not_applicable` from `missing`;
+- a runtime that preserves public cache semantics when the referenced scheme has
   `type: "none"`.
 
-Thiết kế chi tiết nằm trong
-[Đề xuất khai báo Content Site và truy cập công khai](../vi/design/content-site-access-discovery-proposal.md).
+The detailed design lives in
+[the content-site and public-access discovery proposal](../vi/design/content-site-access-discovery-proposal.md)
+(an internal Vietnamese memo).
 
-`ailmao-api-v2` hiện dùng custom JWT từ `POST /auth/login`, không có đầy đủ
-`authorization_endpoint`, `token_endpoint`, `jwks_uri` hoặc agent registration
-contract. Publisher MUST NOT tạo OAuth/OIDC metadata trỏ đến endpoint không tồn tại
-chỉ để vượt scanner.
+`ailmao-api-v2` currently uses a custom JWT from `POST /auth/login`, with no
+complete `authorization_endpoint`, `token_endpoint`, `jwks_uri` or agent
+registration contract. A publisher MUST NOT create OAuth/OIDC metadata pointing
+at endpoints that do not exist just to satisfy a scanner.
 
 ### 4.4 MCP Server Card
 
-MCP Server Card chỉ phù hợp khi có MCP server và transport endpoint thật. WebMCP
-không phải remote MCP server. Card mô tả một server chưa tồn tại là fabrication,
-không phải discovery.
+An MCP Server Card is only appropriate when a real MCP server and transport
+endpoint exist. WebMCP is not a remote MCP server. A card describing a server
+that does not exist is fabrication, not discovery.
 
-Mục này nên được xem lại khi organization triển khai MCP server thực tế.
+Revisit this item when the organisation actually deploys an MCP server.
 
-### 4.5 Agent Skills index
+### 4.5 The Agent Skills index
 
-`/.well-known/agent-skills/index.json` đã được triển khai theo hướng không mô tả
-AI Lmao như một skills/tools provider. Thay vào đó,
-`ailmao-landing/public/skills/ailmao-agent-access/SKILL.md` hướng dẫn sử dụng các
-read-only surface thật: AADP manifest, sitemap/entity endpoint, Markdown negotiation
-và WebMCP tools.
+`/.well-known/agent-skills/index.json` was implemented in a way that does NOT
+describe AI Lmao as a skills/tools provider. Instead,
+`ailmao-landing/public/skills/ailmao-agent-access/SKILL.md` documents how to use
+the real read-only surfaces: the AADP manifest, the sitemap/entity endpoints,
+Markdown negotiation and the WebMCP tools.
 
-Index route tính `sha256` từ file đang phục vụ thay vì hardcode, nên digest không
-drift khỏi nội dung tại `url`. Đây là per-application authored document; chưa có
-phần đủ AADP-specific để đưa vào core. Nếu AADP sau này phát hành skill riêng,
-pattern “tính digest từ live file” SHOULD được giữ lại.
+The index route computes the `sha256` from the file it actually serves rather
+than hardcoding it, so the digest cannot drift from the content at `url`. This
+is a per-application authored document; nothing about it is AADP-specific enough
+to move into core yet. If AADP later publishes a skill of its own, the "compute
+the digest from the live file" pattern SHOULD be kept.
 
-## 5. Quan hệ giữa các proposal
+## 5. How the proposals relate
 
 ```text
-Agent-discovery integrations proposal (memo này)
+Agent-discovery integrations proposal (this memo)
 ├── helper/library candidates
 │   ├── Link header
 │   ├── RFC 9727 API Catalog
@@ -201,65 +220,77 @@ Agent-discovery integrations proposal (memo này)
     └── Content Site + public access discovery
 ```
 
-Memo này là umbrella inventory. Proposal Content Site là focused design memo có
-thể dẫn tới ADR và protocol version mới. Nội dung wire shape, validation và migration
-MUST nằm ở proposal chuyên sâu, không được nhân đôi tại đây.
+This memo is an umbrella inventory. The Content Site proposal is a focused
+design memo that may lead to an ADR and a new protocol version. Wire shape,
+validation and migration content MUST live in that focused proposal and MUST NOT
+be duplicated here.
 
-## 6. Hướng triển khai đề xuất
+## 6. Suggested way forward
 
-1. Tách từng AADP helper candidate thành issue/design item có acceptance criteria.
-2. Ưu tiên sửa semantics `security_schemes.type: "none"` trước khi thêm field mới.
-3. Mở ADR riêng cho application profile/default access.
-4. Loại DNS-AID checksum helper khỏi roadmap/public API của `ail-aadp`.
-5. Chỉ mở DNS-AID integration profile khi có deployment thật, client-side DNSSEC
-   validation, canonical descriptor contract và cross-implementation vectors.
-6. Không gộp DNS mutation, DNSSEC resolver, WebMCP runtime hoặc MCP server
-   implementation vào core.
-7. Chỉ công bố adjacent discovery metadata khi capability thật đã deploy.
+1. Split each AADP helper candidate into an issue/design item with acceptance
+   criteria.
+2. Fix the `security_schemes.type: "none"` semantics before adding new fields.
+3. Open a separate ADR for the application profile and default access.
+4. Remove the DNS-AID checksum helper from the `ail-aadp` roadmap and public
+   API.
+5. Open a DNS-AID integration profile only once there is a real deployment,
+   client-side DNSSEC validation, a canonical descriptor contract and
+   cross-implementation vectors.
+6. Do not fold DNS mutation, a DNSSEC resolver, a WebMCP runtime or an MCP
+   server implementation into core.
+7. Publish adjacent discovery metadata only once the real capability is
+   deployed.
 
 ## 7. Housekeeping
 
-Tại thời điểm memo ban đầu được viết, `ailmao-landing/node_modules/ail-aadp` dùng
-version `1.0.5` trong khi repository `aadp` đã ở `1.0.9`. Việc nâng dependency là
-maintenance task riêng, không nên gộp vào protocol proposal.
+When this memo was first written, `ailmao-landing/node_modules/ail-aadp` was at
+version `1.0.5` while the `aadp` repository was already at `1.0.9`. Upgrading
+that dependency is a separate maintenance task and should not be folded into a
+protocol proposal.
 
 ## 8. Security considerations
 
-- Helper MUST NOT tạo placeholder endpoint hoặc live credential.
-- DNSSEC xác thực RRset do domain owner công bố; nó không tự chứng minh nội dung
-  capability descriptor đúng sự thật hoặc agent sẽ hành xử đúng metadata.
-- Client phải fail closed hoặc báo trạng thái không xác minh được theo profile khi
-  DNSSEC validation/digest verification không hoàn tất; không âm thầm nâng self-hash
-  AADP thành authenticity signal.
-- Client vẫn phải áp dụng URL/redirect/SSRF policy cho mọi discovered URL.
-- Scanner score không phải security proof hoặc protocol conformance result.
-- Publisher không được biến protected resource thành public chỉ bằng metadata sai;
-  enforcement tại resource server vẫn là security boundary.
+- Helpers MUST NOT create placeholder endpoints or live credentials.
+- DNSSEC authenticates an RRset published by the domain owner; it does not by
+  itself prove that the capability descriptor's contents are truthful, or that
+  an agent will behave as its metadata claims.
+- A client must fail closed, or report an unverifiable state as the profile
+  requires, when DNSSEC validation or digest verification does not complete; it
+  must never quietly promote an AADP self-hash into an authenticity signal.
+- A client must still apply URL/redirect/SSRF policy to every discovered URL.
+- A scanner score is not a security proof or a protocol conformance result.
+- A publisher cannot turn a protected resource into a public one with incorrect
+  metadata; enforcement at the resource server remains the security boundary.
 
-## 9. Compatibility và versioning
+## 9. Compatibility and versioning
 
-- Helper chỉ sinh representation từ contract hiện có có thể là package-level feature.
-- Field mới trong manifest cần protocol/schema version mới theo ADR-0004.
-- Schema v1.0 MUST NOT bị sửa để nhận application profile/default access mới.
-- DNS-AID integration profile phải version độc lập và không thay đổi AADP conformance.
-- Draft DNS-AID key hoặc MCP proposal MUST NOT được trình bày như chuẩn đã final.
+- A helper that only renders a representation of an existing contract can be a
+  package-level feature.
+- A new manifest field requires a new protocol/schema version under ADR-0004.
+- The v1.0 schemas MUST NOT be edited to accommodate a new application profile
+  or default access.
+- A DNS-AID integration profile must version independently and must not change
+  AADP conformance.
+- A draft DNS-AID key or MCP proposal MUST NOT be presented as a finalised
+  standard.
 
 ## 10. IANA Considerations
 
-Memo này không yêu cầu hành động IANA.
+This document has no IANA actions.
 
-## 11. Tài liệu tham chiếu
+## 11. References
 
-### Nguồn AADP
+### AADP sources
 
-- [Quy ước tài liệu AADP](../document-conventions.md)
+- [AADP documentation conventions](../document-conventions.md)
 - [AADP v1.0 specification](../../spec/v1.0/specification.md)
 - [ADR-0001: Checksum algorithm](../adr/0001-checksum-algorithm.md)
 - [ADR-0004: Backward compatibility](../adr/0004-backward-compatibility.md)
 - [ADR-0005: Manifest v1 discovery](../adr/0005-manifest-v1-discovery.md)
-- [Đề xuất khai báo Content Site và truy cập công khai](../vi/design/content-site-access-discovery-proposal.md)
+- [Content-site and public-access discovery proposal](../vi/design/content-site-access-discovery-proposal.md)
+  (internal Vietnamese memo)
 
-### Chuẩn ngoài
+### External standards
 
 - RFC 8288, “Web Linking”.
 - RFC 4033, “DNS Security Introduction and Requirements”.

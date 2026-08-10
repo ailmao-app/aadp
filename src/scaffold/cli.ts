@@ -2,7 +2,7 @@
 /**
  * `aadp init` / `aadp add-resource <type>` — scaffold starter files for
  * the `defineAADP()`/`defineResource()` server runtime
- * (`docs/vi/plans/implementation-plan.md` §11 "Ưu tiên 2"). Generates
+ * (`docs/vi/plans/implementation-plan.md` §11, priority 2). Generates
  * files only; it never edits an existing config file, since parsing and
  * rewriting arbitrary user TypeScript is more likely to corrupt it than
  * help — the generated file's own comments tell the user what to wire up
