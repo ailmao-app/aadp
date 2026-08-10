@@ -142,14 +142,28 @@ person willing to own the result.
 | Field | Value |
 |---|---|
 | Origin | `https://ailmao.com` |
-| Ran at | 2026-08-10T13:15:55Z – 13:15:57Z |
+| Ran at | 2026-08-10T13:22:13Z – 13:22:20Z |
 | Node | `v20.18.1` (the `engines.node` floor; the repo's own test matrix cannot use it — see `.github/workflows/ci.yml` — but this run never invokes the dev toolchain) |
-| Package | `ail-aadp@1.4.0`, 259 files / 277.1 kB, tarball `sha256:933ccdafe715b6fb48610685abb02775ea3d74791c0f2620d781a5f66c82a47e`. Re-packed and re-run after the packaging fix below, so the evidence is about the tarball that would actually be published |
+| Package | `ail-aadp@1.4.0`, 259 files / 277.5 kB, tarball `sha256:6461cfacc2580f2ea16ca7e4aef234dda8e665cc50df3fd0b89393c23998d16c` |
 | URL policy | Default (strict). No `allowPrivateNetwork`, no custom policy — so `answer.security`/`evidence.security` pass outright instead of warning |
 | Answer sample | `https://ailmao.com/ai/v1.0/entities/answer/can-a-user-control-an-ailon.json` |
 | Claim sample | `https://ailmao.com/ai/v1.0/entities/claim/ailons-are-fictional.json` |
 | Evidence sample | `https://ailmao.com/ai/v1.0/entities/evidence/terms-of-service.json` |
 | Result | Answer `passed` 9/9; Evidence `passed` 10/10. Zero failed, zero warnings, zero skipped, zero inconclusive |
+
+That digest identifies **the artifact to publish**, not a predecessor of it.
+Every packaged file — `dist`, `schemas`, `spec`, `examples`, `scripts`,
+`CHANGELOG.md`, `README.md`, `SECURITY.md`, `LICENSE` — was frozen before the
+run, and everything changed afterwards (this record, the two stored reports)
+lives under `docs/`, which `files` does not package. `npm pack` on this tree is
+reproducible: packing twice in a row yields the identical digest above, which
+is what makes the hash a usable identity claim rather than a timestamp.
+
+Recorded because an earlier attempt got this wrong in a way that is easy to
+miss: the reports were produced from a tarball packed *before* a `CHANGELOG.md`
+edit, so the record named a hash nobody could reproduce from the tagged commit
+even though no runtime code differed. Byte identity depends on the whole
+packaged input, documentation included.
 
 Worth recording what this deployment is, because it is **not** the
 `examples/reference-server` the plan originally named: `ailmao.com` is a

@@ -11,9 +11,9 @@
     "name": "aadp-evidence-conformance",
     "version": "1.4.0"
   },
-  "started_at": "2026-08-10T13:15:56.376Z",
-  "finished_at": "2026-08-10T13:15:57.710Z",
-  "duration_ms": 1334,
+  "started_at": "2026-08-10T13:22:14.154Z",
+  "finished_at": "2026-08-10T13:22:20.070Z",
+  "duration_ms": 5917,
   "status": "passed",
   "summary": {
     "total": 10,
@@ -38,42 +38,42 @@
       "group": "discovery",
       "title": "Manifest declares aadp:evidence@1.0 with {id, version, schema}",
       "status": "passed",
-      "duration_ms": 324
+      "duration_ms": 1211
     },
     {
       "id": "evidence.resource",
       "group": "resource",
       "title": "Sample claim and evidence entities are reachable through the core discovery/entity flow",
       "status": "passed",
-      "duration_ms": 250
+      "duration_ms": 1565
     },
     {
       "id": "evidence.schema",
       "group": "schema",
       "title": "Sample x_evidence wrappers pass the Evidence 1.0 schema",
       "status": "passed",
-      "duration_ms": 2
+      "duration_ms": 3
     },
     {
       "id": "evidence.semantic",
       "group": "semantic",
       "title": "Pure wrapper semantic invariants are green (including content_checksum)",
       "status": "passed",
-      "duration_ms": 1
+      "duration_ms": 0
     },
     {
       "id": "evidence.context",
       "group": "context",
       "title": "Entity type, x_evidence presence, canonical_url policy and retrieved_at <= updated_at ORDERING are green",
       "status": "passed",
-      "duration_ms": 0
+      "duration_ms": 1
     },
     {
       "id": "evidence.graph",
       "group": "graph",
       "title": "Claim → evidence resolves with no dangling reference, and fan-in is deduplicated",
       "status": "passed",
-      "duration_ms": 242
+      "duration_ms": 905
     },
     {
       "id": "evidence.stance",
@@ -94,14 +94,14 @@
       "group": "integration",
       "title": "Answer related_entities resolve to claim/evidence and expand two hops, with x_answer unchanged",
       "status": "passed",
-      "duration_ms": 513
+      "duration_ms": 2230
     },
     {
       "id": "evidence.security",
       "group": "security",
       "title": "Free text is inert, source URLs are never traversed, and access grants nothing",
       "status": "passed",
-      "duration_ms": 0
+      "duration_ms": 1
     }
   ]
 }
