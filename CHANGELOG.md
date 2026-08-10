@@ -10,7 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pro
 
 Evidence & Provenance Module `1.0` (`docs/adr/0010-evidence-citation-provenance-and-security.md`, `spec/modules/evidence/v1.0/specification.md`, `docs/vi/plans/implementation-plan-v1.4.0.md`), plus the generic server module support and reference resources carried over from `1.3.0`. Additive only: AADP wire version stays `1.0`, and no released core, Relations `1.0` or Answer `1.0` schema changes. No public API changes for any consumer that does not opt into the `ail-aadp/modules/evidence/v1.0` subpath.
 
-> **Release gate.** ADR-0010 was Accepted on 2026-08-09, allocating `aadp:evidence@1.0`. The external interoperability run (a packed-tarball conformance run against a real HTTPS deployment, for both Answer and Evidence) is still open — see `docs/records/implementation-record-v1.4.0.md`.
+> **Release gate.** ADR-0010 was Accepted on 2026-08-09, allocating `aadp:evidence@1.0`. The external interoperability run has been performed: a packed-tarball clean install on Node `20.18.1` (the `engines.node` floor), driving `https://ailmao.com` over real HTTPS through public exports only, with both runners reporting `passed` — Answer 9/9, Evidence 10/10. Reports are stored verbatim in `docs/records/conformance/1.4.0/`, owned by Trong Nhan. Every release gate for `1.4.0` is now closed — see `docs/records/implementation-record-v1.4.0.md`.
 
 ### Added
 
@@ -45,7 +45,7 @@ Evidence & Provenance Module `1.0` (`docs/adr/0010-evidence-citation-provenance-
 
 - Both new server fields are generic: the runtime never inspects, imports or branches on a specific module id, and the entity `checksum` stays scoped to `data` so adding an extension to an already-published entity does not change it. A configuration omitting `modules` and `extensions` produces manifest and entity documents byte-identical to `1.3.0`. Boundary keys `x_Foo`, `x_1` and bare `x_` are accepted because the released core entity schema accepts them.
 - The reference Answer resource closes the reference-resource gate deferred from `1.3.0`. Its interop test asserts the served entity passes `validateAnswerEntityV1` end to end and that every related target actually resolves. Answer `1.0` requires an absolute HTTPS `canonical_url`, so answers validate when the example runs under an HTTPS `AADP_BASE_URL`; the server also prints the local address it bound when that differs from the origin it publishes.
-- The external interoperability gate deferred from `1.3.0` — a packed-tarball conformance run against a real HTTPS deployment, for both Answer and Evidence — is **still open**; see `docs/records/implementation-record-v1.4.0.md`.
+- The external interoperability gate deferred from `1.3.0` — a packed-tarball conformance run against a real HTTPS deployment, for both Answer and Evidence — has been **run, passed and owned** on the `engines.node` floor; the reports are in `docs/records/conformance/1.4.0/`. See `docs/records/implementation-record-v1.4.0.md`.
 
 ## 1.3.1 - 2026-08-08
 

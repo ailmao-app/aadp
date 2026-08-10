@@ -1,9 +1,9 @@
-# AADP `ail-aadp` 1.4.0 Implementation Record — in progress
+# AADP `ail-aadp` 1.4.0 Implementation Record
 
 | Field | Value |
 |---|---|
 | Document type | Implementation record |
-| Status | **In progress — not a release record.** Phases 0-6 complete and ADR-0010 Accepted; the external interoperability run remains the one open gate |
+| Status | **Gates closed.** Phases 0-6 complete, ADR-0010 Accepted, and the external interoperability run performed and owned — real HTTPS deployment, packed-tarball clean install, Node engine floor, both reports `passed`. What remains before a tag is the ordinary release verification on the exact commit to be tagged |
 | Audience | Package maintainers and release reviewers |
 | Scope | Evidence & Provenance Module `1.0` plus the generic server module support and reference resources carried over from `1.3.0` |
 | Wire impact | AADP wire version stays `1.0`. No released core, Relations `1.0` or Answer `1.0` schema, module version or wire contract changed. Evidence `1.0` is a new module contract |
@@ -12,9 +12,11 @@
 ## Abstract
 
 This memo records what `1.4.0` has delivered, which decisions are worth
-remembering, and which gates remain open. It exists before the release
-deliberately: one of the open items is a **maintainer decision, not unwritten
-code**, and a reviewer needs to be able to tell those apart.
+remembering, and how its gates were closed. It was written before the release
+deliberately, while the last open item was a **maintainer decision, not
+unwritten code** — a distinction a reviewer has to be able to make. That item
+is now closed too, with the evidence stored alongside this record rather than
+summarized away.
 
 It is informational and does not override any specification or schema.
 Requirement words follow [the AADP documentation conventions](../document-conventions.md).
@@ -118,28 +120,58 @@ artifact needed editing — but that was the outcome, not a guarantee the proces
 provided. From the `ail-aadp@1.4.0` tag onward the schemas above are immutable
 in the ordinary way.
 
-## Open gates
+### External interoperability evidence (closed 2026-08-10)
 
-### 1. External interoperability evidence has no owner or environment
-
-Carried over from **open gate 2 of the [1.3.0 record](implementation-record-v1.3.0.md)**
-and still open. This is now the only thing standing between `1.4.0` and a tag. The plan forbids closing it with a mock server or unit tests; it
-needs a real deployment and a named person.
+Carried over from **open gate 2 of the [1.3.0 record](implementation-record-v1.3.0.md)**,
+open through this release's whole implementation, and closed here. It was
+never blocked by missing code: it needed a real deployment, a real run, and a
+person willing to own the result.
 
 | Required | Status |
 |---|---|
-| Named maintainer owning the run | **Not assigned** |
-| Reference server deployed at a real HTTPS origin, reachable from CI | **Not provisioned** |
-| `ail-aadp` clean-installed from a packed tarball, public exports only | Mechanism exists in `tests/package/*` and passes against a local process; not yet pointed at a real origin |
-| Real HTTP — no in-process handler, no fetch mock | Not run |
-| `runAnswerConformance` report JSON, overall `passed` | Not run |
-| `runEvidenceConformance` report JSON, overall `passed` | Not run |
-| Run on the Node engine floor declared in `package.json` | Not run |
+| Named maintainer owning the run | **Done** — Trong Nhan (nhannvt09cntt@gmail.com) |
+| A conforming deployment at a real HTTPS origin | **Done** — `https://ailmao.com` (see below) |
+| `ail-aadp` clean-installed from a packed tarball, public exports only | **Done** — `ail-aadp-1.4.0.tgz` packed from this tree, installed into an empty project; the run imports only `ail-aadp/modules/answer/v1.0` and `ail-aadp/modules/evidence/v1.0` |
+| Real HTTP — no in-process handler, no fetch mock | **Done** — plain HTTPS over the public internet |
+| `runAnswerConformance` report JSON, overall `passed` | **Done** — [`conformance/1.4.0/answer-1.0-ailmao.com.json`](conformance/1.4.0/answer-1.0-ailmao.com.json), 9/9 |
+| `runEvidenceConformance` report JSON, overall `passed` | **Done** — [`conformance/1.4.0/evidence-1.0-ailmao.com.json`](conformance/1.4.0/evidence-1.0-ailmao.com.json), 10/10 |
+| Run on the Node engine floor declared in `package.json` | **Done** — Node `v20.18.1`, the `engines.node` floor exactly |
 
-Neither half is blocked by missing code any more: the reference server publishes
-conformant Answer, claim and evidence entities, and both runners execute from a
-packed tarball. What is missing is a deployment and an owner, both of which are
-coordination outside this repository.
+#### The run
+
+| Field | Value |
+|---|---|
+| Origin | `https://ailmao.com` |
+| Ran at | 2026-08-10T12:58:03Z – 12:58:05Z |
+| Node | `v20.18.1` (the `engines.node` floor; the repo's own test matrix cannot use it — see `.github/workflows/ci.yml` — but this run never invokes the dev toolchain) |
+| Package | `ail-aadp@1.4.0`, packed from commit `2edd14e`, tarball `sha256:1ce46d429905f1f45ffeafed2a04651787d6da7513024b4150236131ef4cb727` |
+| URL policy | Default (strict). No `allowPrivateNetwork`, no custom policy — so `answer.security`/`evidence.security` pass outright instead of warning |
+| Answer sample | `https://ailmao.com/ai/v1.0/entities/answer/can-a-user-control-an-ailon.json` |
+| Claim sample | `https://ailmao.com/ai/v1.0/entities/claim/ailons-are-fictional.json` |
+| Evidence sample | `https://ailmao.com/ai/v1.0/entities/evidence/terms-of-service.json` |
+| Result | Answer `passed` 9/9; Evidence `passed` 10/10. Zero failed, zero warnings, zero skipped, zero inconclusive |
+
+Worth recording what this deployment is, because it is **not** the
+`examples/reference-server` the plan originally named: `ailmao.com` is a
+first-party Next.js application that consumes `ail-aadp` as an ordinary
+dependency and publishes its own `answer`, `claim` and `evidence` resources —
+first-party statements about the product, each cited to a page that
+deployment actually publishes. That makes it stronger evidence than the
+example server would have been, not weaker: the modules are exercised by a
+consumer that was not written alongside them, through public exports only,
+on data the repository does not control. The deployment serves the Evidence
+`1.0` schema artifacts from its own origin, since they are not published on
+`aadp.dev` yet.
+
+Both reports are stored verbatim under [`conformance/1.4.0/`](conformance/1.4.0/);
+`evidence.answer_link` passing is what proves the two-hop
+answer → claim → evidence walk works against a deployment neither runner
+authored.
+
+## Open gates
+
+None. Every gate this record opened is closed above; the release verification
+on the exact commit to be tagged is the ordinary pre-tag step, not a gate.
 
 ## Verification run
 
@@ -154,8 +186,10 @@ The whole Answer test suite (12 files, 174 tests) passes **without a single line
 changed**, which is the regression proof required for the shared-layer refactor.
 
 `npm pack --dry-run` alone is not evidence that public exports work; the packed
-tarball suite in `tests/package/*` is what exercises them, and the external run
-in open gate 2 is what would prove interoperability.
+tarball suite in `tests/package/*` is what exercises them locally, and the
+external run recorded in open gate 1 is what proves interoperability — a clean
+tarball install on the engines floor, driving a deployment this repository does
+not control, over real HTTPS.
 
 ## Decisions worth recording
 

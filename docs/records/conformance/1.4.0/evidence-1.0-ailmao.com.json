@@ -1,0 +1,107 @@
+{
+  "report_version": "1",
+  "aadp_version": "1.0",
+  "module": {
+    "id": "aadp:evidence",
+    "version": "1.0"
+  },
+  "package_version": "1.4.0",
+  "base_url": "https://ailmao.com",
+  "runner": {
+    "name": "aadp-evidence-conformance",
+    "version": "1.4.0"
+  },
+  "started_at": "2026-08-10T12:58:04.475Z",
+  "finished_at": "2026-08-10T12:58:05.476Z",
+  "duration_ms": 1001,
+  "status": "passed",
+  "summary": {
+    "total": 10,
+    "passed": 10,
+    "failed": 0,
+    "warnings": 0,
+    "skipped": 0,
+    "inconclusive": 0
+  },
+  "effective_limits": {
+    "maxDepth": 3,
+    "maxNodes": 1000,
+    "maxRequests": 2000,
+    "maxTotalBytes": 67108864,
+    "deadlineMs": 300000,
+    "maxCrossOriginRequests": 100,
+    "maxPages": 20
+  },
+  "checks": [
+    {
+      "id": "evidence.discovery",
+      "group": "discovery",
+      "title": "Manifest declares aadp:evidence@1.0 with {id, version, schema}",
+      "status": "passed",
+      "duration_ms": 244
+    },
+    {
+      "id": "evidence.resource",
+      "group": "resource",
+      "title": "Sample claim and evidence entities are reachable through the core discovery/entity flow",
+      "status": "passed",
+      "duration_ms": 187
+    },
+    {
+      "id": "evidence.schema",
+      "group": "schema",
+      "title": "Sample x_evidence wrappers pass the Evidence 1.0 schema",
+      "status": "passed",
+      "duration_ms": 2
+    },
+    {
+      "id": "evidence.semantic",
+      "group": "semantic",
+      "title": "Pure wrapper semantic invariants are green (including content_checksum)",
+      "status": "passed",
+      "duration_ms": 0
+    },
+    {
+      "id": "evidence.context",
+      "group": "context",
+      "title": "Entity type, x_evidence presence, canonical_url policy and retrieved_at <= updated_at ORDERING are green",
+      "status": "passed",
+      "duration_ms": 1
+    },
+    {
+      "id": "evidence.graph",
+      "group": "graph",
+      "title": "Claim → evidence resolves with no dangling reference, and fan-in is deduplicated",
+      "status": "passed",
+      "duration_ms": 186
+    },
+    {
+      "id": "evidence.stance",
+      "group": "stance",
+      "title": "Stance/confidence are producer assertions; a missing confidence is not inferred",
+      "status": "passed",
+      "duration_ms": 1
+    },
+    {
+      "id": "evidence.provenance",
+      "group": "provenance",
+      "title": "Timestamp ordering, precedence and freshness classification are correct",
+      "status": "passed",
+      "duration_ms": 0
+    },
+    {
+      "id": "evidence.answer_link",
+      "group": "integration",
+      "title": "Answer related_entities resolve to claim/evidence and expand two hops, with x_answer unchanged",
+      "status": "passed",
+      "duration_ms": 379
+    },
+    {
+      "id": "evidence.security",
+      "group": "security",
+      "title": "Free text is inert, source URLs are never traversed, and access grants nothing",
+      "status": "passed",
+      "duration_ms": 1
+    }
+  ]
+}
