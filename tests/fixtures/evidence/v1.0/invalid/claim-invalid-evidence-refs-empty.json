@@ -1,0 +1,9 @@
+{
+  "module": "aadp:evidence",
+  "version": "1.0",
+  "kind": "claim",
+  "statement": "Orbit reported 99.9% uptime in 2026.",
+  "locale": "en",
+  "evidence_refs": [],
+  "content_checksum": "sha256:65ec740925dda18332e6b0740eb932d9cc42e601ea615e8bcec3db57116b20c0"
+}

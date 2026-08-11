@@ -49,7 +49,7 @@ Không tạo release rỗng chỉ để đạt số version trong roadmap. Patch
 | `1.1.x` | Stabilization cho public API 1.1 | Có điều kiện | Không |
 | `1.2.0` | Module infrastructure và Relations pilot | Implementation Ready | Extension/module riêng |
 | `1.3.0` | Answer Module | Chờ Relations ổn định | Module riêng |
-| `1.4.0` | Evidence & Provenance Module | Chờ Answer/Relations | Module riêng |
+| `1.4.0` | Evidence & Provenance Module | Implementation xong; chờ external conformance run | Module riêng |
 | `1.5.0` | Cross-module graph traversal và composition | Chờ ba module ổn định | Không đổi core schema |
 | `1.6.0` | Experimental AI Usage Policy | Chờ ADR và legal review | `x_ai_usage` experimental |
 | `1.7.0` | Auth-aware retrieval helpers | Chờ security ADR | Không đổi manifest schema |
@@ -329,8 +329,11 @@ sửa artifact đã công bố.
 
 ## 12. Release 1.4.0 — Evidence & Provenance Module
 
-Trạng thái: blocked bởi citation/claim ADR, stable Relations target model và
-Answer Module stable để khóa integration contract.
+Trạng thái: **implementation hoàn tất**, ADR-0010 Accepted (2026-08-09),
+specification/conformance nay là normative. Gate còn lại duy nhất là external
+conformance run trên deployment HTTPS thật (kế thừa từ `1.3.0`, xem §10) — cần
+môi trường và owner, không phải code. Chi tiết ở
+[implementation record 1.4.0](../../records/implementation-record-v1.4.0.md).
 
 Issue coverage:
 
@@ -624,7 +627,7 @@ Release gate:
 | Abort/concurrency/retry/byte budget/profiles | `1.1.0` | Đã phát hành |
 | `AADP-MODULE-001`, `AADP-REL-001..006` | `1.2.0` | Implementation Ready |
 | `AADP-MODULE-002` Answer | `1.3.0` | Chờ Relations |
-| `AADP-MODULE-003` Evidence & Provenance | `1.4.0` | Chờ citation/claim ADR |
+| `AADP-MODULE-003` Evidence & Provenance | `1.4.0` | ADR-0010 Accepted; implementation xong |
 | `AADP-MODULE-004..006` cross-module completion | `1.3.0–1.5.0` | Chia theo module/orchestration |
 | Graph traversal/composition | `1.5.0` | Planned |
 | `AADP-AI-POLICY-001..003` | `1.6.0` | Chờ legal/ADR |

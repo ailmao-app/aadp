@@ -1,0 +1,418 @@
+{
+  "module": "aadp:evidence",
+  "version": "1.0",
+  "kind": "claim",
+  "statement": "Orbit reported 99.9% uptime in 2026.",
+  "locale": "en",
+  "evidence_refs": [
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-0",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-0.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-1",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-1.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-2",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-2.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-3",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-3.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-4",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-4.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-5",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-5.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-6",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-6.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-7",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-7.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-8",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-8.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-9",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-9.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-10",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-10.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-11",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-11.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-12",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-12.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-13",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-13.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-14",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-14.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-15",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-15.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-16",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-16.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-17",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-17.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-18",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-18.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-19",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-19.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-20",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-20.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-21",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-21.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-22",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-22.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-23",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-23.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-24",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-24.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-25",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-25.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-26",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-26.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-27",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-27.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-28",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-28.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-29",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-29.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-30",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-30.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-31",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-31.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-32",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-32.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-33",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-33.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-34",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-34.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-35",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-35.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-36",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-36.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-37",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-37.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-38",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-38.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-39",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-39.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-40",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-40.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-41",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-41.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-42",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-42.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-43",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-43.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-44",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-44.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-45",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-45.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-46",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-46.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-47",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-47.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-48",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-48.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-49",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-49.json"
+      },
+      "stance": "support"
+    },
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:report-50",
+        "url": "https://example.com/ai/v1.0/entities/evidence/report-50.json"
+      },
+      "stance": "support"
+    }
+  ],
+  "content_checksum": "sha256:2545638514eb2efe09fb6c96934766bcd003ad042f49430fa80407bbd75c00c0"
+}

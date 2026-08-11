@@ -27,12 +27,22 @@ const pkg = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")
 };
 
 /**
- * Whether `files` packages `filePath`. Entries in this package are plain
- * file or directory names (no globs), so a directory entry covers
- * everything beneath it and a file entry must match exactly.
+ * Whether `files` packages `filePath`. Positive entries in this package are
+ * plain file or directory names, so a directory entry covers everything
+ * beneath it and a file entry must match exactly.
+ *
+ * Negations (`!...`) are skipped rather than interpreted: the only one
+ * excludes `node_modules` at any depth, i.e. generated dependency trees,
+ * and can never exclude a script's own source file. What the tarball
+ * contains is asserted directly against `npm pack` in
+ * `tarball-contents.test.ts`, which is the right place for exclusion
+ * semantics — this file is only asking "did someone forget to package a
+ * file a published script reads".
  */
 function isPackaged(filePath: string): boolean {
-  return pkg.files.some((entry) => filePath === entry || filePath.startsWith(`${entry}/`));
+  return pkg.files
+    .filter((entry) => !entry.startsWith("!"))
+    .some((entry) => filePath === entry || filePath.startsWith(`${entry}/`));
 }
 
 /**

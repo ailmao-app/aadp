@@ -1,0 +1,24 @@
+{
+  "module": "aadp:evidence",
+  "version": "1.0",
+  "kind": "claim",
+  "statement": "Orbit reported 99.9% uptime in 2026.",
+  "locale": "en",
+  "evidence_refs": [
+    {
+      "target_type": "evidence",
+      "target": {
+        "id": "evidence:orbit-status-report-2026",
+        "url": "https://example.com/ai/v1.0/entities/evidence/orbit-status-report-2026.json",
+        "x_ext": {
+          "": "bmp-private-use",
+          "𐀀": "supplementary-plane"
+        }
+      },
+      "stance": "support",
+      "confidence": 0.5
+    }
+  ],
+  "notes": "Editorial note: the two reports cover different measurement windows.",
+  "content_checksum": "sha256:97c0dff3b51a737565b73929d72c765bf6df3881c8b9f5df76777fb69c8e2afa"
+}

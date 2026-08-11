@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/modules/evidence/v1.0/source.schema.json",
+  "title": "AADP Evidence Module v1.0 — Source",
+  "description": "Component schema (not a top-level module document kind). Describes where an evidence document came from — a location OUTSIDE AADP that this module never fetches (specification.md §13). `title` and `publisher.name` are untrusted free text. `access` is presentation metadata ONLY: it is a producer assertion about the source behind `url`, it grants no access, and it MUST NOT take part in any traversal, authorization or conformance decision (specification.md §12, ADR-0010 §8) — authorization of the evidence resource itself is decided by core/Relations authorization and the manifest `security` declaration.",
+  "type": "object",
+  "required": ["title", "url", "publisher", "access"],
+  "properties": {
+    "title": { "type": "string", "minLength": 1 },
+    "url": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "publisher": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "url": { "type": "string", "format": "uri", "pattern": "^https://" }
+      },
+      "additionalProperties": false
+    },
+    "access": { "enum": ["public", "authenticated", "restricted"] }
+  },
+  "additionalProperties": false
+}

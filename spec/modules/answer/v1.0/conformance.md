@@ -11,124 +11,130 @@
 
 ## 1. Purpose
 
-Xác định check ID ổn định, taxonomy issue, và normative/advisory boundary cho
-Answer `1.0` conformance. Không thay đổi core `CHECKS`/check ID hay Relations
-`RELATIONS_CHECKS` (ADR-0007 "Conformance boundary").
+Defines the stable check IDs, issue taxonomy and normative/advisory boundary for
+Answer `1.0` conformance. It does not change the core `CHECKS`/check IDs or the
+Relations `RELATIONS_CHECKS` (ADR-0007, "Conformance boundary").
 
 ## 2. Check catalog
 
-| Check ID | Group | Nội dung | Required/Optional |
+| Check ID | Group | Content | Required/Optional |
 |---|---|---|---|
-| `answer.discovery` | discovery | Manifest quảng bá đúng `{id, version, schema}` cho `aadp:answer@1.0` | Required |
-| `answer.resource` | resource | Fetch sample Answer entity thành công qua core discovery/entity flow | Required |
-| `answer.schema` | schema | Wrapper `x_answer` đúng Answer `1.0` schema | Required |
-| `answer.semantic` | semantic | Pure wrapper semantic invariants (bao gồm `content_checksum`) xanh | Required |
-| `answer.context` | context | Entity type, `x_answer` presence, `entity.canonical_url` presence/URL-policy, `updated_at` equality xanh | Required |
-| `answer.authorship` | authorship | Discriminator/provenance không mơ hồ (`author.url` policy) | Required |
-| `answer.references` | references | `related_entities` VÀ (khi generated-summary) `authorship.source_targets` resolve bằng Relations resolver/shared budget | Required khi có sample |
-| `answer.freshness` | freshness | Timestamp semantics và injected-clock classification đúng | Required |
-| `answer.security` | security | Free text inert; URL/target resolution không bypass policy | Required |
+| `answer.discovery` | discovery | The manifest advertises the correct `{id, version, schema}` for `aadp:answer@1.0` | Required |
+| `answer.resource` | resource | A sample Answer entity fetches successfully through the core discovery/entity flow | Required |
+| `answer.schema` | schema | The `x_answer` wrapper passes the Answer `1.0` schema | Required |
+| `answer.semantic` | semantic | Pure wrapper semantic invariants (including `content_checksum`) are green | Required |
+| `answer.context` | context | Entity type, `x_answer` presence, `entity.canonical_url` presence and URL policy, and `updated_at` equality are green | Required |
+| `answer.authorship` | authorship | The discriminator and provenance are unambiguous (`author.url` policy) | Required |
+| `answer.references` | references | `related_entities` AND (for a generated summary) `authorship.source_targets` resolve through the Relations resolver on the shared budget | Required when a sample exists |
+| `answer.freshness` | freshness | Timestamp semantics and injected-clock classification are correct | Required |
+| `answer.security` | security | Free text is inert; URL/target resolution does not bypass policy | Required |
 
-Mỗi check là async function thuần trên `AnswerCheckContext`, không baked-in
-fixture. Check phụ thuộc sample document (`options.sampleEntityUrl`) là
-`skipped`/`inconclusive`, KHÔNG BAO GIỜ `failed`, khi không có sample — cùng lý
-do với core `ConformanceOptions.negativeTargets`. `answer.references` là
-`inconclusive` chỉ khi sample answer không có cả `related_entities` lẫn (với
-generated-summary) `authorship.source_targets` — một generated summary chỉ có
-`source_targets`, không có `related_entities`, vẫn phải được exercise, vì
-`source_targets` là provenance bắt buộc của generated-summary, không phải một
-field phụ.
+Each check is a pure async function over `AnswerCheckContext`, with no baked-in
+fixture. A check depending on a sample document (`options.sampleEntityUrl`) is
+`skipped`/`inconclusive` and NEVER `failed` when no sample is available — the
+same reasoning as the core `ConformanceOptions.negativeTargets`.
+`answer.references` is `inconclusive` only when the sample answer has neither
+`related_entities` nor (for a generated summary) `authorship.source_targets` — a
+generated summary that has only `source_targets` and no `related_entities` must
+still be exercised, because `source_targets` is mandatory provenance for a
+generated summary, not an incidental field.
 
 ## 3. Prerequisite chain
 
-`answer.resource` là prerequisite của mọi check trừ `answer.discovery`.
-`answer.schema` là prerequisite của `answer.semantic`, `answer.authorship`,
-`answer.references`, `answer.freshness`. Một prerequisite `failed`/`skipped`
-khiến check phụ thuộc bị `skipped` với message giải thích, không tự chạy.
+`answer.resource` is a prerequisite of every check except `answer.discovery`.
+`answer.schema` is a prerequisite of `answer.semantic`, `answer.authorship`,
+`answer.references` and `answer.freshness`. A `failed`/`skipped` prerequisite
+makes the dependent check `skipped` with an explanatory message rather than
+letting it run.
 
 ## 4. Status taxonomy
 
-`passed`/`failed`/`warning`/`skipped`, giống core (`CheckStatus`). `skipped`
-với `inconclusive: true` nghĩa là runner không đạt verdict (thiếu sample URL,
-hoặc traversal budget cắt ngang) — không phải bằng chứng conformance. Overall
-`report.status` là `failed` nếu có check `failed` (hoặc `warning` khi
-`failOnWarning`); `inconclusive` nếu có check inconclusive nhưng không có
-`failed`; ngược lại `passed`.
+`passed`/`failed`/`warning`/`skipped`, as in core (`CheckStatus`). `skipped`
+with `inconclusive: true` means the runner reached no verdict (a missing sample
+URL, or the traversal budget cutting the run short) — it is not evidence of
+conformance. The overall `report.status` is `failed` when a check failed (or
+warned, under `failOnWarning`); `inconclusive` when a check is inconclusive but
+none failed; otherwise `passed`.
 
 ## 5. Options boundary
 
-Runner hỗ trợ server có auth theo cùng option boundary với Relations:
-`headers`, `crossOriginSafeHeaders`, `urlPolicy`/`allowPrivateNetwork`,
+The runner supports authenticated servers under the same option boundary as
+Relations: `headers`, `crossOriginSafeHeaders`,
+`urlPolicy`/`allowPrivateNetwork`,
 `timeoutMs`/`maxRedirects`/`maxResponseBytes`/`retry`, traversal limits
 (`maxPages`/`maxDepth`/`maxNodes`/`maxRequests`/`maxTotalBytes`/
-`maxCrossOriginRequests`/`deadlineMs`), `now` (injected clock cho
-`answer.freshness`), `signal` (`AbortSignal`), `failOnWarning`, `onCheck`.
+`maxCrossOriginRequests`/`deadlineMs`), `now` (an injected clock for
+`answer.freshness`), `signal` (`AbortSignal`), `failOnWarning` and `onCheck`.
 
-Report phân biệt failed check, unsupported module (không declare trong
-manifest → `answer.discovery` inconclusive), và traversal/budget failure
-(`skipped`+`inconclusive`, không phải `failed`). Một external consumer
-clean-install chỉ dùng public package exports phải đạt toàn bộ required checks
-mà không import source internals — xem `tests/package/*`.
+The report distinguishes a failed check, an unsupported module (not declared in
+the manifest → `answer.discovery` inconclusive), and a traversal/budget failure
+(`skipped` + `inconclusive`, not `failed`). An external consumer using only the
+public package exports from a clean install must pass every required check
+without importing source internals — see `tests/package/*`.
 
-`runAnswerConformance` validate mọi numeric option (`timeoutMs`/`maxRedirects`/
-`maxResponseBytes`/`maxPages`/`maxDepth`/`maxNodes`/`maxRequests`/
-`maxTotalBytes`/`maxCrossOriginRequests`/`deadlineMs`), `retry.maxAttempts`/
-`retry.baseDelayMs`/`retry.maxDelayMs`, và `now` NGAY từ đầu — trước khi gửi
-request đầu tiên — và ném `InvalidAnswerConformanceOptionsError` cho giá trị
-không dùng được (`NaN`/không phải số nguyên/âm/dưới minimum của option đó,
-hoặc `now` không phải Date hợp lệ). Một lỗi cấu hình của caller KHÔNG BAO GIỜ
-được ghi thành `status: "failed"` cho deployment đang test. `maxRedirects`,
-`maxDepth`, `maxNodes`, `maxCrossOriginRequests` cho phép `0` như một giá trị
-ranh giới hợp lệ, vì phạm vi của chúng đủ hẹp để không chặn cả run: `maxDepth`/
-`maxNodes` chỉ charge riêng cho Relations resolve từng Answer target (ví dụ
-dừng traversal trước cả target đầu tiên), không áp dụng cho manifest/sample
-entity fetch; `maxCrossOriginRequests` chỉ chặn request khác origin, request
-cùng origin của một run bình thường vẫn đi qua bình thường. Ngược lại,
-`maxRequests` được charge cho MỌI HTTP attempt của cả run — kể cả manifest
-discovery và sample entity fetch, không chỉ Answer target resolution — nên
-nó yêu cầu tối thiểu 1 giống các dimension transport/core khác (`timeoutMs`,
-`maxResponseBytes`, `maxPages`, `deadlineMs`, `maxTotalBytes`,
-`retry.maxAttempts`), vì `0` ở bất kỳ dimension nào trong nhóm này khiến
-request đầu tiên của cả run không thể thực hiện được.
+`runAnswerConformance` validates every numeric option
+(`timeoutMs`/`maxRedirects`/`maxResponseBytes`/`maxPages`/`maxDepth`/`maxNodes`/
+`maxRequests`/`maxTotalBytes`/`maxCrossOriginRequests`/`deadlineMs`),
+`retry.maxAttempts`/`retry.baseDelayMs`/`retry.maxDelayMs`, and `now` UP FRONT —
+before the first request — and throws
+`InvalidAnswerConformanceOptionsError` for an unusable value (`NaN`,
+non-integer, negative, below that option's minimum, or a `now` that is not a
+valid Date). A caller's misconfiguration MUST NEVER be recorded as
+`status: "failed"` against the deployment under test. `maxRedirects`,
+`maxDepth`, `maxNodes` and `maxCrossOriginRequests` accept `0` as a valid
+boundary value, because their scope is narrow enough not to block the whole run:
+`maxDepth`/`maxNodes` are charged only for the Relations resolution of each
+Answer target (stopping traversal before even the first target, say), not for
+the manifest or sample entity fetch; `maxCrossOriginRequests` only blocks
+cross-origin requests, so a normal run's same-origin requests still go through.
+`maxRequests`, by contrast, is charged for EVERY HTTP attempt in the run —
+including manifest discovery and the sample entity fetch, not just Answer target
+resolution — so it requires a minimum of 1, like the other transport/core
+dimensions (`timeoutMs`, `maxResponseBytes`, `maxPages`, `deadlineMs`,
+`maxTotalBytes`, `retry.maxAttempts`), because `0` in any of those makes the
+run's very first request impossible.
 
 ## 6. Unsupported version
 
-Unsupported Answer version KHÔNG phải remote deployment conformance check —
-runner không thể yêu cầu một conforming server quảng bá version giả. Hành vi
-này được kiểm tra trong package compatibility suite bằng synthetic
-manifest/entity: core-only consumer phải bỏ qua `x_answer`, opt-in Answer
-consumer phải trả `unsupported_module_version` và không fallback sang `1.0`.
+An unsupported Answer version is NOT a remote deployment conformance check — a
+runner cannot require a conforming server to advertise a fake version. That
+behaviour is tested in the package compatibility suite with a synthetic
+manifest/entity: a core-only consumer must ignore `x_answer`, and an opt-in
+Answer consumer must report `unsupported_module_version` without falling back to
+`1.0`.
 
 ## 7. Security check scope
 
-`answer.security` scan free text (`question`/`concise_answer`/`answer`) cho
-prompt-injection-shaped substring, nhưng KHÔNG coi sự hiện diện của một
-substring như vậy là failure — free text chứa chuỗi đó vẫn là valid, inert
-data (specification.md §14). Absence của một crash/behavior change là điều
-kiện pass thật sự, thứ mà một static scan một mình không chứng minh được;
-check này report substring tìm thấy như `warning` (thông tin), không `failed`.
-Check cũng cảnh báo khi run dùng non-default URL policy
-(`allowPrivateNetwork`/custom `urlPolicy`) — SSRF protection bị nới lỏng có
-chủ đích cho run đó.
+`answer.security` scans free text (`question`/`concise_answer`/`answer`) for
+prompt-injection-shaped substrings, but does NOT treat the presence of such a
+substring as a failure — free text containing one is still valid, inert data
+(specification.md §14). The real pass condition is the absence of a crash or
+behaviour change, which a static scan alone cannot prove; this check reports any
+substring it finds as a `warning` (informational), not `failed`. The check also
+warns when the run uses a non-default URL policy
+(`allowPrivateNetwork`/custom `urlPolicy`) — SSRF protection was deliberately
+relaxed for that run.
 
 ## 8. Normative fixture catalog
 
-Xem `tests/fixtures/answer/v1.0/{valid,invalid}/*.json` và
-`tests/modules/answer/v1.0/fixtures.test.ts` cho danh sách đầy đủ + mapping
-issue code kỳ vọng. Danh mục bao phủ: source-authored tối thiểu/đầy đủ,
-generated-summary có/không human review, locale với region + millisecond
-timestamp, expired answer, Relations `target.x_*` cross-plane Unicode key;
-thiếu required field, `content_checksum` mismatch cho từng nhóm field, alias
-`short_answer`, authorship mixed/incomplete, generated summary thiếu/duplicate
-source target, locale/timestamp/URL policy violation, applicability rỗng/
-duplicate/invalid, related entity vượt limit/duplicate, prompt-injection text
-(vẫn phải valid — không phải invalid fixture).
+See `tests/fixtures/answer/v1.0/{valid,invalid}/*.json` and
+`tests/modules/answer/v1.0/fixtures.test.ts` for the full list and the expected
+issue-code mapping. The catalog covers: minimal and complete source-authored
+answers, generated summaries with and without human review, a locale with a
+region plus millisecond timestamps, an expired answer, a cross-plane Unicode key
+in the Relations `target.x_*`; and, on the invalid side, missing required
+fields, a `content_checksum` mismatch for each field group, the `short_answer`
+alias, mixed/incomplete authorship, a generated summary with missing or
+duplicate source targets, locale/timestamp/URL policy violations, empty,
+duplicate or invalid applicability, related entities over the limit or
+duplicated, and prompt-injection text (which must remain valid — it is not an
+invalid fixture).
 
 ## 9. Report shape
 
 `AnswerConformanceReport`: `report_version`, `aadp_version`, `module`,
 `package_version`, `base_url?`, `runner`, `started_at`/`finished_at`/
-`duration_ms`, `status`, `summary`, `effective_limits`, `checks[]`. Renderer
-xuất text/JSON/JUnit; `answerExitCodeFor`: `0` conformant, `1` một check
-failed, `4` inconclusive (nothing certifiable) — cùng contract với core/
-Relations runner.
+`duration_ms`, `status`, `summary`, `effective_limits`, `checks[]`. The renderer
+emits text, JSON or JUnit; `answerExitCodeFor` returns `0` for conformant, `1`
+when a check failed, and `4` for inconclusive (nothing certifiable) — the same
+contract as the core and Relations runners.

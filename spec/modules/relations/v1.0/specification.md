@@ -12,19 +12,19 @@
 
 ## Abstract
 
-Tài liệu này định nghĩa wire contract normative cho Relations Module v1.0. Module
-biểu diễn typed relations giữa AADP entities bằng inline relation set hoặc
-paginated collection mà không đổi core schema v1.0. Từ khóa BCP 14 viết hoa có
-nghĩa chuẩn tắc.
+This document defines the normative wire contract for Relations Module v1.0. The
+module expresses typed relations between AADP entities as an inline relation set
+or a paginated collection, without changing the core v1.0 schemas. Uppercase BCP
+14 keywords carry their normative meaning.
 
 ## 1. Scope
 
-Module định nghĩa discovery, `x_relations`, relation one/inline-many/collection,
-canonical target, standard registry, validation và traversal conformance. Module
-không định nghĩa ranking, graph inference, database model, business authorization
-hoặc automatic credential acquisition.
+The module defines discovery, `x_relations`, the one/inline-many/collection
+relation forms, canonical targets, the standard registry, validation and
+traversal conformance. The module does not define ranking, graph inference, a
+database model, business authorization or automatic credential acquisition.
 
-## 2. Discovery và compatibility
+## 2. Discovery and compatibility
 
 ```json
 {
@@ -34,19 +34,20 @@ hoặc automatic credential acquisition.
 }
 ```
 
-Server MUST chỉ quảng bá module khi payload, endpoints, schema và conformance
-artifacts đã deploy. Core-only client MUST bỏ qua declaration và `x_relations`.
-Relations client MUST exact-match ID/version và MUST NOT fallback version.
-Field `schema` trỏ tới schema dispatch của các top-level Relations documents;
-discovery entry được validate bởi core manifest schema v1.0, không bởi schema này.
+A server MUST advertise the module only once its payloads, endpoints, schemas
+and conformance artifacts are deployed. A core-only client MUST ignore the
+declaration and `x_relations`. A Relations client MUST exact-match the ID and
+version, and MUST NOT fall back to another version. The `schema` field points at
+the dispatch schema for the top-level Relations documents; the discovery entry
+itself is validated by the core manifest schema v1.0, not by that schema.
 
 ## 3. Document kinds
 
-- `relation-set`: value của `entity.x_relations`.
-- `relation-collection`: một page từ collection endpoint.
-- `relation-registry`: machine-readable standard registry.
+- `relation-set`: the value of `entity.x_relations`.
+- `relation-collection`: one page from a collection endpoint.
+- `relation-registry`: the machine-readable standard registry.
 
-Relation item và target chỉ là schema components.
+Relation items and targets are schema components only.
 
 ## 4. Relation set
 
@@ -59,19 +60,19 @@ Relation item và target chỉ là schema components.
 }
 ```
 
-`module`, `version`, `kind`, `items` REQUIRED. Unknown non-`x_*` field MUST bị từ
-chối; `x_*` MAY xuất hiện tại mọi object module định nghĩa.
+`module`, `version`, `kind` and `items` are REQUIRED. An unknown non-`x_*` field
+MUST be rejected; `x_*` MAY appear on any object the module defines.
 
 ## 5. Relation item
 
 | Field | Required | Contract |
 |---|---|---|
-| `rel` | Có | Standard token hoặc vendor token namespaced |
-| `target_type` | Có | AADP resource type token |
-| `cardinality` | Có | `one` hoặc `many` |
-| `inverse` | Không | Descriptive inverse token |
-| `ordered` | Không | Default `false` |
-| `updated_at` | Không | RFC 3339 date-time |
+| `rel` | Yes | A standard token or a namespaced vendor token |
+| `target_type` | Yes | An AADP resource type token |
+| `cardinality` | Yes | `one` or `many` |
+| `inverse` | No | Descriptive inverse token |
+| `ordered` | No | Defaults to `false` |
+| `updated_at` | No | RFC 3339 date-time |
 
 ### 5.1 One
 
@@ -88,7 +89,7 @@ chối; `x_*` MAY xuất hiện tại mọi object module định nghĩa.
 }
 ```
 
-`one` MUST có đúng `target`, MUST NOT có `targets` hoặc `collection`.
+`one` MUST have exactly `target`, and MUST NOT have `targets` or `collection`.
 
 ### 5.2 Inline many
 
@@ -107,8 +108,8 @@ chối; `x_*` MAY xuất hiện tại mọi object module định nghĩa.
 }
 ```
 
-`many` MUST có đúng một trong `targets` hoặc `collection`. Inline list MUST không
-quá 100 items; danh sách lớn hơn dùng collection.
+`many` MUST have exactly one of `targets` or `collection`. An inline list MUST
+NOT exceed 100 items; larger lists use a collection.
 
 ### 5.3 Collection many
 
@@ -125,13 +126,14 @@ quá 100 items; danh sách lớn hơn dùng collection.
 }
 ```
 
-`collection.pagination` MUST là `cursor` trong v1.0.
+`collection.pagination` MUST be `cursor` in v1.0.
 
 ## 6. Canonical target
 
-`id` và absolute HTTP(S) `url` REQUIRED. `label`, `checksum`, `updated_at` là
-hints. Entity tại URL authoritative và MUST có ID bằng target ID, type bằng
-`target_type`. ID prefix trước `:` MUST bằng `target_type`.
+`id` and an absolute HTTP(S) `url` are REQUIRED. `label`, `checksum` and
+`updated_at` are hints. The entity at the URL is authoritative and MUST have an
+ID equal to the target ID and a type equal to `target_type`. The ID prefix
+before `:` MUST equal `target_type`.
 
 ## 7. Relation collection
 
@@ -157,14 +159,15 @@ hints. Entity tại URL authoritative và MUST có ID bằng target ID, type b�
 }
 ```
 
-Mọi field REQUIRED trừ `ordered` có default `false`. `checksum` là SHA-256 của
-canonical `items` theo core convention. `cursor.next` là opaque string hoặc
-`null`, bind với source/relation/target type/ordering/filter. Page MUST không có
-duplicate target IDs. `ordered: true` yêu cầu stable snapshot ordering.
+Every field is REQUIRED except `ordered`, which defaults to `false`. `checksum`
+is the SHA-256 of the canonical `items` per the core convention. `cursor.next`
+is an opaque string or `null`, bound to the source, relation, target type,
+ordering and filters. A page MUST NOT contain duplicate target IDs.
+`ordered: true` requires a stable snapshot ordering.
 
 ## 8. Standard registry
 
-Machine-readable registry dùng envelope:
+The machine-readable registry uses this envelope:
 
 ```json
 {
@@ -185,51 +188,53 @@ Machine-readable registry dùng envelope:
 }
 ```
 
-`aadp_version`, `module`, `module_version`, `kind`, `generated_at`, `checksum`,
-`relations` REQUIRED. `checksum` tính trên canonical `relations`. Mỗi token MUST
-unique. `inverse` MAY omit khi không có inverse chuẩn; `symmetric: true` yêu cầu
-`inverse` bằng chính token. `description` là untrusted informational text.
+`aadp_version`, `module`, `module_version`, `kind`, `generated_at`, `checksum`
+and `relations` are REQUIRED. `checksum` is computed over the canonical
+`relations`. Every token MUST be unique. `inverse` MAY be omitted when there is
+no standard inverse; `symmetric: true` requires `inverse` to equal the token
+itself. `description` is untrusted informational text.
 
 | Token | Inverse hint | Semantics |
 |---|---|---|
-| `creator` | `created` | Target tạo nguồn |
-| `created` | `creator` | Target được nguồn tạo |
-| `author` | `authored` | Target viết nguồn |
-| `authored` | `author` | Target được nguồn viết |
-| `posts` | `creator` hoặc `author` | Target là post của nguồn |
-| `series` | `has_part` | Target là series của nguồn |
-| `part_of` | `has_part` | Nguồn là phần của target |
-| `has_part` | `part_of` | Target là phần của nguồn |
-| `mentions` | `mentioned_by` | Nguồn nhắc target |
-| `mentioned_by` | `mentions` | Target nhắc nguồn |
-| `about` | `subject_of` | Nguồn nói về target |
-| `subject_of` | `about` | Target nói về nguồn |
-| `supports` | `supported_by` | Nguồn hỗ trợ target |
-| `supported_by` | `supports` | Target hỗ trợ nguồn |
-| `evidence` | `supports` | Target là evidence |
-| `source` | `source_of` | Target là nguồn |
-| `source_of` | `source` | Target dùng nguồn entity |
-| `related` | `related` | Quan hệ đối xứng chung |
+| `creator` | `created` | The target created the source |
+| `created` | `creator` | The target was created by the source |
+| `author` | `authored` | The target wrote the source |
+| `authored` | `author` | The target was written by the source |
+| `posts` | `creator` or `author` | The target is a post by the source |
+| `series` | `has_part` | The target is a series of the source |
+| `part_of` | `has_part` | The source is part of the target |
+| `has_part` | `part_of` | The target is part of the source |
+| `mentions` | `mentioned_by` | The source mentions the target |
+| `mentioned_by` | `mentions` | The target mentions the source |
+| `about` | `subject_of` | The source is about the target |
+| `subject_of` | `about` | The target is about the source |
+| `supports` | `supported_by` | The source supports the target |
+| `supported_by` | `supports` | The target supports the source |
+| `evidence` | `supports` | The target is evidence |
+| `source` | `source_of` | The target is a source |
+| `source_of` | `source` | The target uses the source entity |
+| `related` | `related` | A general symmetric relationship |
 
-`follows`/`followers` không thuộc registry v1.0 vì privacy risk. Vendor token MUST
-khớp `^x_[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$`. Unknown unnamespaced token MUST bị
-từ chối. Inverse consistency là SHOULD, không phải MUST.
+`follows`/`followers` are not part of the v1.0 registry because of privacy risk.
+A vendor token MUST match `^x_[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$`. An unknown
+unnamespaced token MUST be rejected. Inverse consistency is a SHOULD, not a
+MUST.
 
-## 9. HTTP behavior
+## 9. HTTP behaviour
 
 - Success: `200 application/json`.
-- Empty collection: `200`, `items: []`.
+- Empty collection: `200` with `items: []`.
 - Unknown source: AADP `not_found`.
-- Invalid/cross-context cursor: AADP `invalid_request`.
+- Invalid or cross-context cursor: AADP `invalid_request`.
 - Missing credential: AADP `unauthorized`.
 - Policy-blocked known relation: AADP `forbidden`.
 
-Collection SHOULD hỗ trợ ETag, Last-Modified và conditional GET. Generic HTML
-error hoặc silent scraping fallback MUST NOT được dùng.
+A collection SHOULD support ETag, Last-Modified and conditional GET. A generic
+HTML error page or a silent scraping fallback MUST NOT be used.
 
 ## 10. Schema artifacts
 
-Package MUST ship đúng các artifacts sau:
+The package MUST ship exactly these artifacts:
 
 ```text
 schemas/modules/relations/v1.0/
@@ -242,40 +247,42 @@ schemas/modules/relations/v1.0/
 └── relation-registry.schema.json
 ```
 
-`module.schema.json` là schema dispatch của module và MUST dùng `oneOf` theo
-`kind` tới đúng ba top-level document schemas. Nó MUST NOT validate discovery
-entry `{id, version, schema}`; entry đó thuộc core manifest schema v1.0. Component
-schemas MUST không được đăng ký như document kinds.
+`module.schema.json` is the module's dispatch schema and MUST use `oneOf` on
+`kind` to reach exactly the three top-level document schemas. It MUST NOT
+validate the discovery entry `{id, version, schema}`; that entry belongs to the
+core manifest schema v1.0. Component schemas MUST NOT be registered as document
+kinds.
 
 ## 11. Validation model
 
-Pure validation kiểm tra schema/cardinality/token/ID prefix/duplicates mà không
-gọi network. Resolution validation fetch target/collection và kiểm tra identity,
-context, cursor bằng shared HTTP/budget. Pure validation MUST chạy trước khi tin
-URL trong module payload.
+Pure validation checks schema, cardinality, tokens, ID prefixes and duplicates
+without making network calls. Resolution validation fetches targets and
+collections and checks identity, context and cursors using the shared HTTP stack
+and budget. Pure validation MUST run before any URL in a module payload is
+trusted.
 
 ## 12. Traversal
 
-Traversal MUST tuân ADR-0008: shared depth/node/request/byte/deadline budget,
-cross-origin cap, cancellation, cycle guard và dedup. Partial/inconclusive result
-MUST không được báo complete.
+Traversal MUST follow ADR-0008: a shared depth/node/request/byte/deadline
+budget, a cross-origin cap, cancellation, a cycle guard and deduplication. A
+partial or inconclusive result MUST NOT be reported as complete.
 
-## 13. Security và privacy
+## 13. Security and privacy
 
-- Relation text/label là untrusted data.
-- Mọi URL qua SSRF/redirect policy.
-- Module MUST không vượt target security scheme.
-- Public AADP MUST không xuất private/block/moderation relation.
-- Broken relation MUST không kích hoạt scraping hoặc tool execution.
+- Relation text and labels are untrusted data.
+- Every URL goes through the SSRF/redirect policy.
+- The module MUST NOT bypass a target's security scheme.
+- Public AADP MUST NOT expose private, block or moderation relations.
+- A broken relation MUST NOT trigger scraping or tool execution.
 
 ## 14. Compatibility
 
-Core-only consumer bỏ qua `x_relations`. Schema/types/validator/client/conformance
-của Relations 1.0 MUST release cùng nhau.
+A core-only consumer ignores `x_relations`. The Relations 1.0 schemas, types,
+validator, client and conformance suite MUST be released together.
 
 ## 15. IANA Considerations
 
-Tài liệu này không yêu cầu hành động IANA.
+This document has no IANA actions.
 
 ## 16. References
 
