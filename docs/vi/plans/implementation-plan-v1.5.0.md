@@ -11,8 +11,17 @@
 | Review | [review-20260811-194300](../../../.claude/review/review-20260811-194300.md) — bản này được viết lại để đóng finding P1-1..P1-4 và P2-5; P2-6 được đóng bằng cập nhật roadmap §2/§12 |
 | Owner | AADP maintainers |
 
-Tài liệu này là **kế hoạch, không phải nguồn normative**. Nguồn normative sẽ là
-ADR-0011 và `spec/traversal/v1.0/specification.md`. Nếu hai bên lệch nhau, spec thắng.
+Tài liệu này là **kế hoạch, không phải nguồn normative**. Nguồn binding là
+[ADR-0011](../../adr/0011-cross-module-graph-traversal.md); nếu plan và ADR lệch
+nhau, **ADR thắng**.
+
+Cố ý KHÔNG viện dẫn `spec/traversal/v1.0/specification.md`: cross-module traversal
+là **client-side capability, không phải wire contract**, nên có cần một
+specification riêng hay không vẫn là open question #3 của ADR-0011. Trích dẫn một
+"nguồn normative" chưa tồn tại và chưa chắc tồn tại sẽ khiến release gate có thể
+được đóng dựa trên tài liệu không có thật. Nếu open question #3 quyết định publish
+spec, thì bảng work package phải thêm việc draft/review/accept spec đó và Phase
+1-6 tiếp tục bị chặn tới khi spec chốt.
 
 ## Trạng thái theo work package
 
@@ -133,16 +142,31 @@ export interface TraversalAdapterCapabilities {
   fetchesTargets: boolean;
 }
 
-export interface TraversalAdapter {
+export interface TraversalAdapter<TDoc = unknown> {
   readonly key: TraversalAdapterKey;
   readonly capabilities: TraversalAdapterCapabilities;
   /**
-   * Đọc extension payload của MỘT entity đã validate và trả danh sách edge ứng
-   * viên theo input order. Pure: KHÔNG fetch, KHÔNG charge budget, KHÔNG đọc
-   * clock. Việc fetch/charge do scheduler làm qua shared canonical resolution.
+   * Bước BẮT BUỘC trước `planEdges`. Validate extension payload của entity bằng
+   * ĐÚNG validator đã phát hành của module version đó (`validateEvidenceEntityV1`,
+   * `validateAnswerEntityV1`, …) và trả typed document, hoặc trả issue list.
+   * Pure: KHÔNG fetch, KHÔNG charge, KHÔNG đọc clock.
+   *
+   * Adapter MUST NOT tự viết validation behavior — nó gọi validator public của
+   * module client, để traversal không bao giờ chấp nhận payload mà module client
+   * đơn lẻ sẽ từ chối.
    */
-  planEdges(entity: EntityV1, context: TraversalPlanContext): TraversalEdgePlan[];
+  parseExtension(entity: EntityV1): TraversalParseResult<TDoc>;
+  /**
+   * Chỉ được gọi khi `parseExtension` trả `ok: true`, và nhận **document đã
+   * validate**, không phải `unknown`. Trả danh sách edge ứng viên theo input
+   * order. Pure: KHÔNG fetch, KHÔNG charge budget, KHÔNG đọc clock.
+   */
+  planEdges(document: TDoc, entity: EntityV1, context: TraversalPlanContext): TraversalEdgePlan[];
 }
+
+export type TraversalParseResult<TDoc> =
+  | { ok: true; document: TDoc }
+  | { ok: false; issues: ModuleSemanticIssue[] };
 
 export interface TraversalEdgePlan {
   edgeGroup: string;
@@ -156,15 +180,45 @@ export interface TraversalEdgePlan {
 }
 ```
 
-Ba hệ quả bắt buộc:
+Bốn hệ quả bắt buộc:
 
-- `planEdges` là pure ⇒ adapter không thể tự phát request, nên không thể vượt
-  URL/DNS policy hay bypass budget. Đây là lý do tách `planEdges` khỏi việc fetch.
-- Adapter MUST NOT import `src/module-registry` để dispatch; validation của
-  payload vẫn do module client (`validateEvidenceEntityV1`, …) làm như hiện tại.
+- `parseExtension`/`planEdges` đều pure ⇒ adapter không thể tự phát request, nên
+  không thể vượt URL/DNS policy hay bypass budget. Đây là lý do tách chúng khỏi
+  việc fetch.
+- **Scheduler MUST NOT gọi `planEdges` trên extension chưa validate.** Shared
+  canonical resolution chỉ bảo đảm entity **core-valid** (`EntityV1`) — nó không
+  biết adapter nào sắp đọc `x_*` nào, nên nó không thể validate module payload
+  hộ. Thiếu bước này thì một entity core-valid mang `x_answer`/`x_evidence` hỏng
+  sẽ đi thẳng vào adapter dưới dạng `unknown`, và adapter hoặc throw ngoài
+  taxonomy, hoặc dựng edge từ dữ liệu chưa hợp lệ.
+- Adapter MUST NOT import `src/module-registry` để dispatch; nó gọi validator
+  public của module client (`validateEvidenceEntityV1`, …), nên traversal và
+  module client đơn lẻ luôn chấp nhận đúng một tập payload.
 - Adapter cho ba module `1.0` nằm trong package, nhưng **không tự đăng ký**:
   consumer gọi `registerBuiltinTraversalAdapters()` hoặc truyền
   `options.adapters`. Core-only consumer không chạm tới file nào của traversal.
+
+### Validation phase
+
+Thứ tự bắt buộc cho mỗi node đã `resolved`:
+
+```text
+1. đọc tập x_* thực có trên entity
+2. với mỗi x_*: lookup adapter theo {payload.module, payload.version, field}
+     miss  → expansion outcome `unsupported-module`, DỪNG, không đọc payload
+3. adapter.parseExtension(entity)
+     ok:false → expansion outcome `invalid-extension`, DỪNG, KHÔNG phát edge nào
+4. adapter.planEdges(document, entity, context)
+```
+
+`invalid-extension` giữ node ở status `resolved` — core entity vẫn hợp lệ, chỉ
+extension hỏng. Đây đúng mô hình hai tầng: canonical outcome của node không đổi,
+vấn đề nằm ở expansion. Issue của validator được gắn kèm event `expansion` để
+consumer truy vết được, và **không** edge con nào được lên lịch.
+
+Fixture bắt buộc: `x_relations`, `x_answer`, `x_evidence` malformed (sai schema,
+sai `content_checksum`, sai `version`), mỗi cái kèm assert "không request nào
+được phát cho edge con".
 
 ## Edge matrix
 
@@ -200,10 +254,12 @@ hàng 2, không làm root.
 Mỗi canonical target `{id, normalizedUrl}` đi qua đúng một trong các chuỗi sau:
 
 ```text
-discovered ──► resolving ──► resolved ──► expanding ──► expanded
-     │             │             │            │
-     │             │             │            └──► unsupported-module | leaf | depth-limit
-     │             │             └──► (không expand vì đã expanded ở nhánh khác) ──► cycle
+discovered ──► resolving ──► resolved ──► validating ──► expanding ──► expanded
+     │             │             │             │             │
+     │             │             │             │             └──► leaf | depth-limit
+     │             │             │             ├──► unsupported-module
+     │             │             │             └──► invalid-extension
+     │             │             └──► (đã expand ở nhánh khác) ──► already-expanded | cycle
      │             └──► forbidden | not-found | invalid | budget-exhausted
      └──► (đã có canonical outcome) ──► replayed (không fetch lại)
 ```
@@ -213,25 +269,44 @@ discovered ──► resolving ──► resolved ──► expanding ──► 
 
 | Outcome | Nghĩa | Có phát request? | Có charge node? |
 |---|---|---|---|
-| `expanded` | Adapter khớp, edge đã được lên lịch | (tuỳ edge con) | Không (charge ở resolve) |
-| `leaf` | Adapter khớp nhưng entity không có edge nào (hàng 6, hoặc mảng rỗng) | Không | Không |
+| `expanded` | Adapter khớp, payload valid, edge đã được lên lịch | (tuỳ edge con) | Không (charge ở resolve) |
+| `leaf` | Adapter khớp, payload valid, nhưng entity không có edge nào (hàng 6, hoặc mảng rỗng) | Không | Không |
 | `unsupported-module` | Entity có `x_*` nhưng không adapter nào khớp `{moduleId, moduleVersion, extensionField}` | Không | Không |
-| `depth-limit` | Edge sẽ chạm `maxDepth` | Không | Không |
-| `cycle` | Canonical key đã `markExpanded` trước đó | Không | Không |
+| `invalid-extension` | Adapter khớp nhưng module validator reject payload | Không | Không |
+| `depth-limit` | Edge có **landing depth > `maxDepth`** | Không | Không |
+| `already-expanded` | Canonical key đã expand ở một nhánh khác **không phải ancestor** (fan-in/diamond) | Không | Không |
+| `cycle` | Canonical key **nằm trên ancestor path của chính occurrence này** | Không | Không |
 | `not-resolved` | Node có status ≠ `resolved` nên không có payload để expand | — | — |
 | `budget-exhausted` | Budget cạn / abort trước khi kịp expand | Không | Không |
 
 Quy tắc bắt buộc:
 
-- **Cycle**: dùng nguyên `markExpanded`/`expandedTargets` của
-  `RelationsTraversalBudgetState`. Cycle KHÔNG phải lỗi, KHÔNG throw, KHÔNG charge
-  thêm — chỉ dừng đúng nhánh đó và phát outcome `cycle`.
+- **Expand-at-most-once vs cycle là hai chuyện khác nhau.** Cơ chế chặn vẫn là
+  `markExpanded`/`expandedTargets` của `RelationsTraversalBudgetState`, không đổi
+  và không thêm state vào budget. Nhưng `expandedTargets` chỉ chứng minh "đã
+  expand rồi", KHÔNG chứng minh có cycle: trong diamond DAG `A→B→D`, `A→C→D`,
+  nhánh `C→D` gặp `D` đã expanded mà không hề có đường quay lại ancestor. Báo đó
+  là `cycle` là sai topology.
+  - Phân loại: scheduler đi ngược **parent-occurrence chain** của chính edge đang
+    xét. Nếu canonical key của target xuất hiện trên chain đó ⇒ `cycle`; nếu
+    không ⇒ `already-expanded`.
+  - Chi phí: chain dài tối đa `maxDepth` (default 3), nên đây là O(depth) trên
+    mỗi edge, không phải state toàn cục mới. Parent-occurrence link vốn đã cần cho
+    `parentDiscoveryIndex` của schedule key.
+  - Hai outcome **hành xử giống hệt nhau**: dừng nhánh, không throw, không charge
+    thêm. Khác nhau duy nhất ở nhãn báo cáo — nhưng đó chính là thứ consumer và
+    check `graph.traversal.cycle_contained` dùng để đọc topology.
+- **Depth boundary**: dùng nguyên `chargeDepth`, vốn chỉ vượt budget khi
+  `depth > maxDepth`. Node **ở đúng** `depth == maxDepth` vẫn được fetch và emit;
+  chỉ edge có landing depth `> maxDepth` mới cho `depth-limit`. Viết sai chỗ này
+  sẽ làm effective depth ít hơn Relations `1.0` đúng một cấp với cùng limits.
 - **Type mismatch**: verdict tính **theo từng occurrence**, đúng mô hình hai tầng
   của `EvidenceGraph` (node giữ canonical outcome dùng chung; reference/edge giữ
   verdict riêng). Một reference khai sai `target_type` là `invalid` **cho riêng
   nó** và MUST NOT làm hỏng reference khác trỏ cùng canonical target.
-- **Unsupported module**: là kết quả hợp lệ, KHÔNG fail traversal, KHÔNG fail
-  conformance. Đây là điều kiện sống còn cho core-only/single-module consumer.
+- **Unsupported module** và **invalid extension**: đều là kết quả hợp lệ, KHÔNG
+  fail traversal, KHÔNG fail conformance. Đây là điều kiện sống còn cho
+  core-only/single-module consumer và cho deployment có một entity hỏng.
 - Một node chỉ được expand **một lần** trên toàn walk, kể cả khi được nhiều cạnh
   trỏ tới (fan-in) — do `markExpanded`, không do dedupe riêng của service.
 
@@ -399,28 +474,64 @@ Ba invariant kiểm chứng được:
 
 Đây là phần đóng nửa đầu finding P2-5.
 
-Thuật toán, chạy một lần cho mỗi origin gặp trong walk:
+**Traversal service KHÔNG fetch manifest.** Đây là quyết định có chủ đích, không
+phải thiếu sót — lý do ở §"Tại sao không đọc manifest" bên dưới.
 
-1. Đọc `.well-known/ai-manifest.json` (core discovery, không có đường mới), lấy
-   `modules[]` — `Array<{ id, version, schema }>`.
-2. Với mỗi entity fetch về, lấy tập extension field `x_*` thực có trên entity đó.
-   **Manifest là gợi ý, entity là sự thật**: adapter được chọn theo
-   `{payload.module, payload.version, extensionField}` đọc từ chính payload, không
-   theo manifest. Manifest chỉ dùng để báo cáo và để bỏ qua sớm.
-3. Tra adapter registry bằng **exact match** ba thành phần. KHÔNG range, KHÔNG
+Thuật toán, chạy cho mỗi entity đã resolve:
+
+1. Lấy tập extension field `x_*` thực có trên chính entity đó. **Entity là nguồn
+   duy nhất**: adapter được chọn theo `{payload.module, payload.version,
+   extensionField}` đọc từ payload.
+2. Tra adapter registry bằng **exact match** ba thành phần. KHÔNG range, KHÔNG
    fallback sang version khác — giống hệt rule đã phát hành cho module registry
    (ADR-0007) và cho Evidence client.
-4. Miss ⇒ expansion outcome `unsupported-module`, node vẫn là node hợp lệ, walk
+3. Miss ⇒ expansion outcome `unsupported-module`, node vẫn là node hợp lệ, walk
    tiếp. **KHÔNG throw, KHÔNG fail.**
+4. Hit ⇒ sang §"Validation phase" bước 3.
 5. Nếu consumer truyền `options.capabilities` (allowlist `{moduleId, version}[]`),
    adapter ngoài allowlist bị coi như không tồn tại (cùng outcome
    `unsupported-module`), để consumer thu hẹp surface một cách tường minh.
-6. Manifest khai nhiều version của cùng `moduleId`: negotiation **không chọn giúp**
-   — mỗi entity payload tự khai version của nó, và bước 3 quyết định. Không có
+6. Deployment khai nhiều version của cùng `moduleId`: negotiation **không chọn giúp**
+   — mỗi entity payload tự khai version của nó, và bước 2 quyết định. Không có
    "preference order" nào vì không có tình huống nào phải chọn.
 
 Hệ quả bắt buộc: một deployment khai module mà consumer không hỗ trợ **không bao
 giờ** làm hỏng traversal của consumer đó. Đây là compatibility gate, có test riêng.
+
+### Tại sao không đọc manifest
+
+Bản trước của kế hoạch này bắt traversal đọc `.well-known/ai-manifest.json` một
+lần mỗi origin. Bỏ hẳn, vì manifest **không quyết định gì**: adapter đã được chọn
+từ payload của entity, nên request manifest là chi phí thuần tuý kèm theo ba vấn
+đề không có lời giải rẻ:
+
+- **Ngoài accounting**: request/byte/cross-origin của manifest không nằm trong
+  bảng accounting nào, nên một walk chạm N origin sẽ phát N request không ai đếm
+  — chính xác là loại rò rỉ mà release gate "không unbounded request" cấm.
+- **Không có failure state**: manifest 404, invalid, bị URL policy chặn, hay làm
+  cạn budget sẽ rơi vào đâu? Không phải node status (nó không phải node), không
+  phải edge. Trả lời được câu này đòi thêm một nhánh taxonomy chỉ để phục vụ một
+  hint không ai dùng.
+- **Root origin không phải lúc nào cũng có**: root dạng `EntityV1` in-memory có
+  thể không có `canonical_url`, nên "origin của root" không xác định được, và
+  cùng một graph sẽ cho kết quả khác nhau giữa root-là-URL và root-là-entity.
+
+Nếu consumer muốn dữ liệu manifest cho mục đích báo cáo, họ tự fetch bằng core
+discovery đã có và truyền vào `options.declaredModules` — traversal chỉ **đọc**
+nó cho summary, không bao giờ tự tạo request và không bao giờ để nó đổi kết quả
+negotiation.
+
+### Root origin
+
+Cross-origin accounting cần một `rootOrigin` xác định. Thứ tự lấy:
+
+1. URL của root, nếu root được truyền dưới dạng URL;
+2. ngược lại `entity.canonical_url` của root entity;
+3. ngược lại `options.rootOrigin` do caller truyền.
+
+Không có cả ba ⇒ **throw invalid-options trước request đầu tiên**. Không đoán,
+không mặc định "same-origin với mọi thứ" — đoán sai ở đây làm
+`maxCrossOriginRequests` mất tác dụng.
 
 ## Conformance contract
 
@@ -435,13 +546,16 @@ giờ** làm hỏng traversal của consumer đó. Đây là compatibility gate,
 
   | Check ID | Nội dung | Trạng thái fail |
   |---|---|---|
-  | `graph.capability.manifest` | Manifest đọc được, `modules[]` hợp lệ | error |
+  | `graph.capability.no_manifest_request` | Traversal KHÔNG tự phát request tới `.well-known/ai-manifest.json` | error |
   | `graph.capability.unsupported_is_not_error` | Module/version lạ cho outcome `unsupported-module`, không throw | error |
   | `graph.capability.exact_match` | Không có fallback sang version khác | error |
+  | `graph.traversal.extension_validated` | Extension hỏng ⇒ `invalid-extension`, không edge con nào được phát | error |
   | `graph.traversal.edge_matrix` | Mọi edge quan sát được thuộc đúng một hàng của edge matrix | error |
   | `graph.traversal.source_targets_opt_in` | Mặc định KHÔNG request tới `authorship.source_targets` | error |
   | `graph.traversal.metadata_not_fetched` | Không request tới `evidence.source.url`/`publisher.url` | error |
-  | `graph.traversal.cycle_contained` | Cycle cho outcome `cycle`, không lỗi, không lặp vô hạn | error |
+  | `graph.traversal.cycle_contained` | Cycle thật (ancestor re-entry) ⇒ `cycle`, không lỗi, không lặp vô hạn | error |
+  | `graph.traversal.fanin_not_cycle` | Diamond DAG ⇒ `already-expanded`, **KHÔNG** phải `cycle` | error |
+  | `graph.traversal.depth_boundary` | Node ở đúng `depth == maxDepth` được resolve; chỉ landing `> maxDepth` mới `depth-limit` | error |
   | `graph.traversal.type_mismatch_scoped` | Verdict sai type không lan sang occurrence khác | error |
   | `graph.ordering.deterministic` | Hai run với thứ tự hoàn tất khác nhau cho cùng chuỗi event | error |
   | `graph.ordering.mixed_order_equivalence` | Đảo thứ tự reference cho cùng graph và cùng số request | error |
@@ -452,9 +566,13 @@ giờ** làm hỏng traversal của consumer đó. Đây là compatibility gate,
   | `graph.streaming.bounded_memory` | Buffer không vượt `maxBufferedEvents` | warning |
   | `graph.compat.core_only_unchanged` | Consumer core-only/single-module không đổi behavior | error |
 
-- Fixture matrix (local, chạy trong CI, không cần deployment): fan-in, mixed
-  order, mixed type, cycle, depth limit, unsupported module, unsupported version,
-  budget stop, abort, collection paging.
+- Check ID là **package API** (ổn định theo SemVer của `ail-aadp`), không phải wire
+  contract — profile này không có artifact nào trên đường truyền.
+- Fixture matrix (local, chạy trong CI, không cần deployment): fan-in/diamond,
+  cycle thật, mixed order, mixed type, malformed `x_relations`/`x_answer`/
+  `x_evidence`, depth boundary (`maxDepth=0`, landing `== maxDepth`, landing
+  `> maxDepth`), unsupported module, unsupported version, budget stop, abort,
+  collection paging.
 - Hai neutral data set (Phase 6) phải có **tên, URL và owner cụ thể ghi trong
   implementation record** trước khi gate được coi là đóng; "hai data set" không có
   định danh thì không tái lập và không audit được. Data set MUST do hai bên khác
@@ -464,8 +582,9 @@ giờ** làm hỏng traversal của consumer đó. Đây là compatibility gate,
 
 ```ts
 export type ExpansionOutcome =
-  | "expanded" | "leaf" | "unsupported-module"
-  | "depth-limit" | "cycle" | "not-resolved" | "budget-exhausted";
+  | "expanded" | "leaf" | "unsupported-module" | "invalid-extension"
+  | "depth-limit" | "already-expanded" | "cycle"
+  | "not-resolved" | "budget-exhausted";
 
 export type GraphNodeStatusV1 = AnswerTargetResolutionStatus; // tái dùng, không enum mới
 
@@ -493,6 +612,10 @@ export interface GraphTraversalOptions extends RelationsClientOptions {
   budget: RelationsTraversalBudgetState;
   adapters?: readonly TraversalAdapter[];
   capabilities?: ReadonlyArray<{ moduleId: string; version: string }>;
+  /** Cross-origin accounting. Bắt buộc khi root là entity không có `canonical_url`. */
+  rootOrigin?: string;
+  /** Manifest `modules[]` do CALLER tự fetch, chỉ dùng cho summary. Traversal không bao giờ tự fetch manifest. */
+  declaredModules?: ManifestV1["modules"];
   includeGeneratedSummarySources?: boolean;  // default false
   followCollections?: boolean;               // default true
   concurrency?: number;                      // default 4

@@ -7,6 +7,11 @@ allocated by this ADR: cross-module traversal is a **client-side capability**,
 not a wire contract. `aadp_version` stays `1.0`, and `aadp:relations@1.0`,
 `aadp:answer@1.0` and `aadp:evidence@1.0` are untouched.
 
+**Until and unless open question 3 decides otherwise, this ADR is the binding
+source for cross-module traversal.** There is no
+`spec/traversal/v1.0/specification.md`, and neither the plan nor any release gate
+may cite one as authority while it does not exist.
+
 Nothing under `src/traversal/**` or `spec/traversal/**` may be created before
 this ADR is Accepted. [ADR-0010](0010-evidence-citation-provenance-and-security.md)
 spent the "decide before freezing" protection of
@@ -74,17 +79,37 @@ traversal service → module clients → module registry
 The module registry MUST NOT know the traversal service exists. No traversal type
 appears in `src/module-registry/**`.
 
-### 2. `planEdges` is pure; only the scheduler fetches
+### 2. Adapters validate before they plan, and both steps are pure
 
-An adapter's only traversal duty is `planEdges(entity, context)`: read one
-already-validated entity's extension payload and return candidate edges in wire
-input order. It MUST NOT fetch, MUST NOT charge the budget, MUST NOT read the
-clock, MUST NOT mutate its input.
+An adapter has exactly two traversal duties, in order:
 
-All fetching, charging and validation stays with the scheduler and the existing
-module clients. This is what keeps a third-party adapter from becoming a way
-around URL/DNS policy or budget accounting: an adapter that cannot make a request
-cannot bypass the rules governing requests.
+1. `parseExtension(entity)` — validate the entity's extension payload using the
+   **released validator of that module version** (`validateAnswerEntityV1`,
+   `validateEvidenceEntityV1`, …) and return either a typed document or a list of
+   issues. An adapter MUST NOT invent its own validation behavior; traversal and
+   a standalone module client MUST accept exactly the same set of payloads.
+2. `planEdges(document, entity, context)` — called **only** on a successful parse,
+   receiving the validated document rather than `unknown`, and returning candidate
+   edges in wire input order.
+
+Both MUST NOT fetch, MUST NOT charge the budget, MUST NOT read the clock, MUST
+NOT mutate their input.
+
+The validation step is mandatory because the shared canonical resolution layer
+guarantees only that an entity is **core**-valid: it does not know which `x_*`
+field some adapter is about to read, so it cannot validate module payloads on the
+adapter's behalf. Without step 1, a core-valid entity carrying a malformed
+`x_answer`/`x_evidence` reaches an adapter as raw `unknown`, and the adapter
+either throws outside the error taxonomy or builds edges out of unvalidated data.
+
+A failed parse yields expansion outcome `invalid-extension`, plans no edges, and
+leaves the node's resolution status at `resolved` — the core entity really is
+valid; only the extension is not.
+
+All fetching and charging stays with the scheduler. This is what keeps a
+third-party adapter from becoming a way around URL/DNS policy or budget
+accounting: an adapter that cannot make a request cannot bypass the rules
+governing requests.
 
 ### 3. The edge matrix is normative for the traversal service only
 
@@ -119,38 +144,82 @@ sixth value, no new resolution enum, consistent with ADR-0010 §2.
 
 Whether a resolved node's own edges were followed is a **different question**, so
 it gets its own traversal-layer enum: `expanded`, `leaf`, `unsupported-module`,
-`depth-limit`, `cycle`, `not-resolved`, `budget-exhausted`.
+`invalid-extension`, `depth-limit`, `already-expanded`, `cycle`, `not-resolved`,
+`budget-exhausted`.
 
 Conflating the two would have forced a new value into a released vocabulary that
 three module clients already return.
 
-### 5. Unsupported modules and versions are outcomes, never failures
+**Depth boundary.** `depth-limit` applies when an edge's **landing depth would
+exceed** `maxDepth`, matching the released `chargeDepth`, which fails only on
+`depth > maxDepth`. A node at exactly `depth == maxDepth` is still fetched and
+emitted. Stating this the other way round would silently give the traversal
+service one level less reach than Relations `1.0` at identical limits.
+
+### 5. Negotiation reads the entity, and traversal never fetches a manifest
 
 Adapter lookup is **exact match** on `{payload.module, payload.version,
-extensionField}`. No range matching, no fallback to another version — the same
-rule ADR-0007 released for the module registry and Evidence `1.0` already
-enforces.
+extensionField}`, read from the payload present on the fetched entity. No range
+matching, no fallback to another version — the same rule ADR-0007 released for
+the module registry and Evidence `1.0` already enforces.
 
 A miss yields expansion outcome `unsupported-module`. The node stays a valid node,
-the walk continues, nothing throws, and no conformance check fails.
+the walk continues, nothing throws, and no conformance check fails. Where a
+deployment advertises several versions of one module id there is nothing to choose
+between — each entity declares its own version — so this ADR defines no preference
+order.
 
-The manifest's `modules[]` is a **hint, not the authority**: the adapter is chosen
-from the payload actually present on the fetched entity. The manifest is used for
-reporting and early skipping only. Where a manifest advertises several versions of
-one module id there is nothing to choose between — each entity declares its own
-version — so this ADR defines no preference order.
+The traversal service **MUST NOT fetch `.well-known/ai-manifest.json`**. The
+manifest decides nothing here, since the entity payload is the authority, so
+fetching it would be pure cost carrying three unsolved problems: its requests and
+bytes appear in no accounting row (a walk touching N origins would emit N
+uncounted requests, exactly what the "no unbounded requests" gate forbids); a
+manifest that 404s, is invalid, is blocked by URL policy, or exhausts the budget
+has no defined outcome, being neither a node nor an edge; and an in-memory root
+entity may have no `canonical_url`, so "the root's origin" is not always defined
+and the same graph would behave differently depending on how the root was passed.
+
+A consumer that wants manifest data for reporting fetches it themselves with the
+existing core discovery API and passes it in. Traversal reads it for the summary
+only, and it never changes a negotiation result.
 
 A consumer MAY pass an explicit capability allowlist; adapters outside it are
 treated as absent, producing the same `unsupported-module` outcome.
 
-### 6. Cycles are contained, not errors
+Cross-origin accounting still needs a definite root origin: it is taken from the
+root URL, else the root entity's `canonical_url`, else a caller-supplied
+`rootOrigin` — and when none of the three exists, traversal throws on invalid
+options **before the first request** rather than guessing. Guessing here would
+quietly disable `maxCrossOriginRequests`.
 
-Cycle containment reuses `markExpanded`/`expandedTargets` on the existing budget
-state. Re-entering an already-expanded canonical key stops that branch with
-outcome `cycle` — no throw, no extra charge, no retry.
+### 6. Expand-at-most-once and "this is a cycle" are two different claims
+
+Containment reuses `markExpanded`/`expandedTargets` on the existing budget state,
+unchanged, with no new state added to the budget: re-entering an already-expanded
+canonical key stops that branch — no throw, no extra charge, no retry.
+
+But `expandedTargets` proves only "already expanded", **not** "cycle". In the
+diamond `A→B→D`, `A→C→D`, the `C→D` occurrence meets an expanded `D` with no path
+back to an ancestor anywhere in sight. Reporting that as a cycle misdescribes the
+topology of a perfectly ordinary DAG, and makes a `cycle_contained` conformance
+check stop measuring cycles.
+
+So the two get separate outcomes:
+
+- `already-expanded` — the canonical key was expanded on some other branch
+  (fan-in/diamond);
+- `cycle` — the canonical key is **on the ancestor path of this very occurrence**,
+  determined by walking that edge's parent-occurrence chain.
+
+The chain is at most `maxDepth` long (reference default 3), so classification is
+O(depth) per edge and needs no new global state — the parent-occurrence link is
+already required for the schedule key's `parentDiscoveryIndex`.
+
+Both outcomes behave identically (stop the branch, no throw, no charge); only the
+reported label differs, and that label is what consumers read the topology from.
 
 Unlike Evidence `1.0`, which is acyclic by construction (ADR-0010 §3), the
-cross-module union **can** express cycles: Relations edges carry a free
+cross-module union **can** express real cycles: Relations edges carry a free
 `target_type` token and any entity may carry `x_relations`. So the machinery
 ADR-0010 was able to omit is required here.
 
@@ -225,6 +294,10 @@ format. Check IDs are stable API under the prefixes `graph.capability.*`,
 `graph.traversal.*`, `graph.ordering.*`, `graph.budget.*`, `graph.streaming.*`
 and `graph.compat.*`; message text is not.
 
+"Stable API" here means **package API, versioned by `ail-aadp`'s own SemVer** —
+this profile puts nothing on the wire, so it is not a protocol surface and it
+does not make this ADR a wire contract.
+
 The "two neutral data sets" release gate is only closed when both data sets are
 recorded by **name, URL and owner** in the `1.5.0` implementation record, with at
 least one owner outside the AADP maintainers. An unnamed data set is neither
@@ -241,7 +314,18 @@ reproducible nor auditable.
   Relations/Answer/Evidence test MUST pass unedited — that is the compatibility
   gate.
 - Cycle machinery, absent from Evidence `1.0`, must now be written, tested and
-  audited. That is the price of a union graph with free `target_type` tokens.
+  audited — including the ancestor-path walk that separates a real cycle from
+  ordinary fan-in. That is the price of a union graph with free `target_type`
+  tokens.
+- Every adapter must call the released validator of its module version before
+  planning. That is one more required hook per adapter, and it makes a third-party
+  adapter's correctness depend on a public module validator existing — the
+  intended constraint, since an adapter that validates differently would let
+  traversal accept payloads a standalone client rejects.
+- Dropping the manifest fetch means the traversal service publishes no discovery
+  behavior of its own and can be reasoned about purely from the entities it
+  fetches. The cost is that a consumer wanting manifest data in the summary has
+  to fetch it and pass it in.
 - Deterministic emission over concurrent fetching costs a buffer and some
   scheduling complexity. The alternative — documenting order as
   timing-dependent — would make the streaming API untestable across
@@ -263,9 +347,11 @@ reproducible nor auditable.
    `maxPages` for row 2.
 2. Whether `concurrency` is public at `1.0` or fixed internally — a public knob
    is an API promise about a scheduling detail.
-3. Whether a normative `spec/traversal/v1.0/specification.md` is published, or
-   whether this being a client-side capability makes the plan plus typed API
-   sufficient.
+3. Whether a normative `spec/traversal/v1.0/specification.md` is published in
+   addition to this ADR. Until that is answered, the Status section's default
+   holds: this ADR is the binding source and no document may cite a specification
+   that does not exist. Answering "yes" adds drafting, review and acceptance of
+   that spec to Phase 0 and keeps Phases 1-6 blocked until it is settled.
 
 ## References
 
