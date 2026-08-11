@@ -106,6 +106,31 @@ A failed parse yields expansion outcome `invalid-extension`, plans no edges, and
 leaves the node's resolution status at `resolved` — the core entity really is
 valid; only the extension is not.
 
+A parse failure carries **both** channels the released validators return
+(`errors: unknown[]` and `semanticIssues`), not a single merged issue list.
+`AnswerEntityValidationResult` and `EvidenceEntityValidationResult` are both
+`{ valid, errors, semanticIssues }`, and a schema-only failure populates only
+`errors` — collapsing them would turn such a failure into an empty issue list,
+leaving `invalid-extension` with no stated reason.
+
+### 2a. Expansion outcomes are per-extension, never per-node
+
+A core-valid entity may carry several `x_*` fields at once — the edge matrix
+itself allows an Answer to carry both `x_relations` and `x_answer`, and core v1.0
+allows arbitrary vendor extensions. So lookup, validation and outcome are scoped
+to **one extension at a time**: an unsupported or malformed extension stops only
+its own adapter, and every other matching adapter on that entity still plans its
+edges. The whole node stops only on budget exhaustion or abort.
+
+Extensions are processed in **adapter key rank order** (`moduleId`,
+`moduleVersion`, `extensionField`), never in JSON property order, so two
+semantically identical entities that serialize their extensions in different
+orders produce the same event sequence.
+
+The consequence for the public shape is that a node carries a **list** of
+expansion records rather than one outcome. Without this, an unrelated `x_vendor`
+field would silently delete an entity's Relations or Answer edges.
+
 All fetching and charging stays with the scheduler. This is what keeps a
 third-party adapter from becoming a way around URL/DNS policy or budget
 accounting: an adapter that cannot make a request cannot bypass the rules
@@ -163,11 +188,18 @@ extensionField}`, read from the payload present on the fetched entity. No range
 matching, no fallback to another version — the same rule ADR-0007 released for
 the module registry and Evidence `1.0` already enforces.
 
-A miss yields expansion outcome `unsupported-module`. The node stays a valid node,
-the walk continues, nothing throws, and no conformance check fails. Where a
-deployment advertises several versions of one module id there is nothing to choose
-between — each entity declares its own version — so this ADR defines no preference
-order.
+A miss yields expansion outcome `unsupported-module` **for that extension only**
+(§2a). The node stays a valid node, its other adapters still run, the walk
+continues, nothing throws, and no conformance check fails. Where a deployment
+advertises several versions of one module id there is nothing to choose between —
+each entity declares its own version — so this ADR defines no preference order.
+
+Registration is keyed by the same triple. Registering a **different** adapter
+under a key already taken throws; re-registering the identical adapter is a
+no-op, and `registerBuiltinTraversalAdapters()` is idempotent. Silent overwrite
+is forbidden because it would make traversal results depend on import order. A
+call MAY pass an explicit adapter set, which **replaces** the global registry for
+that call rather than merging with it.
 
 The traversal service **MUST NOT fetch `.well-known/ai-manifest.json`**. The
 manifest decides nothing here, since the entity payload is the authority, so
@@ -194,11 +226,27 @@ quietly disable `maxCrossOriginRequests`.
 
 ### 6. Expand-at-most-once and "this is a cycle" are two different claims
 
-Containment reuses `markExpanded`/`expandedTargets` on the existing budget state,
-unchanged, with no new state added to the budget: re-entering an already-expanded
-canonical key stops that branch — no throw, no extra charge, no retry.
+Expansion state is **walk-local**, held in the state object owned by one
+`traverseGraphV1` call, and the traversal service neither reads nor writes
+`budget.expandedTargets`.
 
-But `expandedTargets` proves only "already expanded", **not** "cycle". In the
+A budget deliberately outlives a single call — that is the whole point of the
+shared canonical cache, which supports sequential and concurrent resolvers over
+one budget. Putting expansion state on the budget would mean a second
+`traverseGraphV1` over the same budget sees a node "already expanded" by the
+first walk and silently drops all of its outgoing edges, making a traversal's
+result depend on the call history that preceded it. Keeping the traversal
+service off `budget.expandedTargets` also keeps a raw `traverseRelations` on the
+same budget from contaminating, or being contaminated by, a graph walk.
+
+The split is: **node, request, byte and cross-origin accounting plus the
+canonical outcome cache stay budget-scoped** (so a second walk reuses fetched
+entities without spending requests); **expansion and ancestor state are
+walk-local**. Re-entering an already-expanded canonical key within one walk stops
+that branch — no throw, no extra charge, no retry.
+
+The walk-local expanded set proves only "already expanded in this walk", **not**
+"cycle". In the
 diamond `A→B→D`, `A→C→D`, the `C→D` occurrence meets an expanded `D` with no path
 back to an ancestor anywhere in sight. Reporting that as a cycle misdescribes the
 topology of a perfectly ordinary DAG, and makes a `cycle_contained` conformance
@@ -257,9 +305,18 @@ conformance check, exercised with responses completing in reverse order.
 ### 9. The terminal event is mandatory, and partial results say so
 
 `traverseGraphV1` emits exactly one `complete` event carrying `stopReason`
-(`exhausted` | `budget` | `aborted` | `max-events`) and `partial`. It is emitted
-on every path including budget exhaustion and abort, so a consumer never has to
-infer completeness from the iterator merely ending.
+(`exhausted` | `budget` | `aborted`) and `partial`. It is emitted on every path
+including budget exhaustion and abort, so a consumer never has to infer
+completeness from the iterator merely ending.
+
+There is deliberately **no total-event limit**: `maxBufferedEvents` bounds the
+buffer, and the budget's six dimensions bound the work. A third limit would add
+another partial-stop path to account for and test while bounding no additional
+resource. A consumer that wants to stop early breaks out of the iterator.
+
+The public type surface — every event, node, reference, edge, expansion record
+and the collected-graph result — must be complete and compile-checkable before
+acceptance, so no implementer has to invent part of a SemVer-stable API.
 
 If the consumer abandons the iterator early, no `complete` is emitted — the
 consumer gave up, so there is no outcome to declare.
@@ -281,7 +338,7 @@ throw — invalid options, and the `1.3.1` `resolution_context_mismatch`.
   or request — applies unchanged, and the traversal service MUST NOT offer any
   path around it.
 - Accounting is fixed: a cache hit and a join of an in-flight fetch charge
-  nothing; expansion charges nothing beyond `markExpanded`; retries and redirect
+  nothing; expansion charges nothing at all (its state is walk-local); retries and redirect
   hops charge requests, bytes and cross-origin exactly as `http.ts` already does.
   `releaseNode` keeps its released precondition and stays module-internal — the
   traversal service never calls it.
@@ -322,6 +379,13 @@ reproducible nor auditable.
   adapter's correctness depend on a public module validator existing — the
   intended constraint, since an adapter that validates differently would let
   traversal accept payloads a standalone client rejects.
+- Per-extension outcomes mean a node reports a list, not a verdict. Consumers
+  asking "did this node expand?" must look at the record for the extension they
+  care about — the price of not letting an unrelated vendor field delete real
+  edges.
+- Walk-local expansion state means the same node can be expanded again by a later
+  walk on the same budget. That is intended: the budget still refuses to pay for
+  a second fetch, so the repeat costs nothing but re-emitted edges.
 - Dropping the manifest fetch means the traversal service publishes no discovery
   behavior of its own and can be reasoned about purely from the entities it
   fetches. The cost is that a consumer wanting manifest data in the summary has
