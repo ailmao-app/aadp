@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { packAndExtractTarball, cleanupTarball, BUILD_TIMEOUT_MS, type PackedTarball } from "./tarball-helpers.js";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { packAndExtractTarball, cleanupTarball, BUILD_TIMEOUT_MS, PACKED_IMPORT_TIMEOUT_MS, type PackedTarball } from "./tarball-helpers.js";
 
 /**
  * Locks the public export surface (AADP-COMPAT-001 §4.1): every subpath in
@@ -14,6 +14,8 @@ import { packAndExtractTarball, cleanupTarball, BUILD_TIMEOUT_MS, type PackedTar
  */
 
 let tarball: PackedTarball;
+
+vi.setConfig({ testTimeout: PACKED_IMPORT_TIMEOUT_MS });
 
 beforeAll(() => {
   tarball = packAndExtractTarball();

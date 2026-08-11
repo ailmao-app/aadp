@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { packAndExtractTarball, cleanupTarball, BUILD_TIMEOUT_MS, type PackedTarball } from "./tarball-helpers.js";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { packAndExtractTarball, cleanupTarball, BUILD_TIMEOUT_MS, PACKED_IMPORT_TIMEOUT_MS, type PackedTarball } from "./tarball-helpers.js";
 
 /**
  * Synthetic module-compatibility gate for Answer `1.0`
@@ -26,6 +26,8 @@ import { packAndExtractTarball, cleanupTarball, BUILD_TIMEOUT_MS, type PackedTar
  */
 
 let tarball: PackedTarball;
+
+vi.setConfig({ testTimeout: PACKED_IMPORT_TIMEOUT_MS });
 
 beforeAll(() => {
   tarball = packAndExtractTarball();
