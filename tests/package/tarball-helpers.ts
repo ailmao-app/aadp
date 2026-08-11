@@ -22,6 +22,24 @@ import { inject } from "vitest";
 export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const BUILD_TIMEOUT_MS = 180_000;
 
+/**
+ * Per-test budget for suites that import or spawn out of an extracted
+ * tarball, applied with `vi.setConfig` so it stays scoped to those files
+ * instead of loosening the default 5s every other suite relies on to catch
+ * a hang.
+ *
+ * The default is not a meaningful budget here: the first import in a file
+ * pays for a cold read of a just-unpacked 259-file package, and for the
+ * root entry point that means the whole `dist/` graph in one call. On a
+ * slow or contended filesystem — Windows with an on-access virus scanner,
+ * a loaded CI runner — that alone exceeded 5s and failed
+ * `exports.test.ts`'s first case while every later case, served from the
+ * module cache, finished in milliseconds. Nothing here asserts speed, so
+ * the timeout only needs to be far enough above the real cost to stop
+ * reporting machine load as a missing export.
+ */
+export const PACKED_IMPORT_TIMEOUT_MS = 30_000;
+
 export interface PackedTarball {
   packageDir: string;
   workDir: string;
