@@ -122,10 +122,16 @@ to **one extension at a time**: an unsupported or malformed extension stops only
 its own adapter, and every other matching adapter on that entity still plans its
 edges. The whole node stops only on budget exhaustion or abort.
 
-Extensions are processed in **adapter key rank order** (`moduleId`,
-`moduleVersion`, `extensionField`), never in JSON property order, so two
-semantically identical entities that serialize their extensions in different
-orders produce the same event sequence.
+Extensions are processed in **extension-field name order** (code-point), never in
+JSON property order, so two semantically identical entities that serialize their
+extensions differently produce the same event sequence.
+
+The sort key is the field name, not the adapter key, because this same decision
+admits extensions with **no valid module envelope** — a non-object value, or a
+missing `module`/`version` — and those have no `moduleId`/`moduleVersion` to rank
+by. Field names always exist and are always unique within one JSON object, so
+they order every case totally. This governs only the order of expansion records;
+edge order remains governed by `edgeGroupRank` in the schedule key.
 
 The consequence for the public shape is that a node carries a **list** of
 expansion records rather than one outcome. Without this, an unrelated `x_vendor`
@@ -167,13 +173,31 @@ Node resolution keeps the released `AnswerTargetResolutionStatus`
 (`resolved` | `forbidden` | `not-found` | `invalid` | `budget-exhausted`) — no
 sixth value, no new resolution enum, consistent with ADR-0010 §2.
 
-Whether a resolved node's own edges were followed is a **different question**, so
-it gets its own traversal-layer enum: `expanded`, `leaf`, `unsupported-module`,
-`invalid-extension`, `depth-limit`, `already-expanded`, `cycle`, `not-resolved`,
-`budget-exhausted`.
+Whether edges were followed is a **different question** — in fact two of them, at
+two different scopes, so traversal defines **two** enums of its own:
 
-Conflating the two would have forced a new value into a released vocabulary that
-three module clients already return.
+| Scope | Enum | Values |
+|---|---|---|
+| Node | `GraphNodeStatusV1` (released, unchanged) | `resolved`, `forbidden`, `not-found`, `invalid`, `budget-exhausted` |
+| Extension | `ExtensionExpansionOutcomeV1` | `planned`, `no-edges`, `unsupported-module`, `invalid-extension` |
+| Edge occurrence | `EdgeExpansionOutcomeV1` | `expanded`, `leaf`, `depth-limit`, `cycle`, `already-expanded`, `not-expanded`, `budget-exhausted` |
+
+Extension scope and edge scope must stay separate because **one valid extension
+can plan several edges with different fates**: a well-formed `x_relations` may
+plan three edges where the first expands normally, the second re-enters an
+ancestor, and the third would land past `maxDepth`. There is no single correct
+outcome for that extension's record, so the edge-level values live on the edge.
+
+**Every planned edge produces an occurrence result, including edges that are
+never fetched.** Otherwise a consumer cannot distinguish "no such reference" from
+"the reference exists but was blocked by depth or a cycle". Such an edge carries
+no resolution `status` — nothing was ever attempted — which is why `status` is
+optional on an edge rather than gaining a new value in the released node
+vocabulary. Blocked edges are emitted at their scheduled position and do count in
+`summary.edges`, because they are real references on the wire.
+
+Conflating any of the three would have forced new values into a released
+vocabulary that three module clients already return.
 
 **Depth boundary.** `depth-limit` applies when an edge's **landing depth would
 exceed** `maxDepth`, matching the released `chargeDepth`, which fails only on
@@ -218,11 +242,26 @@ only, and it never changes a negotiation result.
 A consumer MAY pass an explicit capability allowlist; adapters outside it are
 treated as absent, producing the same `unsupported-module` outcome.
 
-Cross-origin accounting still needs a definite root origin: it is taken from the
-root URL, else the root entity's `canonical_url`, else a caller-supplied
-`rootOrigin` — and when none of the three exists, traversal throws on invalid
-options **before the first request** rather than guessing. Guessing here would
-quietly disable `maxCrossOriginRequests`.
+The root still needs a definite **URL** — not merely an origin: it is taken from
+the root URL, else the root entity's `canonical_url`, else a caller-supplied
+`rootUrl`, and when none of the three exists traversal throws on invalid options
+**before the first request** rather than guessing.
+
+It must be a URL because the graph is keyed by canonical `{id, normalizedUrl}`
+throughout: the root's node key, the `from` of its edges, and its expansion
+records all need one. A bare origin cannot form a canonical identity, and
+synthesizing one by joining the origin to `entity.id` would **invent a URL that
+does not exist on the wire** — which breaks the moment an edge points back at the
+root, since the invented key would not match the canonical key of that reference
+and a cycle through the root would go unrecognized. One URL serves both purposes:
+identity, and `origin` for cross-origin accounting. Guessing either would quietly
+disable `maxCrossOriginRequests`.
+
+Because traversal options extend `RelationsClientOptions`, the released
+`rootOrigin` option is inherited alongside the new `rootUrl`. The root URL always
+wins: the effective origin is that URL's origin, a `rootOrigin` that disagrees
+with it is invalid options rather than a silent tie-break, and a `rootOrigin`
+with no root URL behind it is still insufficient because it carries no identity.
 
 ### 6. Expand-at-most-once and "this is a cycle" are two different claims
 
@@ -379,10 +418,15 @@ reproducible nor auditable.
   adapter's correctness depend on a public module validator existing — the
   intended constraint, since an adapter that validates differently would let
   traversal accept payloads a standalone client rejects.
-- Per-extension outcomes mean a node reports a list, not a verdict. Consumers
-  asking "did this node expand?" must look at the record for the extension they
-  care about — the price of not letting an unrelated vendor field delete real
-  edges.
+- Per-extension outcomes mean a node reports a list, not a verdict, and edge
+  fates live on edges rather than on the extension. Consumers asking "did this
+  node expand?" must look at the record for the extension they care about, and at
+  the outcome of the specific edge — the price of not letting an unrelated vendor
+  field delete real edges, or one blocked branch mislabel its siblings.
+- Requiring a root URL rules out passing a bare in-memory entity with no
+  `canonical_url` and no `rootUrl`. That is a real ergonomic cost, accepted
+  because the alternative is a synthetic key that silently breaks cycle detection
+  through the root.
 - Walk-local expansion state means the same node can be expanded again by a later
   walk on the same budget. That is intended: the budget still refuses to pay for
   a second fetch, so the repeat costs nothing but re-emitted edges.

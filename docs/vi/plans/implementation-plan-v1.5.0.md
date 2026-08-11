@@ -228,8 +228,8 @@ Thứ tự bắt buộc cho mỗi node đã `resolved`:
 
 ```text
 1. đọc tập x_* thực có trên entity
-2. sắp các extension theo ADAPTER KEY RANK (moduleId, moduleVersion, field),
-   KHÔNG theo thứ tự property trong payload
+2. sắp các extension theo TÊN FIELD (code-point), KHÔNG theo thứ tự property
+   trong payload
 3. với mỗi extension, độc lập nhau:
      a. lookup adapter theo {payload.module, payload.version, field}
           miss     → expansion record `unsupported-module` CHO RIÊNG field này,
@@ -241,9 +241,21 @@ Thứ tự bắt buộc cho mỗi node đã `resolved`:
 4. node dừng toàn bộ CHỈ khi budget cạn hoặc abort
 ```
 
-Một extension không có module envelope hợp lệ (thiếu `module`/`version`, không
-phải object) được ghi `unsupported-module` cho field đó và bỏ qua — nó không phải
-lỗi của entity, chỉ là dữ liệu traversal không hiểu.
+Bước 2 sắp theo **tên field**, không theo adapter key rank. Lý do: chính bước 3a
+cho phép một extension **không có module envelope hợp lệ** (không phải object,
+thiếu `module`/`version`) — những field đó không có `moduleId`/`moduleVersion` để
+xếp hạng, nên adapter key rank không phải total order trên tập `x_*`. Tên field
+thì luôn tồn tại và luôn duy nhất trong một JSON object, nên nó là total order cho
+**mọi** trường hợp, kể cả `x_vendor_a: 1` và `x_vendor_b: {}` đứng cạnh
+`x_answer`.
+
+Thứ tự này chỉ quyết định thứ tự **expansion record**; thứ tự **edge** vẫn do
+`edgeGroupRank` trong schedule key quyết định (§"Ordering"), nên hai cơ chế không
+xung đột.
+
+Một extension không có module envelope hợp lệ được ghi `unsupported-module` cho
+field đó và bỏ qua — nó không phải lỗi của entity, chỉ là dữ liệu traversal không
+hiểu.
 
 Edge của nhiều adapter trên cùng một node được lên lịch theo `edgeGroupRank`
 (§"Ordering"), nên thứ tự cuối cùng vẫn deterministic và độc lập với thứ tự
@@ -263,7 +275,10 @@ Fixture bắt buộc:
 - `x_vendor` + `x_answer` trên cùng entity ⇒ Answer edges vẫn được plan đầy đủ;
 - `x_relations` + `x_answer` trên cùng entity ⇒ cả hai nhóm edge đều xuất hiện;
 - một extension invalid + một extension valid ⇒ chỉ adapter hỏng bị chặn;
-- đảo thứ tự property của các `x_*` ⇒ **cùng chuỗi event**.
+- đảo thứ tự property của các `x_*` ⇒ **cùng chuỗi event**, kể cả khi có ít nhất
+  hai field không có module envelope (`x_vendor_a: 1`, `x_vendor_b: {}`);
+- một `x_relations` plan ba edge với outcome khác nhau (expanded + cycle +
+  depth-limit) ⇒ ba edge record riêng, extension record vẫn là `planned`.
 
 ## Edge matrix
 
@@ -299,30 +314,60 @@ hàng 2, không làm root.
 Mỗi canonical target `{id, normalizedUrl}` đi qua đúng một trong các chuỗi sau:
 
 ```text
-discovered ──► resolving ──► resolved ──► validating ──► expanding ──► expanded
-     │             │             │             │             │
-     │             │             │             │             └──► leaf | depth-limit
-     │             │             │             ├──► unsupported-module
-     │             │             │             └──► invalid-extension
-     │             │             └──► (đã expand ở nhánh khác) ──► already-expanded | cycle
-     │             └──► forbidden | not-found | invalid | budget-exhausted
-     └──► (đã có canonical outcome) ──► replayed (không fetch lại)
+NODE      discovered ─► resolving ─► resolved ─► validating (mỗi x_* độc lập)
+                            │
+                            └─► forbidden | not-found | invalid | budget-exhausted
+
+EXTENSION           validating ─► planned | no-edges
+                            ├─► unsupported-module
+                            └─► invalid-extension
+
+EDGE      (mỗi edge do adapter plan, kể cả edge không bao giờ fetch)
+                    scheduled ─► expanded | leaf
+                            ├─► depth-limit | cycle | already-expanded
+                            ├─► not-expanded        (target không resolve được)
+                            └─► budget-exhausted
 ```
 
-`ExpansionOutcome` là enum **mới, riêng của traversal layer** — KHÔNG đụng vào
-`AnswerTargetResolutionStatus` đã phát hành:
+Có **ba** vocabulary, ở ba cấp khác nhau. Gộp chúng lại là sai: một `x_relations`
+hợp lệ có thể plan ba edge mà edge 0 expand bình thường, edge 1 quay lại ancestor,
+edge 2 vượt depth — không tồn tại một outcome đúng cho cả extension.
+
+**1. Node — canonical resolution.** Dùng nguyên `AnswerTargetResolutionStatus`
+đã phát hành (`resolved` | `forbidden` | `not-found` | `invalid` |
+`budget-exhausted`). Không thêm giá trị nào.
+
+**2. Extension — adapter có chạy được không** (`ExtensionExpansionOutcomeV1`):
+
+| Outcome | Nghĩa | Có phát request? |
+|---|---|---|
+| `planned` | Adapter khớp, payload valid, đã plan ≥1 edge | Không |
+| `no-edges` | Adapter khớp, payload valid, nhưng không có edge nào (hàng 6, hoặc mảng rỗng) | Không |
+| `unsupported-module` | Không adapter nào khớp `{moduleId, moduleVersion, extensionField}` | Không |
+| `invalid-extension` | Adapter khớp nhưng module validator reject payload | Không |
+
+**3. Edge occurrence — điều gì xảy ra với chính cạnh đó**
+(`EdgeExpansionOutcomeV1`). **Mọi edge được plan đều sinh một occurrence result,
+kể cả khi không hề fetch target** — nếu không, consumer không phân biệt được
+"không có ref" với "có ref nhưng bị chặn vì depth/cycle":
 
 | Outcome | Nghĩa | Có phát request? | Có charge node? |
 |---|---|---|---|
-| `expanded` | Adapter khớp, payload valid, edge đã được lên lịch | (tuỳ edge con) | Không (charge ở resolve) |
-| `leaf` | Adapter khớp, payload valid, nhưng entity không có edge nào (hàng 6, hoặc mảng rỗng) | Không | Không |
-| `unsupported-module` | Entity có `x_*` nhưng không adapter nào khớp `{moduleId, moduleVersion, extensionField}` | Không | Không |
-| `invalid-extension` | Adapter khớp nhưng module validator reject payload | Không | Không |
-| `depth-limit` | Edge có **landing depth > `maxDepth`** | Không | Không |
-| `already-expanded` | Canonical key đã expand ở một nhánh khác **không phải ancestor** (fan-in/diamond) | Không | Không |
-| `cycle` | Canonical key **nằm trên ancestor path của chính occurrence này** | Không | Không |
-| `not-resolved` | Node có status ≠ `resolved` nên không có payload để expand | — | — |
-| `budget-exhausted` | Budget cạn / abort trước khi kịp expand | Không | Không |
+| `expanded` | Target resolve xong và đã được expand qua cạnh này | Có (hoặc cache hit) | Có ở lần fetch đầu |
+| `leaf` | Target resolve xong, không expand tiếp (hàng 6 hoặc `expandable: false`) | Có (hoặc cache hit) | Có ở lần fetch đầu |
+| `depth-limit` | Landing depth **> `maxDepth`** | **Không** | Không |
+| `cycle` | Target **nằm trên ancestor path của chính occurrence này** | Không (target đã là node) | Không |
+| `already-expanded` | Target đã expand ở nhánh khác không phải ancestor (fan-in/diamond) | Không | Không |
+| `not-expanded` | Target không resolve được (`status` ≠ `resolved`) | Có (đã thử) | Tuỳ |
+| `budget-exhausted` | Budget cạn / abort trước khi thử cạnh này | Không | Không |
+
+Edge bị chặn **trước khi fetch** (`depth-limit`, `cycle`, `already-expanded`,
+`budget-exhausted`) vẫn được phát đúng vị trí schedule key của nó và vẫn tính vào
+`summary.edges` — nó là reference có thật trên wire. Nó **không** có
+`status`, vì chưa từng có lần resolve nào để phán xét (xem `GraphEdgeV1.status`
+optional ở §"Typed API contract"); thêm một giá trị mới vào
+`AnswerTargetResolutionStatus` để mô tả tình huống này là chạm vào vocabulary đã
+phát hành, nên không làm.
 
 Quy tắc bắt buộc:
 
@@ -385,18 +430,24 @@ export type GraphTraversalEventV1 =
   | { type: "node"; node: GraphNodeV1 }
   | { type: "reference"; reference: GraphReferenceV1 }
   | { type: "edge"; edge: GraphEdgeV1 }
-  | { type: "expansion"; expansion: GraphExpansionRecordV1 }
+  | { type: "expansion"; expansion: GraphExtensionExpansionV1 }
   | { type: "complete"; summary: GraphTraversalSummaryV1 };
 
-/** Kết quả expansion của MỘT extension trên MỘT node — xem §"Validation phase". */
-export interface GraphExpansionRecordV1 {
+/**
+ * Kết quả expansion của MỘT extension trên MỘT node — xem §"Validation phase".
+ * KHÔNG mang outcome cấp edge: một extension có thể plan nhiều edge với outcome
+ * khác nhau, và chúng nằm trên `GraphEdgeV1.outcome`.
+ */
+export interface GraphExtensionExpansionV1 {
   /** Canonical key của node. */
   key: string;
-  /** Extension field cụ thể, ví dụ "x_answer". Vắng khi entity không có `x_*` nào. */
-  extensionField?: `x_${string}`;
+  /** Extension field cụ thể, ví dụ "x_answer". */
+  extensionField: `x_${string}`;
   /** Adapter đã xử lý field này. Vắng khi outcome là `unsupported-module`. */
   adapter?: TraversalAdapterKey;
-  outcome: ExpansionOutcome;
+  outcome: ExtensionExpansionOutcomeV1;
+  /** Số edge adapter này đã plan. 0 khi outcome ≠ "planned". */
+  plannedEdges: number;
   /** Chỉ có khi outcome === "invalid-extension" — giữ nguyên hai channel của validator. */
   errors?: unknown[];
   semanticIssues?: ModuleSemanticIssue[];
@@ -422,7 +473,7 @@ export interface CrossModuleGraphV1<T = unknown> {
   references: GraphReferenceV1[];
   /** Theo schedule key. */
   edges: GraphEdgeV1[];
-  expansions: GraphExpansionRecordV1[];
+  expansions: GraphExtensionExpansionV1[];
   summary: GraphTraversalSummaryV1;
 }
 
@@ -432,6 +483,7 @@ export interface GraphTraversalSummaryV1 {
   /** true với mọi `stopReason` khác `"exhausted"`. */
   partial: boolean;
   nodes: number;
+  /** Gồm CẢ edge bị chặn trước fetch (depth-limit/cycle/already-expanded/budget). */
   edges: number;
   requests: number;
   /** Số expansion record `unsupported-module`, theo module id khai trong payload. */
@@ -629,17 +681,45 @@ discovery đã có và truyền vào `options.declaredModules` — traversal ch�
 nó cho summary, không bao giờ tự tạo request và không bao giờ để nó đổi kết quả
 negotiation.
 
-### Root origin
+### Root identity
 
-Cross-origin accounting cần một `rootOrigin` xác định. Thứ tự lấy:
+Root cần một **URL**, không phải chỉ một origin. Thứ tự lấy:
 
 1. URL của root, nếu root được truyền dưới dạng URL;
 2. ngược lại `entity.canonical_url` của root entity;
-3. ngược lại `options.rootOrigin` do caller truyền.
+3. ngược lại `options.rootUrl` do caller truyền.
 
-Không có cả ba ⇒ **throw invalid-options trước request đầu tiên**. Không đoán,
+Không có cả ba ⇒ **throw invalid-options trước request đầu tiên**.
+
+Phải là URL chứ không phải origin vì graph dùng canonical key
+`{id, normalizedUrl}` xuyên suốt: `GraphNodeV1.key`, `GraphEdgeV1.from` và
+expansion record đều cần key đó cho root. Một `rootOrigin` trần không tạo được
+canonical identity, và ghép origin với `entity.id` sẽ **phát minh một URL không
+tồn tại trên wire** — sai ngay khi một edge trỏ ngược về chính root, vì key tự chế
+sẽ không khớp canonical key của reference đó và cycle về root không được nhận ra.
+
+Một URL thì phục vụ cả hai mục đích: canonical identity của root node, và
+`rootOrigin` cho cross-origin accounting (`new URL(rootUrl).origin`). Không đoán,
 không mặc định "same-origin với mọi thứ" — đoán sai ở đây làm
 `maxCrossOriginRequests` mất tác dụng.
+
+`options.rootUrl` phải qua đúng URL policy của call như mọi URL khác; nó **không**
+được fetch (root entity đã có trong tay), chỉ dùng làm identity.
+
+**Quan hệ với `rootOrigin` đã phát hành.** `GraphTraversalOptions` kế thừa
+`RelationsClientOptions`, vốn đã có `rootOrigin?: string` (và `rootOrigin` là một
+thành phần của resolution-context identity ở `1.3.1`). Hai field cùng tồn tại nên
+precedence phải tường minh:
+
+- root URL (theo ba bước trên) **luôn** quyết định canonical key của root;
+- `rootOrigin` hiệu lực = `new URL(rootUrl).origin`;
+- nếu caller truyền `rootOrigin` **khác** origin đó ⇒ **throw invalid-options**,
+  không âm thầm chọn một bên. Truyền trùng thì hợp lệ và là no-op;
+- `rootOrigin` một mình, không kèm nguồn root URL nào, **không đủ** — nó không tạo
+  được identity, nên vẫn là invalid-options.
+
+Giá trị `rootOrigin` truyền xuống module client phải là giá trị hiệu lực này, để
+resolution-context digest của mọi fetch trong walk nhất quán.
 
 ## Conformance contract
 
@@ -664,9 +744,12 @@ không mặc định "same-origin với mọi thứ" — đoán sai ở đây l�
   | `graph.traversal.edge_matrix` | Mọi edge quan sát được thuộc đúng một hàng của edge matrix | error |
   | `graph.traversal.source_targets_opt_in` | Mặc định KHÔNG request tới `authorship.source_targets` | error |
   | `graph.traversal.metadata_not_fetched` | Không request tới `evidence.source.url`/`publisher.url` | error |
-  | `graph.traversal.cycle_contained` | Cycle thật (ancestor re-entry) ⇒ `cycle`, không lỗi, không lặp vô hạn | error |
+  | `graph.traversal.cycle_contained` | Cycle thật (ancestor re-entry) ⇒ edge outcome `cycle`, không lỗi, không lặp vô hạn | error |
   | `graph.traversal.fanin_not_cycle` | Diamond DAG ⇒ `already-expanded`, **KHÔNG** phải `cycle` | error |
   | `graph.traversal.depth_boundary` | Node ở đúng `depth == maxDepth` được resolve; chỉ landing `> maxDepth` mới `depth-limit` | error |
+  | `graph.traversal.edge_outcome_per_occurrence` | Một extension plan nhiều edge với outcome khác nhau ⇒ mỗi edge có outcome riêng, không bị gộp | error |
+  | `graph.traversal.blocked_edge_emitted` | Edge bị chặn trước fetch vẫn được emit, không có `status`, vẫn tính vào `summary.edges` | error |
+  | `graph.traversal.root_identity` | Root entity thiếu `canonical_url` và thiếu `rootUrl` ⇒ throw invalid-options trước request đầu tiên | error |
   | `graph.traversal.type_mismatch_scoped` | Verdict sai type không lan sang occurrence khác | error |
   | `graph.ordering.deterministic` | Hai run với thứ tự hoàn tất khác nhau cho cùng chuỗi event | error |
   | `graph.ordering.mixed_order_equivalence` | Đảo thứ tự reference cho cùng graph và cùng số request | error |
@@ -692,12 +775,17 @@ không mặc định "same-origin với mọi thứ" — đoán sai ở đây l�
 ## Typed API contract
 
 ```ts
-export type ExpansionOutcome =
-  | "expanded" | "leaf" | "unsupported-module" | "invalid-extension"
-  | "depth-limit" | "already-expanded" | "cycle"
-  | "not-resolved" | "budget-exhausted";
+/** Cấp EXTENSION: adapter có chạy được không. */
+export type ExtensionExpansionOutcomeV1 =
+  | "planned" | "no-edges" | "unsupported-module" | "invalid-extension";
 
-export type GraphNodeStatusV1 = AnswerTargetResolutionStatus; // tái dùng, không enum mới
+/** Cấp EDGE: điều gì xảy ra với chính cạnh đó. */
+export type EdgeExpansionOutcomeV1 =
+  | "expanded" | "leaf" | "depth-limit" | "cycle"
+  | "already-expanded" | "not-expanded" | "budget-exhausted";
+
+/** Cấp NODE: canonical resolution — vocabulary đã phát hành, không thêm giá trị. */
+export type GraphNodeStatusV1 = AnswerTargetResolutionStatus;
 
 export interface GraphNodeV1<T = unknown> {
   key: string;                    // canonical {id, normalizedUrl}
@@ -709,9 +797,10 @@ export interface GraphNodeV1<T = unknown> {
   /**
    * MỘT record cho MỖI extension — không phải một outcome cho cả node. Một entity
    * có `x_vendor` không hỗ trợ + `x_answer` hợp lệ sẽ có hai record, và Answer
-   * edges vẫn được plan (§"Validation phase").
+   * edges vẫn được plan (§"Validation phase"). Outcome của từng cạnh nằm trên
+   * `GraphEdgeV1.outcome`, không nằm ở đây.
    */
-  expansions?: GraphExpansionRecordV1[];
+  expansions?: GraphExtensionExpansionV1[];
   message?: string;
 }
 
@@ -720,8 +809,17 @@ export interface GraphEdgeV1 {
   to: string;
   edgeGroup: string;
   index: number;
+  /** Extension field đã plan cạnh này — nối edge về đúng expansion record. */
+  extensionField: `x_${string}`;
   declaredTargetType: string;
-  status: GraphNodeStatusV1;      // verdict theo occurrence, KHÔNG dùng chung
+  /**
+   * Verdict resolution của RIÊNG occurrence này (gồm cả sai `target_type` →
+   * "invalid"). **Vắng** khi cạnh chưa bao giờ được thử resolve —
+   * `depth-limit`, `cycle`, `already-expanded`, `budget-exhausted`.
+   */
+  status?: GraphNodeStatusV1;
+  /** Luôn có. Điều gì xảy ra với cạnh này ở tầng traversal. */
+  outcome: EdgeExpansionOutcomeV1;
   message?: string;
 }
 
@@ -729,8 +827,11 @@ export interface GraphTraversalOptions extends RelationsClientOptions {
   budget: RelationsTraversalBudgetState;
   adapters?: readonly TraversalAdapter[];
   capabilities?: ReadonlyArray<{ moduleId: string; version: string }>;
-  /** Cross-origin accounting. Bắt buộc khi root là entity không có `canonical_url`. */
-  rootOrigin?: string;
+  /**
+   * Identity của root: canonical key VÀ cross-origin accounting. Bắt buộc khi
+   * root là entity không có `canonical_url`. Không bao giờ được fetch.
+   */
+  rootUrl?: string;
   /** Manifest `modules[]` do CALLER tự fetch, chỉ dùng cho summary. Traversal không bao giờ tự fetch manifest. */
   declaredModules?: ManifestV1["modules"];
   includeGeneratedSummarySources?: boolean;  // default false
