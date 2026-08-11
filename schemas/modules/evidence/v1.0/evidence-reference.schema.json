@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aadp.dev/schemas/modules/evidence/v1.0/evidence-reference.schema.json",
+  "title": "AADP Evidence Module v1.0 — Evidence reference",
+  "description": "Component schema (not a top-level module document kind). One edge from a claim to an evidence document (specification.md §7). `target` is the released Relations `1.0` target component, unmodified — Evidence does not copy or fork that schema, and the Relations `x_*` extension point on it is preserved. `target_type` is the CONSTANT `evidence`, not a free token: that constant is what makes the `1.0` model acyclic by construction (§7.1), since a claim can then point neither at another claim nor at itself. `confidence`'s decimal precision is a semantic rule, not a schema one — `multipleOf` cannot express \"at most 2 decimal places\" without binary floating-point false negatives.",
+  "type": "object",
+  "required": ["target_type", "target", "stance"],
+  "properties": {
+    "target_type": { "const": "evidence" },
+    "target": { "$ref": "https://aadp.dev/schemas/modules/relations/v1.0/target.schema.json" },
+    "stance": { "enum": ["support", "contradict", "neutral"] },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "additionalProperties": false
+}

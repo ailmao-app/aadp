@@ -1,6 +1,6 @@
 {
   "name": "ail-aadp",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "AI Application Discovery Protocol (AADP) — specification, schemas, validator, reference client and conformance suite",
   "keywords": [
     "aadp",
@@ -58,6 +58,10 @@
       "types": "./dist/modules/answer/v1.0/index.d.ts",
       "import": "./dist/modules/answer/v1.0/index.js"
     },
+    "./modules/evidence/v1.0": {
+      "types": "./dist/modules/evidence/v1.0/index.d.ts",
+      "import": "./dist/modules/evidence/v1.0/index.js"
+    },
     "./conformance": {
       "types": "./dist/conformance/index.d.ts",
       "import": "./dist/conformance/index.js"
@@ -78,6 +82,7 @@
     "./schemas/v1.0/*": "./schemas/v1.0/*",
     "./schemas/modules/relations/v1.0/*": "./schemas/modules/relations/v1.0/*",
     "./schemas/modules/answer/v1.0/*": "./schemas/modules/answer/v1.0/*",
+    "./schemas/modules/evidence/v1.0/*": "./schemas/modules/evidence/v1.0/*",
     "./schemas/*": "./schemas/v0.1/*",
     "./package.json": "./package.json"
   },
@@ -86,6 +91,7 @@
     "schemas",
     "spec",
     "examples",
+    "!**/node_modules",
     "scripts",
     "CHANGELOG.md",
     "README.md",

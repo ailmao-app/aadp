@@ -245,7 +245,7 @@ export const ANSWER_CHECKS: AnswerCheck[] = [
       if (marker3) offending.push(`answer contains "${marker3}"`);
       // This check does not treat a marker's mere presence as a failure —
       // free text containing such a string is still valid, inert data
-      // (specification.md "Security và privacy contract"). It only records
+      // (specification.md "Security and privacy contract"). It only records
       // that this run observed such text and did not execute/interpolate
       // it — the absence of a crash/behavior change IS the pass condition,
       // which a static scan alone cannot prove; this is reported as

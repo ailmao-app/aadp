@@ -3,8 +3,9 @@
  * (`tests/fixtures/relations/v1.0/{valid,invalid}`, the same fixtures
  * `tests/modules/relations/v1.0/fixtures.test.ts` uses at the module-registry
  * layer) through the actual `runRelationsConformance` runner end-to-end —
- * satisfying `AADP-REL-006`'s "chạy toàn bộ normative fixtures với expected
- * primary check ID, result và issue code" via a live local server rather
+ * satisfying `AADP-REL-006`'s "run the whole normative fixture catalog with
+ * its expected primary check ID, result and issue code" via a live local
+ * server rather
  * than a second, parallel fixture format.
  */
 import { readFileSync } from "node:fs";

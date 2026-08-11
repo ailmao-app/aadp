@@ -9,8 +9,9 @@ contract ADR-0004 calls out as separate from wire compatibility.
 
 ## Context
 
-`docs/vi/plans/implementation-plan.md` §"Issue bảo trì/production còn mở"
-explicitly deferred four related capabilities out of the `1.0.x` line as
+`docs/vi/plans/implementation-plan.md`, in its section on open
+maintenance/production issues, explicitly deferred four related capabilities out
+of the `1.0.x` line as
 `AADP-ROBUSTNESS-001`: caller-driven cancellation, bounded traversal
 concurrency, an opt-in retry/backoff policy, and a total request-byte budget
 across a whole traversal (the existing `discovery-budget.ts` only bounds page
@@ -182,8 +183,8 @@ no new options.
 
 - A caller who upgrades to `1.1.0` and changes nothing keeps `1.0.x`'s exact
   request count, ordering, and timing: no signal, `concurrency: 1`, no retry,
-  no total-byte cap, no profile. This is the release gate's "default giữ
-  behavior `1.0.x`" requirement made concrete per field.
+  no total-byte cap, no profile. This is the release gate's "defaults keep
+  `1.0.x` behavior" requirement made concrete per field.
 - Every new field is optional and additive to a type already covered by
   `tests/package/compatibility-contract.test.ts`; that test suite must grow
   assertions for the new fields' presence/shape as part of implementing this

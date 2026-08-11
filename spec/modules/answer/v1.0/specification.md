@@ -13,21 +13,23 @@
 
 ## Abstract
 
-Tài liệu này định nghĩa wire contract normative cho Answer Module v1.0. Module mô
-tả câu hỏi, câu trả lời ngắn, nội dung mở rộng, phạm vi áp dụng, locale, freshness
-và entity liên quan của một answer entity, phân biệt bằng dữ liệu giữa nội dung
-do nguồn biên soạn (`source-authored`) và bản tóm tắt được tạo tự động
-(`generated-summary`). Từ khóa BCP 14 viết hoa có nghĩa chuẩn tắc.
+This document defines the normative wire contract for Answer Module v1.0. The
+module describes an answer entity's question, concise answer, extended content,
+applicability, locale, freshness and related entities, distinguishing — by data,
+never by inference — between content written by a source (`source-authored`) and
+an automatically generated summary (`generated-summary`). Uppercase BCP 14
+keywords carry their normative meaning.
 
 ## 1. Scope
 
-Module định nghĩa discovery, `x_answer`, authorship, freshness, applicability,
-answer entity reference, `content_checksum`, validation và conformance. Module
-KHÔNG định nghĩa content generation, ranking/search score, AEO/GEO score, factual
-truth đánh giá, hoặc evidence/claim/citation graph — các mối quan tâm đó thuộc
-Evidence & Provenance Module `1.4.0` hoặc application layer.
+The module defines discovery, `x_answer`, authorship, freshness, applicability,
+answer entity references, `content_checksum`, validation and conformance. The
+module does NOT define content generation, ranking/search scores, AEO/GEO
+scores, factual-truth evaluation, or an evidence/claim/citation graph — those
+concerns belong to the Evidence & Provenance Module `1.4.0` or to the
+application layer.
 
-## 2. Discovery và compatibility
+## 2. Discovery and compatibility
 
 ```json
 {
@@ -37,34 +39,35 @@ Evidence & Provenance Module `1.4.0` hoặc application layer.
 }
 ```
 
-Server MUST chỉ quảng bá module khi payload, endpoint/resource và conformance
-artifacts đã deploy. Core-only client MUST bỏ qua declaration và `x_answer`.
-Answer client MUST exact-match ID/version và MUST NOT fallback version. Field
-`schema` trỏ tới schema dispatch của document `answer`; discovery entry được
-validate bởi core manifest schema v1.0, không bởi schema này.
+A server MUST advertise the module only once its payloads, endpoints/resources
+and conformance artifacts are deployed. A core-only client MUST ignore the
+declaration and `x_answer`. An Answer client MUST exact-match the ID and
+version, and MUST NOT fall back to another version. The `schema` field points at
+the dispatch schema for the `answer` document; the discovery entry itself is
+validated by the core manifest schema v1.0, not by that schema.
 
-Public API và schema paths:
+Public API and schema paths:
 
 ```text
 ail-aadp/modules/answer/v1.0
 ail-aadp/schemas/modules/answer/v1.0/*
 ```
 
-Package KHÔNG re-export Answer API từ root; tarball/clean-install consumer
-KHÔNG import `src/**`.
+The package does NOT re-export the Answer API from its root; a tarball or
+clean-install consumer does NOT import `src/**`.
 
 ## 3. Document kind
 
-Answer `1.0` có đúng một top-level module document kind: `answer` — value của
-`entity.x_answer` trên entity `type: "answer"`. Không có standalone collection
-kind, registry kind hay alternate-question document; listing/pagination answer
-resources dùng core sitemap/resource flow.
+Answer `1.0` has exactly one top-level module document kind: `answer` — the
+value of `entity.x_answer` on an entity of `type: "answer"`. There is no
+standalone collection kind, registry kind or alternate-question document;
+listing and pagination of answer resources use the core sitemap/resource flow.
 
 ## 4. Wire boundary
 
-Answer payload nằm tại extension `x_answer` ở root của core entity `type:
-"answer"`. Application `data` KHÔNG chứa protocol field, và core entity schema
-v1.0 KHÔNG bị sửa.
+The Answer payload lives at the `x_answer` extension on the root of a core
+entity of `type: "answer"`. The application's `data` contains NO protocol
+fields, and the core entity schema v1.0 is NOT modified.
 
 ```json
 {
@@ -100,226 +103,243 @@ v1.0 KHÔNG bị sửa.
 }
 ```
 
-Ví dụ trên là valid vector: cả `checksum` (core, trên `data = {}`) và
-`x_answer.content_checksum` được tính bằng `checksumOf()` public
-(`ail-aadp/canonical-json`) trên đúng payload hiển thị. Fixture
-`tests/fixtures/answer/v1.0/valid/answer-valid-wire-example.json` được generate
-từ script tái tạo ví dụ này, không copy tay digest.
+The example above is a valid vector: both `checksum` (core, over `data = {}`)
+and `x_answer.content_checksum` are computed with the public `checksumOf()`
+(`ail-aadp/canonical-json`) over exactly the payload shown. The fixture
+`tests/fixtures/answer/v1.0/valid/answer-valid-wire-example.json` is generated
+by a script that reproduces this example; the digests are never copied by hand.
 
-Core checksum chỉ bao phủ `data`; vì mọi field normative của Answer nằm trong
-`x_answer`, Answer Module định nghĩa thêm `x_answer.content_checksum` làm
-integrity digest riêng cho phạm vi này (§8).
+The core checksum covers `data` only; since every normative Answer field lives
+in `x_answer`, the Answer Module adds `x_answer.content_checksum` as a dedicated
+integrity digest for that scope (§8).
 
 ## 5. Field contract
 
-Schema đóng với `additionalProperties: false` ở mọi object do Answer Module định
-nghĩa; KHÔNG có `x_*` extension point ở wrapper level (khác Relations `1.0`).
-Object `target` được `$ref` từ Relations giữ nguyên extension point `x_*` của
-Relations `1.0`.
+Every object the Answer Module defines is closed with
+`additionalProperties: false`; there is NO `x_*` extension point at the wrapper
+level (unlike Relations `1.0`). The `target` object, `$ref`'d from Relations,
+keeps the Relations `1.0` `x_*` extension point.
 
-| Field | Bắt buộc | Contract |
+| Field | Required | Contract |
 |---|---:|---|
-| `module` | Có | Hằng `aadp:answer` |
-| `version` | Có | Hằng `1.0` |
-| `kind` | Có | Hằng `answer` |
-| `question` | Có | String đã trim, 1-500 Unicode code points |
-| `concise_answer` | Có | String đã trim, 1-500 Unicode code points |
-| `answer` | Không | String đã trim, 1-20.000 Unicode code points |
-| `locale` | Có | Canonical BCP 47 profile (§6), tối đa 63 ký tự |
-| `authorship` | Có | Tagged union `source-authored` hoặc `generated-summary` (§7) |
-| `freshness` | Có | Timestamp provenance và optional expiry (§9) |
-| `content_checksum` | Có | `sha256:<64 hex>` digest theo §8 |
-| `applicability` | Không | Audience/jurisdiction/time applicability (§10) |
-| `related_entities` | Không | 0-50 Answer entity reference (§11), không trùng canonical target |
+| `module` | Yes | Constant `aadp:answer` |
+| `version` | Yes | Constant `1.0` |
+| `kind` | Yes | Constant `answer` |
+| `question` | Yes | Trimmed string, 1-500 Unicode code points |
+| `concise_answer` | Yes | Trimmed string, 1-500 Unicode code points |
+| `answer` | No | Trimmed string, 1-20,000 Unicode code points |
+| `locale` | Yes | Canonical BCP 47 profile (§6), at most 63 characters |
+| `authorship` | Yes | Tagged union of `source-authored` or `generated-summary` (§7) |
+| `freshness` | Yes | Timestamp provenance and optional expiry (§9) |
+| `content_checksum` | Yes | `sha256:<64 hex>` digest per §8 |
+| `applicability` | No | Audience/jurisdiction/time applicability (§10) |
+| `related_entities` | No | 0-50 Answer entity references (§11), no duplicate canonical target |
 
-`x_answer` KHÔNG có field `canonical_url` riêng — xem §12. KHÔNG hỗ trợ alias
-`short_answer`; thuật ngữ chính thức là `concise_answer`.
+`x_answer` has NO `canonical_url` field of its own — see §12. The alias
+`short_answer` is NOT supported; the official term is `concise_answer`.
 
-`question`, `concise_answer`, `answer`, author name và applicability notes đều là
-untrusted text. Package KHÔNG render, execute, interpolate vào prompt, parse
-HTML/Markdown instruction hoặc dereference URL từ các field này (§14).
+`question`, `concise_answer`, `answer`, author names and applicability notes are
+all untrusted text. The package does NOT render, execute or interpolate them
+into a prompt, parse HTML/Markdown instructions out of them, or dereference URLs
+found in them (§14).
 
 ## 6. Locale contract
 
-Answer `1.0` dùng deterministic BCP 47 profile giới hạn:
+Answer `1.0` uses a restricted, deterministic BCP 47 profile:
 
 ```text
 language = 2-3 lowercase ASCII letters
-script   = optional, 4 ASCII letters Title Case
-region   = optional, 2 uppercase ASCII letters hoặc 3 digits
-variant  = zero hoặc nhiều subtag: 5-8 lowercase alphanumeric,
-           hoặc một digit theo sau bởi 3 lowercase alphanumeric
+script   = optional, 4 ASCII letters in Title Case
+region   = optional, 2 uppercase ASCII letters or 3 digits
+variant  = zero or more subtags: 5-8 lowercase alphanumerics,
+           or one digit followed by 3 lowercase alphanumerics
 ```
 
-Regex chuẩn tắc (export `ANSWER_LOCALE_PATTERN`):
+The normative regex (exported as `ANSWER_LOCALE_PATTERN`):
 
 ```text
 ^[a-z]{2,3}(-[A-Z][a-z]{3})?(-(?:[A-Z]{2}|[0-9]{3}))?(-(?:[a-z0-9]{5,8}|[0-9][a-z0-9]{3}))*$
 ```
 
-Ví dụ hợp lệ: `vi`, `en`, `en-US`, `zh-Hant`, `zh-Hant-TW`. Underscore, extension
-singleton, private-use, grandfathered tag và casing khác profile bị từ chối, kể
-cả khi một BCP 47 implementation tổng quát có thể hiểu chúng. Schema và pure
-helper (`isValidAnswerLocale`) dùng cùng grammar; không dùng `Intl`, locale OS,
-ICU version hay network registry để quyết định validity. Locale chỉ mô tả ngôn
-ngữ chính của answer; validator không language-detect free text.
+Valid examples: `vi`, `en`, `en-US`, `zh-Hant`, `zh-Hant-TW`. Underscores,
+extension singletons, private-use and grandfathered tags, and casing outside the
+profile are rejected, even where a general BCP 47 implementation would
+understand them. The schema and the pure helper (`isValidAnswerLocale`) use the
+same grammar; validity is never decided by `Intl`, the OS locale, an ICU version
+or a network registry. Locale describes only the answer's primary language; the
+validator does not language-detect free text.
 
 ## 7. Authorship contract
 
-`authorship` dùng discriminator `kind`; hai nhánh loại trừ nhau, mỗi object đóng.
+`authorship` uses the discriminator `kind`; the two branches are mutually
+exclusive and each object is closed.
 
-**`source-authored`**: `author.name` bắt buộc (1-200 code points); `author.url`
-optional, absolute HTTPS, không userinfo/fragment (§13 URL policy). Không có
-`generator`/`generated_at`/`source_targets` trong nhánh này.
+**`source-authored`**: `author.name` is required (1-200 code points);
+`author.url` is optional, absolute HTTPS, no userinfo or fragment (§13 URL
+policy). This branch has no `generator`, `generated_at` or `source_targets`.
 
-**`generated-summary`**: `generator.name`, `generated_at`, và 1-20
-`source_targets` bắt buộc; `generator.version` và `reviewed_by` optional. Mỗi
-`source_targets[]` là Answer entity reference (§11); nó chỉ biểu thị input
-source, không chứng minh factual truth/support/citation validity. `reviewed_by`
-KHÔNG đổi `kind` — generated content sau human review vẫn là `generated-summary`
-để bảo toàn provenance. Client KHÔNG tự suy luận source-authored khi thiếu
-metadata và KHÔNG tự chuyển kind sau khi fetch target.
+**`generated-summary`**: `generator.name`, `generated_at` and 1-20
+`source_targets` are required; `generator.version` and `reviewed_by` are
+optional. Each `source_targets[]` is an Answer entity reference (§11); it
+denotes an input source only, and proves nothing about factual truth, support or
+citation validity. `reviewed_by` does NOT change `kind` — generated content that
+has been reviewed by a human is still `generated-summary`, preserving
+provenance. A client MUST NOT infer source-authored from missing metadata, and
+MUST NOT change the kind after fetching a target.
 
 ## 8. Content checksum contract
 
-`content_checksum` là digest `sha256:<64 lowercase hex>` bảo vệ toàn bộ field
-normative của `x_answer`, độc lập với core checksum (chỉ bao phủ `data`).
+`content_checksum` is a `sha256:<64 lowercase hex>` digest protecting every
+normative field of `x_answer`, independent of the core checksum (which covers
+`data` only).
 
-- Phạm vi hash: `x_answer` sau khi loại bỏ chính field `content_checksum`. Mọi
-  field còn lại nằm trong phạm vi, kể cả Relations `target.x_*` extension lồng
-  bên trong `related_entities`/`source_targets`.
-- Canonicalization và thuật toán tái sử dụng nguyên trạng ADR-0001 và
-  `ail-aadp/canonical-json` (`canonicalize()`/`checksumOf()`): RFC 8785 JCS, sort
-  key theo UTF-16 code unit value (không phải Unicode code point), reject input
-  ngoài JSON/I-JSON domain.
-- `content_checksum = checksumOf(x_answer minus content_checksum)`. Producer tính
-  sau khi các field khác đã chốt, trước khi publish; client tính lại khi validate.
-- Pure wrapper semantic validator (`validateAnswerV1`/`checkAnswerSemantics`)
-  tính lại digest và từ chối khi không khớp, mã lỗi
-  `answer.semantic.content_checksum_mismatch`.
-- Đây là bổ sung cho, không thay thế, core checksum. Một entity Answer hợp lệ
-  phải pass cả hai. `content_checksum` không phải chữ ký chống producer gian
-  dối và không thay thế transport integrity (TLS).
+- Hash scope: `x_answer` with the `content_checksum` field itself removed. Every
+  remaining field is in scope, including the Relations `target.x_*` extensions
+  nested inside `related_entities`/`source_targets`.
+- Canonicalization and algorithm reuse ADR-0001 and `ail-aadp/canonical-json`
+  (`canonicalize()`/`checksumOf()`) exactly as released: RFC 8785 JCS, keys
+  sorted by UTF-16 code unit value (not by Unicode code point), input outside the
+  JSON/I-JSON domain rejected.
+- `content_checksum = checksumOf(x_answer minus content_checksum)`. The producer
+  computes it once the other fields are final, before publishing; the client
+  recomputes it during validation.
+- The pure wrapper semantic validator
+  (`validateAnswerV1`/`checkAnswerSemantics`) recomputes the digest and rejects a
+  mismatch with the code `answer.semantic.content_checksum_mismatch`.
+- This is in addition to, not a replacement for, the core checksum. A valid
+  Answer entity must pass both. `content_checksum` is not a signature against a
+  dishonest producer and does not replace transport integrity (TLS).
 
 ## 9. Freshness contract
 
-- `published_at`, `updated_at` bắt buộc; `reviewed_at`, `expires_at` optional.
-  Timestamp dùng RFC 3339 UTC dạng `Z`, precision tối đa milliseconds.
-- Invariant: `published_at <= updated_at`; nếu có `reviewed_at` thì
-  `published_at <= reviewed_at`; nếu có `expires_at` thì mọi timestamp còn lại
-  phải `<= expires_at`.
-- `x_answer.freshness.updated_at` PHẢI bằng core entity `updated_at` — invariant
-  này thuộc entity-context validator (§15), không thuộc wrapper semantic
-  validator.
-- Expired answer vẫn schema-valid. Client helper (`classifyAnswerFreshness`)
-  phân loại `fresh`/`stale` dựa trên injected clock; pure validator không dùng
-  wall clock. Thiếu `expires_at` nghĩa là không khai báo expiry, không có nghĩa
-  "vĩnh viễn đúng".
+- `published_at` and `updated_at` are required; `reviewed_at` and `expires_at`
+  are optional. Timestamps use RFC 3339 UTC with a `Z` suffix, millisecond
+  precision at most.
+- Invariants: `published_at <= updated_at`; when `reviewed_at` is present,
+  `published_at <= reviewed_at`; when `expires_at` is present, every other
+  timestamp must be `<= expires_at`.
+- `x_answer.freshness.updated_at` MUST equal the core entity's `updated_at` —
+  this invariant belongs to the entity-context validator (§15), not to the
+  wrapper semantic validator.
+- An expired answer is still schema-valid. The client helper
+  (`classifyAnswerFreshness`) classifies `fresh`/`stale` using an injected clock;
+  the pure validator never uses the wall clock. A missing `expires_at` means no
+  expiry was declared — it does not mean "true forever".
 
 ## 10. Applicability contract
 
-`applicability` có tối thiểu một trong các field:
+`applicability` has at least one of these fields:
 
-- `audiences`: 1-20 token duy nhất. Token `general` là unnamespaced standard;
-  namespace `aadp:*` được giữ chỗ. Vendor token theo
-  `^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]{0,63}$`. Answer `1.0` chỉ đăng ký `general`.
-- `jurisdictions`: 1-50 code duy nhất; ISO 3166-1 alpha-2 uppercase hoặc UN M49
-  ba chữ số. `001` nghĩa global.
-- `valid_from`/`valid_until`: RFC 3339 UTC; nếu có cả hai thì `valid_from <
-  valid_until` (strict).
-- `notes`: optional untrusted text, 1-1.000 code points, không có normative effect.
+- `audiences`: 1-20 unique tokens. The token `general` is the unnamespaced
+  standard; the `aadp:*` namespace is reserved. Vendor tokens follow
+  `^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]{0,63}$`. Answer `1.0` registers only
+  `general`.
+- `jurisdictions`: 1-50 unique codes; ISO 3166-1 alpha-2 uppercase, or UN M49
+  three digits. `001` means global.
+- `valid_from`/`valid_until`: RFC 3339 UTC; when both are present,
+  `valid_from < valid_until` (strict).
+- `notes`: optional untrusted text, 1-1,000 code points, with no normative
+  effect.
 
-Unknown unnamespaced audience token bị từ chối. Applicability KHÔNG thay thế
-authorization; server vẫn dùng core/Relations authorization policy trước khi trả
-resource/target.
+An unknown unnamespaced audience token is rejected. Applicability does NOT
+replace authorization; the server still applies core/Relations authorization
+policy before returning a resource or target.
 
-## 11. Related entity và Evidence boundary
+## 11. Related entities and the Evidence boundary
 
-`related_entities` và generated `source_targets` dùng component
-`answer-reference.schema.json` (`{target_type, target}`); `target` `$ref` trực
-tiếp Relations `schemas/modules/relations/v1.0/target.schema.json`, không copy.
-`target_type` theo core entity type grammar `^[a-z][a-z0-9_-]*$`. Mỗi list
-KHÔNG được có hai phần tử cùng canonical target theo semantic identity Relations
-`{id, normalizedUrl}`.
+`related_entities` and the generated `source_targets` use the component
+`answer-reference.schema.json` (`{target_type, target}`); `target` `$ref`s the
+Relations `schemas/modules/relations/v1.0/target.schema.json` directly, never a
+copy. `target_type` follows the core entity type grammar
+`^[a-z][a-z0-9_-]*$`. Within one list, two elements MUST NOT share a canonical
+target under the Relations semantic identity `{id, normalizedUrl}`.
 
-Answer client chỉ resolve target khi caller opt in, qua
-`resolveRelationTarget(reference.target, reference.target_type, ...)` với cùng
-URL/DNS policy, authorization behavior, scheduler, abort signal và caller-owned
-`RelationsTraversalBudgetState` của traversal cha — không suy đoán expected type
-từ prefix của `target.id`, không tạo budget con, không retry ngoài policy hiện có.
+The Answer client resolves targets only when the caller opts in, through
+`resolveRelationTarget(reference.target, reference.target_type, ...)` with the
+same URL/DNS policy, authorization behaviour, scheduler, abort signal and
+caller-owned `RelationsTraversalBudgetState` as the parent traversal — it never
+guesses the expected type from the prefix of `target.id`, never creates a child
+budget, and never retries outside the existing policy.
 
-Answer `1.0` KHÔNG có field `evidence`, `claims` hay `citations` — Evidence
-Module `1.4.0` sẽ liên kết bằng module riêng/Relations contract.
+Answer `1.0` has no `evidence`, `claims` or `citations` field — the Evidence
+Module `1.4.0` will link through its own module and the Relations contract.
 
 ## 12. Canonical URL contract
 
-Answer `1.0` KHÔNG định nghĩa `x_answer.canonical_url`. Answer entity dùng lại
-core `entity.canonical_url` làm human-facing URL duy nhất.
+Answer `1.0` does NOT define `x_answer.canonical_url`. An Answer entity reuses
+the core `entity.canonical_url` as its single human-facing URL.
 
-- `entity.canonical_url` bắt buộc đối với entity `type: "answer"`; entity-context
-  validator từ chối khi thiếu, mã lỗi `answer.semantic.missing_canonical_url`.
-- Không có bản sao/alias trong `x_answer`; schema `additionalProperties: false`
-  từ chối một implementation cũ gửi `x_answer.canonical_url` như unknown field.
-- Core v1.0 chỉ validate `entity.canonical_url` bằng `format: uri`.
-  `validateAnswerEntityV1()` tự thực thi URL policy chặt hơn (§13), dùng chung
-  helper với `author.url`. Vi phạm dùng mã
+- `entity.canonical_url` is required for entities of `type: "answer"`; the
+  entity-context validator rejects its absence with the code
+  `answer.semantic.missing_canonical_url`.
+- There is no copy or alias inside `x_answer`; `additionalProperties: false`
+  makes the schema reject an older implementation sending
+  `x_answer.canonical_url` as an unknown field.
+- Core v1.0 validates `entity.canonical_url` only with `format: uri`.
+  `validateAnswerEntityV1()` enforces a stricter URL policy itself (§13), using
+  the same helper as `author.url`. Violations use the code
   `answer.semantic.canonical_url_policy_violation`.
 
 ## 13. Shared URL policy (canonical_url / author.url)
 
-Absolute HTTPS, không userinfo, không fragment. Pure parsing, không network.
-Export: `checkUrlPolicy(url): string | undefined` (Relations URL/DNS SSRF policy
-là lớp riêng, áp dụng khi thật sự fetch một target, không phải policy này).
+Absolute HTTPS, no userinfo, no fragment. Pure parsing, no network. Exported as
+`checkUrlPolicy(url): string | undefined` (the Relations URL/DNS SSRF policy is
+a separate layer, applied when a target is actually fetched — not this policy).
 
-## 14. Security và privacy contract
+## 14. Security and privacy contract
 
-- Mọi free text là data không tin cậy; package không nối text vào system prompt,
-  shell, HTML hay executable template.
-- `entity.canonical_url` và `author.url` là metadata, không được validator/client
-  tự fetch. Target URL chỉ fetch qua Relations URL/DNS policy.
-- `content_checksum` chỉ phát hiện tampering trên field trong phạm vi hash; không
-  phải chữ ký chống producer gian dối, không thay thế TLS.
-- Redirect, DNS rebinding, private/link-local/reserved address và credential leak
-  behavior kế thừa policy hiện có của core/Relations client.
-- Authorization được kiểm tra trước khi trả answer/target.
-  `applicability.audiences` không cấp quyền truy cập.
-- Authorship metadata không phải chữ ký, identity verification hay endorsement.
-  Generated/source-authored label là provenance assertion của producer; schema
-  validity không chứng minh assertion trung thực.
+- All free text is untrusted data; the package never interpolates text into a
+  system prompt, shell, HTML or executable template.
+- `entity.canonical_url` and `author.url` are metadata and are never fetched by
+  the validator or client. Target URLs are fetched only through the Relations
+  URL/DNS policy.
+- `content_checksum` detects tampering only within the hash scope; it is not a
+  signature against a dishonest producer and does not replace TLS.
+- Redirect, DNS rebinding, private/link-local/reserved address and credential
+  leak behaviour are inherited from the existing core/Relations client policy.
+- Authorization is checked before an answer or target is returned.
+  `applicability.audiences` grants no access.
+- Authorship metadata is not a signature, identity verification or endorsement.
+  The generated/source-authored label is a producer's provenance assertion;
+  schema validity does not prove the assertion is truthful.
 
 ## 15. Validation boundary
 
-**JSON Schema** chịu trách nhiệm: required fields, constants, tagged union,
-closed objects, string/array bounds, URL/timestamp shape, locale profile shape,
-token grammar, Answer reference shape, `contains`/`minProperties` applicability.
+**JSON Schema** is responsible for: required fields, constants, the tagged
+union, closed objects, string and array bounds, URL and timestamp shape, the
+locale profile shape, token grammar, the Answer reference shape, and the
+`contains`/`minProperties` rules for applicability.
 
-**Pure wrapper semantic validator** (`validateAnswerV1`, registry key
-`{aadp:answer, 1.0, answer}`) nhận `x_answer`; không nhận core entity context,
-không fetch network, đọc clock hệ thống hay mutate input. Kiểm tra: module/
-version/kind nhất quán; Unicode code-point bounds sau trim; locale profile;
-timestamp ordering; duplicate target theo Relations semantic identity;
-source-authored/generated-summary branch invariants; `author.url` HTTPS policy;
-`content_checksum` khớp digest tính lại.
+**The pure wrapper semantic validator** (`validateAnswerV1`, registry key
+`{aadp:answer, 1.0, answer}`) receives `x_answer`; it receives no core entity
+context, makes no network calls, does not read the system clock and does not
+mutate its input. It checks: module/version/kind consistency; Unicode code-point
+bounds after trimming; the locale profile; timestamp ordering; duplicate targets
+by Relations semantic identity; the source-authored/generated-summary branch
+invariants; the `author.url` HTTPS policy; and `content_checksum` against a
+recomputed digest.
 
-**Entity-context validator** (`validateAnswerEntityV1(entity)`):
+**The entity-context validator** (`validateAnswerEntityV1(entity)`):
 
-1. Validate core entity v1.0.
-2. Yêu cầu `entity.type === "answer"`, có `x_answer` object, có
+1. Validate the core entity v1.0.
+2. Require `entity.type === "answer"`, an `x_answer` object, and
    `entity.canonical_url`.
-3. Validate `entity.canonical_url` bằng URL-policy helper (§13).
-4. Dispatch `x_answer` qua exact registry key `{aadp:answer, 1.0, answer}`.
-5. Yêu cầu `x_answer.freshness.updated_at === entity.updated_at`.
-6. Trả typed validated entity/wrapper hoặc structured validation result.
+3. Validate `entity.canonical_url` with the URL-policy helper (§13).
+4. Dispatch `x_answer` through the exact registry key
+   `{aadp:answer, 1.0, answer}`.
+5. Require `x_answer.freshness.updated_at === entity.updated_at`.
+6. Return a typed validated entity/wrapper, or a structured validation result.
 
-`parseAnswerEntityV1(entity)` là throwing convenience wrapper trên
-`validateAnswerEntityV1`, không duplicate validation rules.
+`parseAnswerEntityV1(entity)` is a throwing convenience wrapper over
+`validateAnswerEntityV1` and duplicates no validation rules.
 
-Advisory (không tạo semantic error): câu hỏi có phải natural-language question;
-concise answer có tự đủ nghĩa; concise/full answer có mâu thuẫn; nội dung có
-đúng/current/đủ evidence; author/generator có thật hoặc đáng tin.
+Advisory (never a semantic error): whether the question is a natural-language
+question; whether the concise answer stands on its own; whether the concise and
+full answers contradict each other; whether the content is correct, current or
+sufficiently evidenced; whether the author or generator is real or trustworthy.
 
-Validation result dùng stable machine-readable codes với prefix
-`answer.semantic.*`; message text không phải API ổn định.
+Validation results use stable machine-readable codes with the prefix
+`answer.semantic.*`; message text is not a stable API.
 
 ## 16. Layer boundary
 
@@ -330,132 +350,140 @@ module registry ──► Answer schema + pure semantic validator
         ↓
 Answer entity validator/client ──► Relations resolver + shared traversal budget
         ↓
-application content authoring/generation policy (ngoài package core)
+application content authoring/generation policy (outside the package core)
 ```
 
-Core chỉ discovery, validate core envelope và bỏ qua extension không hỗ trợ.
-Entity-context validation nằm trong Answer module, không nằm trong generic
-registry hoặc core validator. Networking, URL/DNS, authorization, scheduling và
-budget tiếp tục do shared core/Relations infrastructure sở hữu.
+Core handles discovery only, validates the core envelope and ignores unsupported
+extensions. Entity-context validation lives in the Answer module, not in the
+generic registry or the core validator. Networking, URL/DNS, authorization,
+scheduling and budget remain owned by the shared core/Relations infrastructure.
 
 ## 17. Typed API
 
-Xem `ail-aadp/modules/answer/v1.0` (`src/modules/answer/v1.0/index.ts`) cho danh
-sách export đầy đủ: types (`AnswerDocumentV1`, `AnswerAuthorshipV1`,
+See `ail-aadp/modules/answer/v1.0` (`src/modules/answer/v1.0/index.ts`) for the
+full export list: types (`AnswerDocumentV1`, `AnswerAuthorshipV1`,
 `AnswerFreshnessV1`, `AnswerApplicabilityV1`, `AnswerEntityReferenceV1`,
 `ValidatedAnswerEntityV1`, ...), schema/registry (`registerAnswerModule`,
 `validateAnswerV1`, `validateAnswerEntityV1`, `parseAnswerEntityV1`), client
-(`fetchAnswerEntityV1`, `classifyAnswerFreshness`, `resolveAnswerTargets`) và
-conformance (`runAnswerConformance` và report renderers). Tên type có suffix
-`V1` hoặc nằm trong versioned subpath để tránh collision. Public function không
-nhận implementation-private registry/network type không được export.
+(`fetchAnswerEntityV1`, `classifyAnswerFreshness`, `resolveAnswerTargets`) and
+conformance (`runAnswerConformance` plus the report renderers). Type names carry
+the `V1` suffix or live in a versioned subpath to avoid collisions. No public
+function accepts an implementation-private registry or network type that is not
+exported.
 
-`fetchAnswerEntityV1` dùng core `fetchEntity`, sau đó gọi `parseAnswerEntityV1`;
-không fetch hoặc trust target URL trước khi toàn bộ core entity và `x_answer`
-hợp lệ.
+`fetchAnswerEntityV1` uses the core `fetchEntity` and then calls
+`parseAnswerEntityV1`; it does not fetch or trust a target URL before the whole
+core entity and `x_answer` are valid.
 
-`resolveAnswerTargets` nhận caller-owned `RelationsTraversalBudgetState` qua
-options và resolve CẢ HAI danh sách Answer entity reference: `related_entities`
-và — khi `authorship.kind === "generated-summary"` — `authorship.
-source_targets` bắt buộc; đây cùng là "Answer target", không được bỏ sót chỉ
-vì nằm trong `authorship`. Mỗi entry kết quả gắn `{group: "related_entities" |
-"source_targets", index}` để giữ provenance; thứ tự kết quả là toàn bộ
-`related_entities` (theo input order) rồi tới toàn bộ `source_targets` (theo
-input order). Một target trùng nhau giữa hai group (cùng canonical `{id,
-normalizedUrl}`) chỉ bị fetch một lần: Relations charge dedup (`chargeNode`)
-trước khi biết outcome fetch/validate, nên bản thân "duplicate" KHÔNG suy ra
-được occurrence đầu đã resolve thành công. `resolveAnswerTargets` giữ state
-riêng theo danh tính của `options.budget` (sống suốt vòng đời budget đó,
-không chỉ một lần gọi, và an toàn khi nhiều lời gọi `resolveAnswerTargets`
-share cùng budget chạy ĐỒNG THỜI — budget vốn caller-owned, không có gì cấm
-`Promise.all` nhiều lời gọi trên cùng budget, và scheduler layer của package
-hỗ trợ concurrent request). State này tách outcome fetch/validate của canonical
-target (transport/schema/checksum/id — áp dụng như nhau cho mọi reference)
-khỏi việc kiểm tra `target_type` của TỪNG reference: một canonical target chỉ
-được fetch tối đa một lần cho toàn bộ vòng đời budget; occurrence trùng —
-kể cả khi đến từ một lời gọi đang chạy đồng thời, trong lúc fetch của
-occurrence đầu còn pending — join cùng fetch đang in-flight đó thay vì gọi lại
-Relations lần hai (chỉ nhận `duplicate` trơ mà không có gì để replay). Sau khi
-fetch xong, mỗi occurrence được đánh giá lại bằng `target_type` CỦA CHÍNH NÓ:
-occurrence thứ hai của một target 404/forbidden/invalid ở lần đầu PHẢI mang
-đúng status đó, không được báo `resolved`; nếu fetch thành công nhưng
-`target_type` của occurrence đó không khớp entity đã fetch thì occurrence đó
-là `invalid` (type mismatch) — kể cả khi occurrence ĐẦU (occurrence kích hoạt
-fetch) mới là bên khai sai type còn occurrence sau khai đúng, occurrence sau
-vẫn PHẢI được báo `resolved` với entity đã fetch, không kế thừa verdict sai
-của occurrence đầu. Một duplicate ứng với canonical key mà resolver này chưa
-từng tự tạo outcome/pending fetch (visited qua đường khác, ví dụ một bước
-Relations traversal thô trên cùng budget) không có gì đáng tin để replay hay
-join — trường hợp đó PHẢI báo `invalid`, không được báo `resolved`, vì một
-duplicate chưa xác minh không phải bằng chứng đã resolve thành công.
+`resolveAnswerTargets` takes a caller-owned `RelationsTraversalBudgetState`
+through its options and resolves BOTH lists of Answer entity references:
+`related_entities` and — when `authorship.kind === "generated-summary"` — the
+mandatory `authorship.source_targets`; both are "Answer targets" and neither may
+be skipped merely because it sits inside `authorship`. Each result entry is
+tagged `{group: "related_entities" | "source_targets", index}` to preserve
+provenance; the result order is all of `related_entities` (in input order)
+followed by all of `source_targets` (in input order). A target appearing in both
+groups (the same canonical `{id, normalizedUrl}`) is fetched only once:
+Relations charges deduplication (`chargeNode`) before the fetch/validate outcome
+is known, so "duplicate" by itself does NOT imply the first occurrence resolved
+successfully. `resolveAnswerTargets` keeps its own state keyed by the identity
+of `options.budget` (living for that budget's whole lifetime, not just one call,
+and safe when several `resolveAnswerTargets` calls sharing one budget run
+CONCURRENTLY — the budget is caller-owned, nothing forbids `Promise.all` over
+several calls on one budget, and the package's scheduler layer supports
+concurrent requests). That state separates a canonical target's fetch/validate
+outcome (transport/schema/checksum/id — identical for every reference) from the
+`target_type` check of EACH individual reference: a canonical target is fetched
+at most once for the budget's whole lifetime; a duplicate occurrence — including
+one arriving from a concurrently running call while the first occurrence's fetch
+is still pending — joins that same in-flight fetch instead of calling Relations a
+second time (which would return a bare `duplicate` with nothing to replay). Once
+the fetch completes, each occurrence is evaluated again against ITS OWN
+`target_type`: a second occurrence of a target that was 404/forbidden/invalid the
+first time MUST carry that same status and MUST NOT report `resolved`; if the
+fetch succeeded but that occurrence's `target_type` does not match the fetched
+entity, that occurrence is `invalid` (type mismatch) — and even when it was the
+FIRST occurrence (the one that triggered the fetch) that declared the wrong type
+while a later one declares the right type, the later occurrence MUST still be
+reported `resolved` with the fetched entity, never inheriting the first
+occurrence's wrong verdict. A duplicate for a canonical key this resolver never
+produced an outcome or pending fetch for (visited by some other path — for
+example a raw Relations traversal step on the same budget) has nothing
+trustworthy to replay or join; that case MUST be reported `invalid`, never
+`resolved`, because an unverified duplicate is not evidence of a successful
+resolution.
 
-Nếu `AadpDiscoveryBudgetExceededError` xảy ra đúng lúc canonical key T đang
-in-flight, `chargeNode` đã ghi T vào `visitedTargets` TRƯỚC khi ném lỗi, nên T
-trở thành "duplicate" vĩnh viễn với Relations dù chưa có outcome thật.
-`resolveAnswerTargets` PHẢI tự nhớ riêng key T đã dừng vì budget exceeded
-(gắn theo `options.budget`, không chỉ một lần gọi) và replay
-`status: "budget-exhausted"`/`partial: true` cho mọi occurrence sau của đúng
-key đó — kể cả ở một lời gọi `resolveAnswerTargets` khác sau này share cùng
-budget — thay vì để nó rơi vào nhánh duplicate-không-outcome và bị báo nhầm
-`invalid`/`partial:false` như thể budget đã dừng nhưng target này lại hỏng
-dữ liệu.
+If an `AadpDiscoveryBudgetExceededError` occurs exactly while canonical key T is
+in flight, `chargeNode` already recorded T in `visitedTargets` BEFORE the error
+was thrown, so T becomes a permanent "duplicate" to Relations despite having no
+real outcome. `resolveAnswerTargets` MUST remember separately that key T stopped
+because the budget was exceeded (attached to `options.budget`, not to one call)
+and replay `status: "budget-exhausted"`/`partial: true` for every later
+occurrence of that exact key — including in a later `resolveAnswerTargets` call
+sharing the same budget — instead of letting it fall into the
+duplicate-without-outcome branch and be misreported as `invalid`/`partial:
+false`, as though the budget had stopped but this particular target were
+data-broken.
 
-`options.signal` (abort) KHÔNG được đối xử như một global stop chia sẻ theo
-budget — nó chỉ scope theo đúng MỘT lời gọi `resolveAnswerTargets` đã truyền
-signal đó, kể cả khi target đang resolve là một canonical fetch dùng chung
-với call khác (cùng call tuần tự sau, hoặc một call đang chạy đồng thời trên
-cùng budget). Canonical fetch dùng chung KHÔNG BAO GIỜ được gắn trực tiếp với
-`options.signal` của riêng một caller nào — nó dùng một `AbortController` nội
-bộ do chính resolver sở hữu, chỉ abort khi KHÔNG còn occurrence nào chờ kết
-quả (đếm số waiter, giảm khi một occurrence rời wait — kể cả rời sớm do
-chính `options.signal` của nó abort — abort internal controller khi đếm về
-0). Mỗi occurrence chỉ race chính wait của nó với đúng `options.signal` nó
-nhận, không phải với fetch chung. Vì vậy: (a) một caller abort signal của
-chính mình chỉ khiến call đó dừng (`partial: true`/`budget-exhausted` cho các
-reference còn lại của CHÍNH call đó), không ảnh hưởng call khác đang chờ cùng
-canonical fetch; (b) một canonical fetch KHÔNG bị hủy chỉ vì MỘT TRONG NHIỀU
-caller đang chờ nó đã abort — caller khác vẫn nhận outcome thật khi fetch
-xong — nhưng KHÔNG bị bỏ chạy ngầm vô thời hạn sau khi caller CUỐI CÙNG còn
-chờ nó cũng đã rời đi: request HTTP thật sự bị hủy ngay khi không còn ai phụ
-thuộc kết quả, để không tiếp tục tiêu `maxRequests`/`maxTotalBytes` cho một
-kết quả không còn ai nhận; (c) một occurrence có `options.signal` ĐÃ abort từ
-trước KHÔNG BAO GIỜ được phép khởi tạo fetch mới (không charge, không gửi
-request) thay mặt một call đã bỏ cuộc từ đầu; (d) `AbortedError` KHÔNG BAO
-GIỜ được ghi vào state global-stop theo budget — chỉ
-`AadpDiscoveryBudgetExceededError` (một kết luận thật sự chia sẻ theo budget)
-mới được nhớ và replay cho occurrence sau; một abort không được phép "đầu độc"
-budget khiến mọi call khác — kể cả call dùng signal mới, chưa từng abort —
-vĩnh viễn nhận `budget-exhausted` cho target đó; (e) khi waiter cuối cùng rời
-đi và fetch bị abandon (đếm waiter về 0 trong lúc canonical fetch chưa settle
-qua đường hoàn tất bình thường của nó), resolver PHẢI release ngay lập tức,
-ĐỒNG BỘ trong đúng tick đó — không trì hoãn đến khi promise của fetch bị hủy
-thật sự settle — charge `chargeNode` đã ghi cho canonical key đó (qua
-`releaseNode` của Relations budget), để một call sau (kể cả gọi ngay lập tức
-sau khi call bị abort vừa trả về, không cần chờ fetch bị hủy settle xong)
-có thể bắt đầu một resolution mới hợp lệ cho đúng target đó thay vì mãi mãi
-gặp Relations `duplicate` và bị báo `invalid`; (f) một attempt ĐÃ bị abandon
-KHÔNG BAO GIỜ được commit bất kỳ shared state nào khi nó settle muộn sau đó —
-không ghi outcome, không ghi global stop. Một attempt bị hủy vẫn có thể settle
-thành công (abort đến sau lần kiểm tra cancellation cuối cùng của transport
-chỉ còn lại phần đuôi đồng bộ), và khi đó nó KHÔNG còn là attempt hiện hành
-của canonical key đó: commit nó sẽ cache response mà chính caller đã bỏ, có
-thể đè lên một attempt MỚI đang chạy cho cùng key với options khác. Bỏ qua
-budget error của một attempt đã abandon cũng không mất mát gì, vì mọi
-dimension của budget đều đơn điệu — attempt thay thế sẽ tự trip lại đúng giới
-hạn đó.
+`options.signal` (abort) MUST NOT be treated as a global stop shared across the
+budget — it is scoped to exactly the ONE `resolveAnswerTargets` call that passed
+it, even when the target being resolved is a canonical fetch shared with another
+call (a later sequential call, or one running concurrently on the same budget).
+A shared canonical fetch is NEVER attached directly to any one caller's
+`options.signal` — it uses an internal `AbortController` owned by the resolver
+itself, aborted only when NO occurrence is still waiting for the result (a
+waiter count, decremented when an occurrence stops waiting — including when it
+stops early because its own `options.signal` aborted — with the internal
+controller aborted when the count reaches 0). Each occurrence races only its own
+wait against exactly the `options.signal` it was given, never against the shared
+fetch. Therefore: (a) a caller aborting its own signal stops only that call
+(`partial: true`/`budget-exhausted` for the remaining references of THAT call)
+and does not affect another call waiting on the same canonical fetch; (b) a
+canonical fetch is NOT cancelled merely because ONE OF SEVERAL waiting callers
+aborted — the others still receive the real outcome when it completes — but it is
+NOT left running in the background indefinitely after the LAST remaining waiter
+leaves either: the real HTTP request is cancelled as soon as nobody depends on
+the result, so it stops consuming `maxRequests`/`maxTotalBytes` for a result
+nobody will receive; (c) an occurrence whose `options.signal` was ALREADY
+aborted MUST NEVER start a new fetch (no charge, no request) on behalf of a call
+that had already given up; (d) an `AbortedError` is NEVER recorded into the
+per-budget global-stop state — only an `AadpDiscoveryBudgetExceededError` (a
+genuinely budget-shared conclusion) is remembered and replayed for later
+occurrences; an abort must not "poison" the budget so that every other call —
+including one with a fresh signal that never aborted — permanently receives
+`budget-exhausted` for that target; (e) when the last waiter leaves and the
+fetch is abandoned (the waiter count reaches 0 while the canonical fetch has not
+settled through its own normal completion path), the resolver MUST release the
+`chargeNode` charge recorded for that canonical key immediately and
+SYNCHRONOUSLY within that same tick — not deferred until the cancelled fetch's
+promise actually settles — through the Relations budget's `releaseNode`, so that
+a later call (including one issued right after the aborted call returns, without
+waiting for the cancelled fetch to settle) can start a genuinely new resolution
+for that target instead of forever meeting Relations' `duplicate` and being
+reported `invalid`; (f) an attempt that has ALREADY been abandoned MUST NEVER
+commit any shared state when it settles late afterwards — no outcome, no global
+stop. A cancelled attempt can still settle successfully (the abort arriving
+after the transport's last cancellation check leaves only the synchronous tail),
+and at that point it is no longer the current attempt for that canonical key:
+committing it would cache a response its own caller abandoned, and could
+overwrite a NEW attempt running for the same key with different options.
+Discarding an abandoned attempt's budget error loses nothing either, because
+every budget dimension is monotonic — the replacement attempt will trip the same
+limit again.
 
-Trạng thái mỗi entry: `resolved | forbidden | not-found | invalid |
-budget-exhausted`; không trả partial result như thể complete. Phân loại dựa
-trên nguyên nhân lỗi thực tế (`RelationsTraversalIssue.cause`), không chỉ mã
-lỗi thô: HTTP 401/403 → `forbidden`; HTTP 404 → `not-found`; blocked URL,
-schema-invalid, checksum mismatch, id/type integrity mismatch, hoặc unsupported
-`aadp_version` → `invalid` (target tồn tại nhưng không dùng được); mọi lỗi
-transport khác (timeout, 5xx, quá nhiều redirect, response quá lớn) cũng mặc
-định `invalid` — một simplification có chủ đích vì taxonomy Answer không có
-bucket thứ sáu cho lỗi transport, và gán `not-found` cho lỗi tạm thời sẽ báo
-sai một target thực ra vẫn tồn tại.
+Per-entry status: `resolved | forbidden | not-found | invalid |
+budget-exhausted`; a partial result is never returned as though it were
+complete. Classification is based on the actual cause of failure
+(`RelationsTraversalIssue.cause`), not just the coarse error code: HTTP 401/403 →
+`forbidden`; HTTP 404 → `not-found`; a blocked URL, a schema-invalid response, a
+checksum mismatch, an id/type integrity mismatch, or an unsupported
+`aadp_version` → `invalid` (the target exists but is unusable); every other
+transport error (timeout, 5xx, too many redirects, oversized response) also
+defaults to `invalid` — a deliberate simplification, because the Answer taxonomy
+has no sixth bucket for transport errors, and reporting `not-found` for a
+transient failure would misreport a target that does in fact exist.
 
-## 18. Schema và artifact inventory
+## 18. Schema and artifact inventory
 
 ```text
 schemas/modules/answer/v1.0/
@@ -478,11 +506,11 @@ src/modules/answer/v1.0/
 
 ## 19. Compatibility
 
-- Answer `1.0` là normative wire version đầu tiên; không có `0.1`.
-- Patch chỉ sửa documentation/implementation bug không đổi payload schema/
-  semantic result normative. Minor chỉ thêm optional contract tương thích ngược.
-  Major dùng cho thay đổi field/discriminator/reference/freshness semantics
-  không tương thích.
-- Client KHÔNG được fallback sang Answer version khác khi exact version không
-  hỗ trợ.
-- Core-only consumer bỏ qua `x_answer` và module discovery entry an toàn.
+- Answer `1.0` is the first normative wire version; there is no `0.1`.
+- A patch only fixes documentation or implementation bugs without changing the
+  payload schema or normative semantic results. A minor only adds
+  backward-compatible optional contract. A major covers incompatible changes to
+  fields, the discriminator, references or freshness semantics.
+- A client MUST NOT fall back to another Answer version when the exact version
+  is unsupported.
+- A core-only consumer safely ignores `x_answer` and the module discovery entry.

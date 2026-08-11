@@ -329,7 +329,7 @@ export function checkRelationRegistrySemantics(doc: unknown): ModuleSemanticIssu
         message: `Inverse "${entry.inverse}" is neither a standard v1.0 token nor a namespaced vendor token (^x_[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$).`,
       });
     }
-    // specification.md §8: "symmetric: true yêu cầu inverse bằng chính token."
+    // specification.md §8: "symmetric: true requires inverse to equal the token itself."
     // A missing `inverse` fails this exactly like a mismatched one — schema
     // makes `inverse` optional, but `symmetric: true` normatively requires
     // it to be present and equal to `token`, so `undefined !== token` must

@@ -1,0 +1,21 @@
+{
+  "module": "aadp:evidence",
+  "version": "1.0",
+  "kind": "evidence",
+  "summary": "Regulator filing referenced under embargo.",
+  "locale": "en",
+  "source": {
+    "title": "Orbit 2026 Regulatory Filing",
+    "url": "https://example.com/filings/2026",
+    "publisher": {
+      "name": "Example Regulator"
+    },
+    "access": "restricted"
+  },
+  "provenance": {
+    "published_at": "2026-01-15T00:00:00Z",
+    "retrieved_at": "2026-08-01T09:00:00Z"
+  },
+  "excerpt": "  Availability across the reporting period was 99.9 percent.  ",
+  "content_checksum": "sha256:ff98366c987141bf936c23903dd38b7c34fadd0a05a844c43f488d5ccc4ec50d"
+}

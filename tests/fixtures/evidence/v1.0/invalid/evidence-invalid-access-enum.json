@@ -1,0 +1,20 @@
+{
+  "module": "aadp:evidence",
+  "version": "1.0",
+  "kind": "evidence",
+  "summary": "Annual status report published by Example Orbit.",
+  "locale": "en",
+  "source": {
+    "title": "Orbit 2026 Status Report",
+    "url": "https://example.com/reports/2026-status",
+    "publisher": {
+      "name": "Example Orbit"
+    },
+    "access": "private"
+  },
+  "provenance": {
+    "published_at": "2026-01-15T00:00:00Z",
+    "retrieved_at": "2026-08-01T09:00:00Z"
+  },
+  "content_checksum": "sha256:c97706a063405592d4edc6ce3ed56305c608a6a1bf3432dfcb3179aa1932c61c"
+}

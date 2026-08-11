@@ -1,20 +1,21 @@
-# ADR-0007: Versioning, discovery và package boundary cho AADP Module
+# ADR-0007: Versioning, discovery and package boundary for AADP Modules
 
 ## Status
 
-Accepted — áp dụng từ kế hoạch package `ail-aadp@1.2.0`.
+Accepted — applies from the `ail-aadp@1.2.0` package plan onward.
 
 ## Context
 
-AADP v1.0 cho phép manifest khai báo `modules[]`, nhưng chưa khóa quan hệ giữa
-package version, core protocol version và module version. Relations Module là
-module chuẩn đầu tiên và phải tạo precedent dùng lại được cho các module sau.
+AADP v1.0 lets a manifest declare `modules[]`, but it never locked down the
+relationship between package version, core protocol version and module version.
+The Relations Module is the first standard module and must set a reusable
+precedent for every module after it.
 
 ## Decision
 
 ### Version domains
 
-Ba version domain độc lập:
+Three independent version domains:
 
 ```text
 ail-aadp@1.2.0          npm package version
@@ -22,17 +23,18 @@ aadp_version: "1.0"    core protocol version
 aadp:relations@1.0      module wire version
 ```
 
-Package bump MUST NOT tự đổi core hoặc module version. Module major thay đổi wire
-không tương thích; minor thêm optional contract tương thích; patch chỉ sửa
-implementation, không đổi tập payload được chấp nhận. Released artifacts là
-immutable.
+A package bump MUST NOT change the core or module version by itself. A module
+major means an incompatible wire change; a minor adds compatible optional
+contract; a patch only fixes the implementation and does not change the set of
+accepted payloads. Released artifacts are immutable.
 
-### Module ID và discovery
+### Module ID and discovery
 
-Module ID MUST khớp `^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$`. Namespace `aadp` dành
-cho module chuẩn AADP; vendor MUST dùng namespace do mình sở hữu.
+A module ID MUST match `^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$`. The `aadp`
+namespace is reserved for standard AADP modules; a vendor MUST use a namespace
+it owns.
 
-Manifest v1.0 chỉ dùng contract đã release:
+Manifest v1.0 uses only the released contract:
 
 ```json
 {
@@ -46,62 +48,67 @@ Manifest v1.0 chỉ dùng contract đã release:
 }
 ```
 
-Server MUST chỉ quảng bá module khi endpoints và artifacts đã deploy và đạt module
-conformance. Không thêm field không có namespace như `registry` vào declaration.
-Field `schema` MUST trỏ tới schema dispatch cho các top-level module documents.
-Discovery entry `{id, version, schema}` tiếp tục được validate bởi core manifest
-schema; module schema MUST NOT dùng lại vai trò đó.
+A server MUST advertise a module only once its endpoints and artifacts are
+deployed and pass module conformance. Do not add unnamespaced fields such as
+`registry` to a declaration. The `schema` field MUST point at the dispatch
+schema for the module's top-level documents. The discovery entry
+`{id, version, schema}` continues to be validated by the core manifest schema;
+a module schema MUST NOT take over that role.
 
 ### Registry lookup
 
-Registry exact-match `{moduleId, moduleVersion, kind}` và MUST phân biệt:
+The registry exact-matches `{moduleId, moduleVersion, kind}` and MUST
+distinguish:
 
 - `unsupported_module`;
 - `unsupported_module_version`;
 - `unsupported_module_kind`;
 - `invalid_module_document`.
 
-Registry MUST NOT fallback sang version khác.
+The registry MUST NOT fall back to a different version.
 
 ### Envelope boundary
 
-Core entity v1.0 tiếp tục immutable. Inline module payload dùng extension point
-`x_*` ở root entity; Relations dùng `x_relations`, không đặt trong application
-`data`.
+Core entity v1.0 stays immutable. An inline module payload uses the root
+entity's `x_*` extension point; Relations uses `x_relations`, never a field
+inside the application's `data`.
 
-Standalone module document MUST tự mô tả `aadp_version`, module ID, module version
-và document kind. Core-only consumer MUST bỏ qua module không hỗ trợ mà không
-fetch module schema/endpoint. Opt-in consumer MUST báo unsupported state rõ ràng.
+A standalone module document MUST self-describe its `aadp_version`, module ID,
+module version and document kind. A core-only consumer MUST ignore an
+unsupported module without fetching that module's schema or endpoints. An
+opt-in consumer MUST report the unsupported state explicitly.
 
 ### Package exports
 
-Module APIs và schemas nằm dưới versioned subpath:
+Module APIs and schemas live under versioned subpaths:
 
 ```text
 ail-aadp/modules/<module-name>/v<module-version>
 ail-aadp/schemas/modules/<module-name>/v<module-version>/*
 ```
 
-Relations dùng `ail-aadp/modules/relations/v1.0` và
-`ail-aadp/schemas/modules/relations/v1.0/*`. Module API MUST NOT được re-export từ
-package root. Tarball tests MUST không import `src/**`.
+Relations uses `ail-aadp/modules/relations/v1.0` and
+`ail-aadp/schemas/modules/relations/v1.0/*`. A module API MUST NOT be
+re-exported from the package root. Tarball tests MUST NOT import `src/**`.
 
 ### Conformance boundary
 
-Core checks và stable core check IDs không đổi khi thêm module. Mỗi module có
-runner/check suite riêng nhưng MAY dùng chung report, HTTP policy và execution
-utilities.
+Core checks and stable core check IDs do not change when a module is added.
+Each module has its own runner and check suite, but MAY share the report shape,
+HTTP policy and execution utilities.
 
 ## Consequences
 
-- Module registry nằm ngoài closed core schema registry.
-- Module clients dùng shared infrastructure, không duplicate HTTP/URL/budget.
-- Core-only consumer tiếp tục tương thích với manifest/entity v1.0.
-- Public surface tăng qua versioned subpaths thay vì package root.
+- The module registry sits outside the closed core schema registry.
+- Module clients use shared infrastructure rather than duplicating HTTP, URL or
+  budget handling.
+- Core-only consumers stay compatible with manifest/entity v1.0.
+- The public surface grows through versioned subpaths instead of the package
+  root.
 
 ## References
 
 - [AADP v1.0 specification](../../spec/v1.0/specification.md)
 - [ADR-0004](0004-backward-compatibility.md)
 - [Relations Module v1.0 specification](../../spec/modules/relations/v1.0/specification.md)
-- [Kế hoạch 1.2.0](../vi/plans/implementation-plan-v1.2.0.md)
+- [Implementation plan 1.2.0](../vi/plans/implementation-plan-v1.2.0.md)

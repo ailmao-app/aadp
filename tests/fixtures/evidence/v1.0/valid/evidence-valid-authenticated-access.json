@@ -1,0 +1,21 @@
+{
+  "module": "aadp:evidence",
+  "version": "1.0",
+  "kind": "evidence",
+  "summary": "Subscriber-only briefing published by Example Orbit.",
+  "locale": "en",
+  "source": {
+    "title": "Orbit 2026 Subscriber Briefing",
+    "url": "https://example.com/reports/2026-briefing",
+    "publisher": {
+      "name": "Example Orbit",
+      "url": "https://example.com"
+    },
+    "access": "authenticated"
+  },
+  "provenance": {
+    "published_at": "2026-01-15T00:00:00Z",
+    "retrieved_at": "2026-08-01T09:00:00Z"
+  },
+  "content_checksum": "sha256:edb4cb429e36c4353f8e76058394b2e947dbf8f2c0a57a7095e31362d2d1e91b"
+}
