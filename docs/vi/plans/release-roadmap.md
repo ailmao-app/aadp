@@ -50,7 +50,7 @@ Không tạo release rỗng chỉ để đạt số version trong roadmap. Patch
 | `1.2.0` | Module infrastructure và Relations pilot | Đã phát hành (2026-08-06) | Extension/module riêng |
 | `1.3.0` | Answer Module | Đã phát hành (2026-08-06); `1.3.1` security patch (2026-08-08) | Module riêng |
 | `1.4.0` | Evidence & Provenance Module | Gates closed (2026-08-10); chờ release verification trên commit được tag | Module riêng |
-| `1.5.0` | Cross-module graph traversal và composition | Blocked ở ADR-0011 (Proposed) | Không đổi core schema |
+| `1.5.0` | Cross-module graph traversal và composition | Phase 0 xong (ADR-0011 Accepted), đang implement | Không đổi core schema |
 | `1.6.0` | Experimental AI Usage Policy | Chờ ADR và legal review | `x_ai_usage` experimental |
 | `1.7.0` | Auth-aware retrieval helpers | Chờ security ADR | Không đổi manifest schema |
 | `1.8.0` | Certification và implementation attestations | Chờ nhiều implementation | Report/profile contract |
@@ -383,17 +383,18 @@ reporting và conformance correctness. Không thêm vocabulary wire mới trong 
 
 ## 14. Release 1.5.0 — Cross-module graph traversal
 
-Trạng thái: **Blocked Implementation Draft**, chặn ở Phase 0 (ADR-0011). Chi tiết
-và toàn bộ contract đề xuất ở
+Trạng thái: **Implementation Draft**, Phase 0 đã đóng. Chi tiết
+và toàn bộ contract ở
 [implementation plan 1.5.0](implementation-plan-v1.5.0.md).
 
 Dependency đã xanh: Relations `1.0`, Answer `1.0`, Evidence `1.0` stable, và gate
 external interoperability của `1.4.0` đã đóng ngày 2026-08-10 — xem §12 và
 [implementation record 1.4.0](../../records/implementation-record-v1.4.0.md).
-Dependency còn đỏ:
-[ADR-0011](../../adr/0011-cross-module-graph-traversal.md) đang ở trạng thái
-**Proposed** với ba open question chưa chốt; không artifact nào của `1.5.0` được
-tạo trước khi ADR đó Accepted.
+[ADR-0011](../../adr/0011-cross-module-graph-traversal.md) đã **Accepted** ngày
+2026-08-12: ba open question được chốt ở §12 (collection default `false` và
+không có `maxPages`, `concurrency` không public, không publish specification
+riêng), và type gate `npm run test:types` đã pass. Runtime implementation của
+Phase 1-2 được phép bắt đầu từ commit acceptance trở đi.
 
 Mục tiêu: cung cấp application service/client orchestration thống nhất sau khi
 Relations, Answer và Evidence đều ổn định.

@@ -2,24 +2,29 @@
 
 ## Status
 
-**Proposed** (2026-08-11) — for package `ail-aadp@1.5.0`. No wire artifact is
+**Accepted** (2026-08-12) — for package `ail-aadp@1.5.0`. Accepted after §12
+settled the three questions this ADR carried while `Proposed`, and after the
+Phase 0 type gate (`npm run test:types`) proved the whole public surface below
+compiles against the released Relations/Answer/Evidence `1.0` types. No wire
+artifact is
 allocated by this ADR: cross-module traversal is a **client-side capability**,
 not a wire contract. `aadp_version` stays `1.0`, and `aadp:relations@1.0`,
 `aadp:answer@1.0` and `aadp:evidence@1.0` are untouched.
 
-**Until and unless open question 3 decides otherwise, this ADR is the binding
-source for cross-module traversal.** There is no
+**This ADR is the binding source for cross-module traversal** — §12.3 settled
+that `1.5.0` publishes no separate specification. There is no
 `spec/traversal/v1.0/specification.md`, and neither the plan nor any release gate
 may cite one as authority while it does not exist.
 
-Nothing under `src/traversal/**` or `spec/traversal/**` may be created before
-this ADR is Accepted. The single permitted exception is the Phase 0 type gate —
+Nothing under `src/traversal/**` or `spec/traversal/**` could be created before
+this ADR was Accepted. The single permitted exception was the Phase 0 type gate —
 the type-only fixture `tests/types/traversal-api.test-d.ts` plus the minimal
 harness needed to compile it (`tests/types/tsconfig.json` and a `test:types`
 script in `package.json`, because the root `tsconfig.json` includes `src` only).
-None of it declares runtime behaviour: the surface must be shown to compile
+None of it declares runtime behaviour: the surface had to be shown to compile
 *before* acceptance, so forbidding the fixture or the harness that runs it would
-make acceptance unreachable.
+have made acceptance unreachable. That gate is now closed, and runtime
+implementation is unblocked from the acceptance commit onward.
 [ADR-0010](0010-evidence-citation-provenance-and-security.md)
 spent the "decide before freezing" protection of
 [ADR-0004](0004-backward-compatibility.md) and
@@ -154,7 +159,7 @@ governing requests.
 | # | Source kind | Edge group | Wire source | Depth delta | Expandable | Condition |
 |---:|---|---|---|---:|---|---|
 | 1 | any entity with `x_relations` | `relations.item` | `x_relations.items[].target` / `targets[]` | +1 | yes | always |
-| 2 | any entity with `x_relations` | `relations.collection` | `x_relations.items[].collection` | +1 per item | yes | `followCollections` |
+| 2 | any entity with `x_relations` | `relations.collection` | `x_relations.items[].collection` | +1 per item | yes | `followCollections`, **default false** |
 | 3 | `answer` | `answer.related_entity` | `x_answer.related_entities[]` | +1 | yes | always |
 | 4 | `answer` | `answer.source_target` | `x_answer.authorship.source_targets[]` | +1 | yes | `includeGeneratedSummarySources`, **default false** |
 | 5 | `claim` | `evidence.evidence_ref` | `x_evidence.evidence_refs[]` | +1 | no (leaf) | always |
@@ -163,6 +168,9 @@ governing requests.
 The matrix describes what the traversal service does. It does **not** redefine any
 module's wire contract, and it does not change what any released module client
 does on its own.
+
+Row 2 pages a collection by following its `next` cursor, and it is bounded by the
+budget alone (§12.1) — there is no separate page limit.
 
 Row 4 is the one deliberate widening. Evidence `1.0` never fetches
 `authorship.source_targets`, and ADR-0010 §9 keeps it that way; the traversal
@@ -406,6 +414,57 @@ recorded by **name, URL and owner** in the `1.5.0` implementation record, with a
 least one owner outside the AADP maintainers. An unnamed data set is neither
 reproducible nor auditable.
 
+### 12. Settled before acceptance: paging, concurrency, specification
+
+These three were open questions in the `Proposed` draft. They are decided here,
+at maintainer direction on 2026-08-12, and this section is what closes them.
+
+#### 12.1 Collections are off by default, and paging is bounded by the budget alone
+
+`followCollections` defaults to **`false`**, reversing the plan's proposed `true`.
+Row 2 is the only edge group whose cost is unbounded in the *entity's* own data —
+one `collection` reference can stand for arbitrarily many pages — so a consumer
+opts into that surface rather than inheriting it.
+
+There is **no `maxPages` option**. Paging is bounded by exactly the six budget
+dimensions of [ADR-0008](0008-module-traversal-and-authorization.md): every page
+is an ordinary fetch, charged as requests, bytes and cross-origin like any other.
+
+A page limit was the alternative, and it was rejected on the same grounds as §10's
+"no seventh dimension". A `maxPages` knob would be a second, parallel bounding
+mechanism over work the budget already bounds, and it would need an outcome of its
+own — "we stopped reading pages" is neither a node status nor an edge fate, so it
+would have forced either a new enum value into a released vocabulary or a new
+truncation flag onto the expansion record. Both are new frozen API for a limit
+that adds no protection the budget does not already give.
+
+Consequently the exhaustion path is one that already exists and is already tested:
+a page fetch that the budget refuses yields edge outcome `budget-exhausted`,
+`stopReason: "budget"` and `partial: true`. No page is ever dropped silently —
+stopping always shows up on both the edge and the terminal event.
+
+#### 12.2 `concurrency` is internal, not public
+
+`concurrency` is **not** part of the `1.0` public API. The scheduler uses an
+internal constant, currently `4`.
+
+Fetch concurrency is a tuning detail of the implementation, and §8 already
+guarantees the only thing a consumer can observe through it: emission order is
+the schedule order, whatever the fetch order was. Publishing the knob would freeze
+a scheduling internal under `ail-aadp`'s SemVer for no behavioural promise. It can
+be added later without a breaking change; it cannot be removed later.
+
+#### 12.3 No normative specification is published in `1.5.0`
+
+No `spec/traversal/v1.0/specification.md` is written for this release. **This ADR
+is the binding source**, as the Status section's default already held.
+
+Cross-module traversal puts nothing on the wire — it is a client-side package API
+over three module contracts that are already specified. A specification exists to
+let independent implementations interoperate on a wire format; there is no wire
+format here to interoperate on. Should traversal ever gain interoperable wire
+behaviour, that is a new ADR and a new spec, not a retrofit of this one.
+
 ## Consequences
 
 - Consumers get one entry point for a multi-module walk, and the failure modes
@@ -453,20 +512,19 @@ reproducible nor auditable.
   bound is the caller's budget. If a per-adapter bound is wanted, it belongs to a
   later ADR, not to implementation-time improvisation.
 - `followCollections` opens a paging surface wider than any module client has
-  today. Its default and `maxPages` value are open questions this ADR must settle
-  before acceptance.
+  today, which is why §12.1 turns it off by default. A consumer that enables it
+  pays for every page out of the same budget, and a walk that cannot afford the
+  next page stops visibly rather than truncating quietly.
+- Leaving `concurrency` internal (§12.2) means a consumer with an unusual latency
+  or rate-limit profile cannot tune the scheduler at `1.0`. Accepted: the knob can
+  be added in a later minor release, whereas a published one could never be
+  withdrawn.
 
-## Open questions to settle before acceptance
+## Open questions
 
-1. `followCollections` default (`true` as proposed, or `false`) and the default
-   `maxPages` for row 2.
-2. Whether `concurrency` is public at `1.0` or fixed internally — a public knob
-   is an API promise about a scheduling detail.
-3. Whether a normative `spec/traversal/v1.0/specification.md` is published in
-   addition to this ADR. Until that is answered, the Status section's default
-   holds: this ADR is the binding source and no document may cite a specification
-   that does not exist. Answering "yes" adds drafting, review and acceptance of
-   that spec to Phase 0 and keeps Phases 1-6 blocked until it is settled.
+None. The three questions this ADR carried while `Proposed` — collection paging,
+`concurrency` visibility, and whether to publish a normative specification — were
+settled in §12 before acceptance.
 
 ## References
 

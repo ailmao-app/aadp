@@ -4,7 +4,7 @@
 
 | Thuộc tính | Giá trị |
 |---|---|
-| Trạng thái | Blocked Implementation Draft — chặn ở Phase 0 ([ADR-0011](../../adr/0011-cross-module-graph-traversal.md), **Proposed**); không artifact nào của Phase 1-6 được tạo trước khi ADR Accepted. Ngoại lệ **duy nhất**: type gate của Phase 0 — fixture type-only `tests/types/traversal-api.test-d.ts` cùng compile harness tối thiểu (xem §"Typed API contract") |
+| Trạng thái | Implementation Draft — Phase 0 **Complete** ([ADR-0011](../../adr/0011-cross-module-graph-traversal.md) **Accepted** 2026-08-12, type gate `npm run test:types` pass); Phase 1-2 `Ready`, Phase 3-6 vẫn chặn theo dependency riêng |
 | Chủ đề | Cross-module graph traversal và composition |
 | Dependency | Relations `1.0`, Answer `1.0`, Evidence `1.0` stable — bằng chứng ở [implementation record 1.4.0](../../records/implementation-record-v1.4.0.md), mục "Closed gates" và "External interoperability evidence (closed 2026-08-10)" |
 | Wire impact | KHÔNG đổi core schema, KHÔNG đổi `aadp:relations@1.0`, `aadp:answer@1.0`, `aadp:evidence@1.0`. Chỉ thêm package API mới (minor bump theo [roadmap §1](release-roadmap.md)) |
@@ -16,12 +16,11 @@ Tài liệu này là **kế hoạch, không phải nguồn normative**. Nguồn 
 nhau, **ADR thắng**.
 
 Cố ý KHÔNG viện dẫn `spec/traversal/v1.0/specification.md`: cross-module traversal
-là **client-side capability, không phải wire contract**, nên có cần một
-specification riêng hay không vẫn là open question #3 của ADR-0011. Trích dẫn một
-"nguồn normative" chưa tồn tại và chưa chắc tồn tại sẽ khiến release gate có thể
-được đóng dựa trên tài liệu không có thật. Nếu open question #3 quyết định publish
-spec, thì bảng work package phải thêm việc draft/review/accept spec đó và Phase
-1-6 tiếp tục bị chặn tới khi spec chốt.
+là **client-side capability, không phải wire contract**. [ADR-0011 §12.3](../../adr/0011-cross-module-graph-traversal.md)
+đã chốt là `1.5.0` KHÔNG publish specification nào — ADR là binding source. Trích
+dẫn một "nguồn normative" không tồn tại sẽ khiến release gate có thể được đóng
+dựa trên tài liệu không có thật, nên không tài liệu nào của release này được
+viện dẫn spec đó.
 
 ## Trạng thái theo work package
 
@@ -29,11 +28,11 @@ Bảng per-work-item bắt buộc theo [document conventions §4](../../document
 
 | # | Work package | Trạng thái | Điều kiện mở khóa |
 |---:|---|---|---|
-| 0 | [ADR-0011](../../adr/0011-cross-module-graph-traversal.md) cross-module traversal | `Proposed` (2026-08-11) | Ba open question ở cuối ADR được chốt, type gate (`tests/types/traversal-api.test-d.ts` + harness) chạy `npm run test:types` pass, rồi ADR chuyển `Accepted` |
-| 1 | Traversal adapter registry + capability negotiation | `Blocked` | Phase 0 |
-| 2 | Edge matrix + traversal state machine | `Blocked` | Phase 0 |
-| 3 | Streaming API + deterministic ordering | `Blocked` | Phase 0, Phase 2 |
-| 4 | Shared budget/accounting contract | `Blocked` | Phase 0, Phase 2 |
+| 0 | [ADR-0011](../../adr/0011-cross-module-graph-traversal.md) cross-module traversal | **`Complete`** (2026-08-12) | Đã đóng: ba open question chốt ở [ADR §12](../../adr/0011-cross-module-graph-traversal.md), type gate `npm run test:types` pass, ADR `Accepted` |
+| 1 | Traversal adapter registry + capability negotiation | **`Ready`** | Phase 0 ✓ |
+| 2 | Edge matrix + traversal state machine | **`Ready`** | Phase 0 ✓ |
+| 3 | Streaming API + deterministic ordering | `Blocked` | Phase 2 (Phase 0 ✓) |
+| 4 | Shared budget/accounting contract | `Blocked` | Phase 2 (Phase 0 ✓) |
 | 5 | Conformance profile `aadp:graph-traversal@1.0` | `Blocked` | Phase 1-4 |
 | 6 | Two neutral data sets + interoperability run | `Blocked` | Phase 5 + owner/deployment được định danh (§"Release gate") |
 
@@ -71,7 +70,8 @@ Bảng per-work-item bắt buộc theo [document conventions §4](../../document
    và §"Open gates" của cùng record ("None"). Roadmap §12 đã được đồng bộ theo
    record này.
 4. [ADR-0011](../../adr/0011-cross-module-graph-traversal.md) Accepted **trước**
-   khi tạo bất kỳ artifact nào của Phase 1-6 — hiện đang `Proposed`. Ngoại lệ duy
+   khi tạo bất kỳ artifact nào của Phase 1-6 — **đã Accepted ngày 2026-08-12**,
+   nên dependency này xanh. Ngoại lệ duy
    nhất được phép trước acceptance là **type gate của Phase 0**, gồm đúng ba thứ:
    fixture `tests/types/traversal-api.test-d.ts`, config `tests/types/tsconfig.json`,
    và script `test:types` trong `package.json` (root `tsconfig.json` chỉ include
@@ -84,9 +84,9 @@ Bảng per-work-item bắt buộc theo [document conventions §4](../../document
    ghi chú §"Trạng thái theo work package" của [plan 1.4.0](implementation-plan-v1.4.0.md))
    KHÔNG lặp lại ở release này.
 
-ADR-0011 khóa tối thiểu các mục sau, và bản `Proposed` hiện tại đã có đủ cả sáu
+ADR-0011 khóa tối thiểu các mục sau, và bản `Accepted` có đủ cả sáu
 (§1-2 registry, §3-4 edge matrix/state machine, §5-6 negotiation/cycle, §8-9
-ordering/streaming, §10 budget, §11 conformance): ranh giới registry (§"Registry boundary"), edge
+ordering/streaming, §10 budget, §11 conformance, cùng §12 ba quyết định cuối): ranh giới registry (§"Registry boundary"), edge
 matrix (§"Edge matrix"), streaming/ordering contract (§"Streaming contract"),
 budget ownership và accounting (§"Budget contract"), capability negotiation
 (§"Capability negotiation"), và conformance surface (§"Conformance contract").
@@ -296,7 +296,7 @@ nó KHÔNG định nghĩa lại wire contract của bất kỳ module nào.
 | # | Source kind | Edge group | Nguồn edge trên wire | Target kind kỳ vọng | Depth delta | Expand tiếp? | Điều kiện |
 |---:|---|---|---|---|---:|---|---|
 | 1 | entity bất kỳ có `x_relations` | `relations.item` | `x_relations.items[].target` / `targets[]` | tuỳ `target_type` (free token) | +1 | Có, nếu entity fetch về có adapter khớp | Luôn (mặc định bật) |
-| 2 | entity bất kỳ có `x_relations` | `relations.collection` | `x_relations.items[].collection` | như trên | +1 cho mỗi item của page | Có | `options.followCollections` (default `true`), giới hạn `maxPages` |
+| 2 | entity bất kỳ có `x_relations` | `relations.collection` | `x_relations.items[].collection` | như trên | +1 cho mỗi item của page | Có | **`options.followCollections`, default `false`**; paging chỉ bị chặn bởi sáu dimension của budget, không có `maxPages` ([ADR-0011 §12.1](../../adr/0011-cross-module-graph-traversal.md)) |
 | 3 | `answer` | `answer.related_entity` | `x_answer.related_entities[]` | tuỳ `target_type` | +1 | Có | Luôn |
 | 4 | `answer` | `answer.source_target` | `x_answer.authorship.source_targets[]` | tuỳ `target_type` | +1 | Có | **`options.includeGeneratedSummarySources`, default `false`** |
 | 5 | `claim` | `evidence.evidence_ref` | `x_evidence.evidence_refs[]` | hằng `evidence` | +1 | Không (leaf) | Luôn |
@@ -536,8 +536,9 @@ scheduleKey = (depth, parentDiscoveryIndex, edgeGroupRank, edgeIndex)
   tập adapter luôn cho cùng ordering.
 - `edgeIndex`: index trên wire, giữ nguyên input order.
 
-Fetch MAY chạy đồng thời (`options.concurrency`, default 4), nhưng **emit thì
-không**: kết quả được buffer và phát ra đúng thứ tự `scheduleKey`. Hệ quả kiểm
+Fetch MAY chạy đồng thời (hằng số nội bộ, hiện là 4 — **không** public ở `1.0`,
+xem [ADR-0011 §12.2](../../adr/0011-cross-module-graph-traversal.md)), nhưng
+**emit thì không**: kết quả được buffer và phát ra đúng thứ tự `scheduleKey`. Hệ quả kiểm
 chứng được — cùng input + cùng option ⇒ cùng chuỗi event, bất kể nhánh nào về
 trước. Đây là test bắt buộc (chạy với fetch trả về theo thứ tự đảo ngược).
 
@@ -843,8 +844,7 @@ export interface GraphTraversalOptions extends RelationsClientOptions {
   /** Manifest `modules[]` do CALLER tự fetch, chỉ dùng cho summary. Traversal không bao giờ tự fetch manifest. */
   declaredModules?: ManifestV1["modules"];
   includeGeneratedSummarySources?: boolean;  // default false
-  followCollections?: boolean;               // default true
-  concurrency?: number;                      // default 4
+  followCollections?: boolean;               // default false (ADR-0011 §12.1)
   maxBufferedEvents?: number;                // default 256
   signal?: AbortSignal;
 }
@@ -897,8 +897,9 @@ resolution layer.
 - Adapter bên thứ ba vẫn có thể trả `planEdges` phát sinh số edge rất lớn; giới
   hạn duy nhất là budget. Nếu cần giới hạn theo adapter thì phải do ADR-0011
   quyết định, không thêm ad hoc lúc implement.
-- `followCollections` mở ra bề mặt paging lớn hơn Evidence `1.0` từng có; cần
-  quyết định trong ADR-0011 xem `maxPages` mặc định là bao nhiêu và có nên
-  default `false` không.
+- `followCollections` mở ra bề mặt paging lớn hơn Evidence `1.0` từng có. Đã chốt
+  ở [ADR-0011 §12.1](../../adr/0011-cross-module-graph-traversal.md): default
+  `false`, không có `maxPages`, paging chỉ bị chặn bởi budget. Rủi ro còn lại là
+  của caller nào opt in — mỗi page tiêu budget như mọi fetch khác.
 - Hai neutral data set và owner của chúng chưa được định danh — đây là gate về
   môi trường/nhân sự, không phải code, giống hệt gate đã kéo từ `1.3.0` sang `1.4.0`.
