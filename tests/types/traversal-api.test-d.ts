@@ -96,6 +96,11 @@ export interface GraphNodeV1<T = unknown> {
   status: GraphNodeStatusV1;
   entity?: EntityV1<T>;
   modules?: Array<{ id: string; version: string; extensionField: `x_${string}` }>;
+  /**
+   * ONE record per extension, never one outcome for the whole node (ADR-0011
+   * §2a). Edge fates stay on `GraphEdgeV1.outcome`.
+   */
+  expansions?: GraphExtensionExpansionV1[];
   message?: string;
 }
 
@@ -291,7 +296,19 @@ type EdgeOutcomeIsRequired = Assert<
 >;
 type BlockedEdgeStillHasOutcome = Assert<Equal<typeof blockedEdge.outcome, EdgeExpansionOutcomeV1>>;
 
-/* 5. Expansion records are per-extension and carry no edge-level fate. */
+/* 5. Expansion records are per-extension and carry no edge-level fate. A node
+ *    therefore reports a LIST of them, and dropping that list from the node must
+ *    fail this gate — `CrossModuleGraphV1.expansions` is a flat collection and
+ *    does not carry the per-node relation. */
+type NodeExpansionsArePublic = Assert<
+  Equal<GraphNodeV1["expansions"], GraphExtensionExpansionV1[] | undefined>
+>;
+type NodeExpansionsAreAList = Assert<
+  Equal<NonNullable<GraphNodeV1["expansions"]>[number], GraphExtensionExpansionV1>
+>;
+type GraphAlsoCarriesFlatExpansions = Assert<
+  Equal<CrossModuleGraphV1["expansions"], GraphExtensionExpansionV1[]>
+>;
 type ExpansionHasNoEdgeOutcome = Assert<Equal<Has<GraphExtensionExpansionV1, "outcome">, true>>;
 declare const expansion: GraphExtensionExpansionV1;
 type ExpansionOutcomeIsExtensionScope = Assert<

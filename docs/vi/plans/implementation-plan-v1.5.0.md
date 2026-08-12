@@ -183,6 +183,23 @@ export type TraversalParseResult<TDoc> =
   | { ok: true; document: TDoc }
   | { ok: false; errors: unknown[]; semanticIssues: ModuleSemanticIssue[] };
 
+/**
+ * Context read-only mà scheduler truyền vào `planEdges`. Chỉ mang những gì
+ * adapter cần để quyết định plan cạnh nào — hai flag dưới đây chính là điều kiện
+ * của hàng 2 và hàng 4 trong edge matrix. KHÔNG mang budget, không mang state
+ * của walk, không mang gì cho phép adapter fetch hay charge.
+ */
+export interface TraversalPlanContext {
+  /** Depth của node nguồn. Landing depth của cạnh là `depth + 1`. */
+  depth: number;
+  /** Canonical key của node nguồn. */
+  nodeKey: string;
+  /** Giá trị hiệu lực của `options.followCollections` (default `false`). */
+  followCollections: boolean;
+  /** Giá trị hiệu lực của `options.includeGeneratedSummarySources` (default `false`). */
+  includeGeneratedSummarySources: boolean;
+}
+
 export interface TraversalEdgePlan {
   edgeGroup: string;
   /** Index trong mảng wire gốc, để truy vết. */
@@ -847,6 +864,24 @@ export interface GraphTraversalOptions extends RelationsClientOptions {
   followCollections?: boolean;               // default false (ADR-0011 §12.1)
   maxBufferedEvents?: number;                // default 256
   signal?: AbortSignal;
+}
+
+/**
+ * Cùng họ với `EvidenceConformanceOptions` đã phát hành, bỏ mọi field riêng của
+ * Evidence. KHÔNG có `maxPages` (ADR-0011 §12.1) và KHÔNG có `concurrency`
+ * (§12.2); mọi giới hạn traversal đi qua `budget`.
+ */
+export interface GraphTraversalConformanceOptions {
+  /** Origin dùng cho các check cần deployment thật. */
+  baseUrl?: string;
+  /** Entity URL làm root của các check traversal. */
+  sampleRootUrl?: string;
+  /** Budget do caller sở hữu; vắng thì runner tạo budget reference default. */
+  budget?: RelationsTraversalBudgetState;
+  timeoutMs?: number;
+  maxRedirects?: number;
+  maxResponseBytes?: number;
+  headers?: Record<string, string>;
 }
 
 export function registerBuiltinTraversalAdapters(): void;

@@ -5,7 +5,13 @@
 **Accepted** (2026-08-12) — for package `ail-aadp@1.5.0`. Accepted after §12
 settled the three questions this ADR carried while `Proposed`, and after the
 Phase 0 type gate (`npm run test:types`) proved the whole public surface below
-compiles against the released Relations/Answer/Evidence `1.0` types. No wire
+compiles against the released Relations/Answer/Evidence `1.0` types.
+
+The gate as committed at acceptance was **incomplete**: it omitted
+`GraphNodeV1.expansions`, and the plan's contract left `TraversalPlanContext` and
+`GraphTraversalConformanceOptions` referenced but undefined. Both were closed in
+the follow-up commit, and the acceptance decision stands on that corrected gate —
+no decision in §12 or below depended on the missing declarations. No wire
 artifact is
 allocated by this ADR: cross-module traversal is a **client-side capability**,
 not a wire contract. `aadp_version` stays `1.0`, and `aadp:relations@1.0`,
