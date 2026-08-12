@@ -13,7 +13,14 @@ source for cross-module traversal.** There is no
 may cite one as authority while it does not exist.
 
 Nothing under `src/traversal/**` or `spec/traversal/**` may be created before
-this ADR is Accepted. [ADR-0010](0010-evidence-citation-provenance-and-security.md)
+this ADR is Accepted. The single permitted exception is the Phase 0 type gate —
+the type-only fixture `tests/types/traversal-api.test-d.ts` plus the minimal
+harness needed to compile it (`tests/types/tsconfig.json` and a `test:types`
+script in `package.json`, because the root `tsconfig.json` includes `src` only).
+None of it declares runtime behaviour: the surface must be shown to compile
+*before* acceptance, so forbidding the fixture or the harness that runs it would
+make acceptance unreachable.
+[ADR-0010](0010-evidence-citation-provenance-and-security.md)
 spent the "decide before freezing" protection of
 [ADR-0004](0004-backward-compatibility.md) and
 [ADR-0007](0007-module-versioning-and-discovery.md) once, at explicit maintainer

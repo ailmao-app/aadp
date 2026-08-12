@@ -4,7 +4,7 @@
 
 | Thuộc tính | Giá trị |
 |---|---|
-| Trạng thái | Blocked Implementation Draft — chặn ở Phase 0 ([ADR-0011](../../adr/0011-cross-module-graph-traversal.md), **Proposed**); không artifact nào được tạo trước khi ADR Accepted |
+| Trạng thái | Blocked Implementation Draft — chặn ở Phase 0 ([ADR-0011](../../adr/0011-cross-module-graph-traversal.md), **Proposed**); không artifact nào của Phase 1-6 được tạo trước khi ADR Accepted. Ngoại lệ **duy nhất**: type gate của Phase 0 — fixture type-only `tests/types/traversal-api.test-d.ts` cùng compile harness tối thiểu (xem §"Typed API contract") |
 | Chủ đề | Cross-module graph traversal và composition |
 | Dependency | Relations `1.0`, Answer `1.0`, Evidence `1.0` stable — bằng chứng ở [implementation record 1.4.0](../../records/implementation-record-v1.4.0.md), mục "Closed gates" và "External interoperability evidence (closed 2026-08-10)" |
 | Wire impact | KHÔNG đổi core schema, KHÔNG đổi `aadp:relations@1.0`, `aadp:answer@1.0`, `aadp:evidence@1.0`. Chỉ thêm package API mới (minor bump theo [roadmap §1](release-roadmap.md)) |
@@ -29,7 +29,7 @@ Bảng per-work-item bắt buộc theo [document conventions §4](../../document
 
 | # | Work package | Trạng thái | Điều kiện mở khóa |
 |---:|---|---|---|
-| 0 | [ADR-0011](../../adr/0011-cross-module-graph-traversal.md) cross-module traversal | `Proposed` (2026-08-11) | Ba open question ở cuối ADR được chốt, rồi ADR chuyển `Accepted` |
+| 0 | [ADR-0011](../../adr/0011-cross-module-graph-traversal.md) cross-module traversal | `Proposed` (2026-08-11) | Ba open question ở cuối ADR được chốt, type gate (`tests/types/traversal-api.test-d.ts` + harness) chạy `npm run test:types` pass, rồi ADR chuyển `Accepted` |
 | 1 | Traversal adapter registry + capability negotiation | `Blocked` | Phase 0 |
 | 2 | Edge matrix + traversal state machine | `Blocked` | Phase 0 |
 | 3 | Streaming API + deterministic ordering | `Blocked` | Phase 0, Phase 2 |
@@ -71,7 +71,15 @@ Bảng per-work-item bắt buộc theo [document conventions §4](../../document
    và §"Open gates" của cùng record ("None"). Roadmap §12 đã được đồng bộ theo
    record này.
 4. [ADR-0011](../../adr/0011-cross-module-graph-traversal.md) Accepted **trước**
-   khi tạo bất kỳ artifact nào của Phase 1-6 — hiện đang `Proposed`. Bài học
+   khi tạo bất kỳ artifact nào của Phase 1-6 — hiện đang `Proposed`. Ngoại lệ duy
+   nhất được phép trước acceptance là **type gate của Phase 0**, gồm đúng ba thứ:
+   fixture `tests/types/traversal-api.test-d.ts`, config `tests/types/tsconfig.json`,
+   và script `test:types` trong `package.json` (root `tsconfig.json` chỉ include
+   `src` nên fixture không tự compile được). Tất cả chỉ khai declaration hoặc cấu
+   hình build, không chứa runtime code, không nằm dưới `src/traversal/**` hay
+   `spec/traversal/**`, và tồn tại chính để chứng minh public API block compile
+   được **trước** khi ADR chốt. Không có chúng thì gate "block phải compile trước
+   khi Accepted" và gate "không artifact trước khi Accepted" khóa lẫn nhau. Bài học
    của `1.4.0` (implementation đi trước acceptance theo chỉ đạo trực tiếp, xem
    ghi chú §"Trạng thái theo work package" của [plan 1.4.0](implementation-plan-v1.4.0.md))
    KHÔNG lặp lại ở release này.
@@ -858,7 +866,13 @@ export function runGraphTraversalConformance(
 Toàn bộ block trên phải **compile được** trước khi ADR chuyển `Accepted`: Phase 0
 có một type-only fixture (`tests/types/traversal-api.test-d.ts`) khai đúng các
 declaration này, để không implementer nào phải tự phát minh một phần public
-SemVer surface. Không còn symbol nào chưa định nghĩa; `GraphTraversalState` là
+SemVer surface. Fixture này cùng compile harness tối thiểu của nó
+(`tests/types/tsconfig.json`, script `test:types` trong `package.json`) là
+**ngoại lệ duy nhất** của luật "không artifact trước khi ADR Accepted"
+(§"Dependency bắt buộc" mục 4): chỉ chứa type declaration hoặc cấu hình build,
+không runtime code, không tạo file nào dưới `src/traversal/**` hay
+`spec/traversal/**`. Gate đóng khi `npm run test:types` pass. Mọi artifact khác
+vẫn bị chặn tới khi ADR Accepted. Không còn symbol nào chưa định nghĩa; `GraphTraversalState` là
 **internal**, không xuất hiện trong bất kỳ signature public nào.
 
 Export path duy nhất: `ail-aadp/traversal/v1.0`. **Không** re-export từ package
