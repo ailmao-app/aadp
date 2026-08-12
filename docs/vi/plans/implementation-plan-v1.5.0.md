@@ -786,6 +786,13 @@ resolution-context digest của mọi fetch trong walk nhất quán.
   | `graph.streaming.bounded_memory` | Buffer không vượt `maxBufferedEvents` | warning |
   | `graph.compat.core_only_unchanged` | Consumer core-only/single-module không đổi behavior | error |
 
+- Field cố ý **không** có trong `GraphTraversalConformanceOptions`, kèm lý do:
+  `maxPages` (ADR-0011 §12.1 — không có page limit nào), `concurrency` (§12.2 —
+  internal), sáu traversal limit field rời (đi qua `budget`, xem docstring của
+  type), `now`/`freshnessMaxAgeMs` (clock của Answer/Evidence freshness, không có
+  check nào của profile này dùng), `profile` (biến thể riêng của Relations), và
+  `sampleRegistryUrl`/`negativeTargetUrl`/`crossOriginProbeUrl` (sample riêng của
+  Relations, không nằm trong intersection ba module).
 - Check ID là **package API** (ổn định theo SemVer của `ail-aadp`), không phải wire
   contract — profile này không có artifact nào trên đường truyền.
 - Fixture matrix (local, chạy trong CI, không cần deployment): fan-in/diamond,
@@ -867,21 +874,39 @@ export interface GraphTraversalOptions extends RelationsClientOptions {
 }
 
 /**
- * Cùng họ với `EvidenceConformanceOptions` đã phát hành, bỏ mọi field riêng của
- * Evidence. KHÔNG có `maxPages` (ADR-0011 §12.1) và KHÔNG có `concurrency`
- * (§12.2); mọi giới hạn traversal đi qua `budget`.
+ * Giữ ĐÚNG common intersection của `RelationsConformanceOptions`,
+ * `AnswerConformanceOptions` và `EvidenceConformanceOptions` đã phát hành, trừ
+ * hai nhóm được nêu lý do bên dưới. Runner của profile này compose ba module đó,
+ * nên nó phải chạy được với cùng deployment/test convention: nếu thiếu URL policy
+ * injection thì không chạy được localhost/private staging, thiếu `signal` thì
+ * caller không abort được — cả hai đều là regression so với ba runner hiện có.
  */
 export interface GraphTraversalConformanceOptions {
   /** Origin dùng cho các check cần deployment thật. */
   baseUrl?: string;
-  /** Entity URL làm root của các check traversal. */
+  /** Entity URL làm root của các check traversal — tương ứng `sampleEntityUrl` của ba module. */
   sampleRootUrl?: string;
-  /** Budget do caller sở hữu; vắng thì runner tạo budget reference default. */
-  budget?: RelationsTraversalBudgetState;
   timeoutMs?: number;
   maxRedirects?: number;
   maxResponseBytes?: number;
+  retry?: RetryOptions;
+  allowPrivateNetwork?: boolean;
+  urlPolicy?: UrlPolicy;
   headers?: Record<string, string>;
+  crossOriginSafeHeaders?: string[];
+  /**
+   * Budget do caller sở hữu; vắng thì runner tạo budget reference default.
+   * Đây là **thay thế duy nhất** so với ba runner kia: sáu limit field rời
+   * (`maxDepth`, `maxNodes`, `maxRequests`, `maxTotalBytes`,
+   * `maxCrossOriginRequests`, `deadlineMs`) không xuất hiện ở đây, vì ADR-0011
+   * §10 quy định caller sở hữu budget và traversal chỉ mượn — hai đường cấu hình
+   * cùng sáu dimension sẽ cho phép runner chạy với limit khác chính budget mà nó
+   * truyền vào. Budget KHÔNG thay thế HTTP policy, callback hay cancellation.
+   */
+  budget?: RelationsTraversalBudgetState;
+  failOnWarning?: boolean;
+  onCheck?: (result: CheckResult) => void;
+  signal?: AbortSignal;
 }
 
 export function registerBuiltinTraversalAdapters(): void;

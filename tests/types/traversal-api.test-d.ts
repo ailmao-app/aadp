@@ -17,7 +17,7 @@
  * assertion here must still hold unchanged.
  */
 
-import type { EntityV1, ManifestV1 } from "../../src/client/v1.0/index.js";
+import type { EntityV1, ManifestV1, RetryOptions, UrlPolicy } from "../../src/client/v1.0/index.js";
 import type { ModuleSemanticIssue } from "../../src/module-registry/index.js";
 import type { CheckResult, ConformanceSummary } from "../../src/conformance/index.js";
 import type {
@@ -173,14 +173,28 @@ export interface GraphTraversalOptions extends RelationsClientOptions {
   maxBufferedEvents?: number; // default 256
 }
 
+/**
+ * The common intersection of the three released runners' option types, minus the
+ * six standalone traversal limits (they go through `budget`) and the fields that
+ * are specific to one module. A profile composing three modules has to run under
+ * the same deployment conventions they do.
+ */
 export interface GraphTraversalConformanceOptions {
   baseUrl?: string;
   sampleRootUrl?: string;
-  budget?: RelationsTraversalBudgetState;
   timeoutMs?: number;
   maxRedirects?: number;
   maxResponseBytes?: number;
+  retry?: RetryOptions;
+  allowPrivateNetwork?: boolean;
+  urlPolicy?: UrlPolicy;
   headers?: Record<string, string>;
+  crossOriginSafeHeaders?: string[];
+  /** Caller-owned. Replaces ONLY the six standalone limit fields (ADR-0011 §10). */
+  budget?: RelationsTraversalBudgetState;
+  failOnWarning?: boolean;
+  onCheck?: (result: CheckResult) => void;
+  signal?: AbortSignal;
 }
 
 export interface GraphTraversalConformanceReport {
@@ -370,6 +384,63 @@ type ReportReusesCoreSummary = Assert<
 type ReportReusesCoreChecks = Assert<Equal<GraphTraversalConformanceReport["checks"], CheckResult[]>>;
 type ReportIsProfileScoped = Assert<Equal<Has<GraphTraversalConformanceReport, "profile">, true>>;
 type ReportIsNotModuleScoped = Assert<Equal<Has<GraphTraversalConformanceReport, "module">, false>>;
+
+/* 13. The runner accepts the SAME shared controls the three released runners do.
+ *     Without URL-policy injection the profile cannot run against localhost or a
+ *     private staging deployment, and without `signal` a caller cannot abort it —
+ *     both regressions against Relations/Answer/Evidence conformance. */
+type RunnerTakesUrlPolicy = Assert<
+  Equal<GraphTraversalConformanceOptions["urlPolicy"], UrlPolicy | undefined>
+>;
+type RunnerTakesPrivateNetworkOptIn = Assert<
+  Equal<GraphTraversalConformanceOptions["allowPrivateNetwork"], boolean | undefined>
+>;
+type RunnerTakesRetryPolicy = Assert<
+  Equal<GraphTraversalConformanceOptions["retry"], RetryOptions | undefined>
+>;
+type RunnerTakesCrossOriginSafeHeaders = Assert<
+  Equal<GraphTraversalConformanceOptions["crossOriginSafeHeaders"], string[] | undefined>
+>;
+type RunnerIsCancellable = Assert<
+  Equal<GraphTraversalConformanceOptions["signal"], AbortSignal | undefined>
+>;
+type RunnerReportsPerCheck = Assert<
+  Equal<GraphTraversalConformanceOptions["onCheck"], ((result: CheckResult) => void) | undefined>
+>;
+type RunnerHonoursFailOnWarning = Assert<
+  Equal<GraphTraversalConformanceOptions["failOnWarning"], boolean | undefined>
+>;
+
+/* 14. The budget replaces ONLY the six standalone traversal limits — never the
+ *     HTTP policy, the callbacks or the cancellation above. Keeping both paths
+ *     would let a runner be configured with limits that contradict the very
+ *     budget it threads into the walk. */
+type RunnerTakesBudget = Assert<
+  Equal<GraphTraversalConformanceOptions["budget"], RelationsTraversalBudgetState | undefined>
+>;
+type NoStandaloneMaxDepth = Assert<Equal<Has<GraphTraversalConformanceOptions, "maxDepth">, false>>;
+type NoStandaloneMaxNodes = Assert<Equal<Has<GraphTraversalConformanceOptions, "maxNodes">, false>>;
+type NoStandaloneMaxRequests = Assert<
+  Equal<Has<GraphTraversalConformanceOptions, "maxRequests">, false>
+>;
+type NoStandaloneMaxTotalBytes = Assert<
+  Equal<Has<GraphTraversalConformanceOptions, "maxTotalBytes">, false>
+>;
+type NoStandaloneMaxCrossOrigin = Assert<
+  Equal<Has<GraphTraversalConformanceOptions, "maxCrossOriginRequests">, false>
+>;
+type NoStandaloneDeadline = Assert<Equal<Has<GraphTraversalConformanceOptions, "deadlineMs">, false>>;
+/* §12.1/§12.2 hold on the runner surface too. */
+type RunnerHasNoMaxPages = Assert<Equal<Has<GraphTraversalConformanceOptions, "maxPages">, false>>;
+type RunnerHasNoConcurrency = Assert<
+  Equal<Has<GraphTraversalConformanceOptions, "concurrency">, false>
+>;
+
+declare let conformanceOptions: GraphTraversalConformanceOptions;
+// @ts-expect-error traversal limits are configured through `budget`, not alongside it
+conformanceOptions = { maxDepth: 3 };
+// @ts-expect-error no page limit exists anywhere in this API (ADR-0011 §12.1)
+conformanceOptions = { maxPages: 20 };
 
 /* 12. Registration is a void, idempotent side effect on the traversal registry. */
 type RegisterTakesNoArguments = Assert<Equal<Parameters<typeof registerBuiltinTraversalAdapters>, []>>;
