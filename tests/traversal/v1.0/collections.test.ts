@@ -376,12 +376,31 @@ describe("over HTTP", () => {
     expect(graph.edges).toEqual([]);
   });
 
-  it("does not start a later-group fetch while a collection is still paging", async () => {
-    // A node with a collection (rank 1) and an answer reference (rank 2). If the
-    // later-group fetch were prefetched across the collection boundary, the two
-    // would race for the last of the budget and completion timing would decide
-    // which branch survives.
-    server = await startServer((_req, res, url) => {
+  /**
+   * A root with BOTH a collection (`relations.collection`, rank 1) and an answer
+   * reference (`answer.related_entity`, rank 2), so there is real later-group
+   * work for a prefetch to reach across the collection boundary and start.
+   *
+   * `delays` lets the same graph be served with the two branches completing in
+   * opposite orders.
+   */
+  async function startBoundaryServer(delays: { collection?: number; claim?: number } = {}): Promise<TestServer> {
+    const sealedAnswer = (base: string) => {
+      const wrapper: Record<string, unknown> = {
+        module: "aadp:answer",
+        version: "1.0",
+        kind: "answer",
+        question: "Does prefetch cross the collection boundary?",
+        concise_answer: "It must not.",
+        locale: "en",
+        authorship: { kind: "source-authored", author: { name: "AADP tests" } },
+        freshness: { published_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-06T00:00:00Z" },
+        related_entities: [{ target_type: "claim", target: { id: "claim:c1", url: `${base}/claim.json` } }],
+      };
+      return { ...wrapper, content_checksum: checksumOf(wrapper) };
+    };
+
+    const started = await startServer((_req, res, url) => {
       if (url.pathname === "/answer.json") {
         return sendJson(res, 200, {
           aadp_version: "1.0",
@@ -391,6 +410,7 @@ describe("over HTTP", () => {
           updated_at: "2026-08-06T00:00:00Z",
           canonical_url: "https://example.com/answers/a",
           data: {},
+          x_answer: sealedAnswer(started.baseUrl),
           x_relations: {
             module: "aadp:relations",
             version: "1.0",
@@ -400,21 +420,89 @@ describe("over HTTP", () => {
                 rel: "related",
                 target_type: "document",
                 cardinality: "many",
-                collection: { url: `${server!.baseUrl}/collection.json`, pagination: "cursor" },
+                collection: { url: `${started.baseUrl}/collection.json`, pagination: "cursor" },
               },
             ],
           },
         });
       }
+      if (url.pathname === "/collection.json") {
+        // An empty page: the collection costs one request and produces no item
+        // that could compete for the budget itself.
+        const body = canonicalize({
+          aadp_version: "1.0",
+          module: "aadp:relations",
+          module_version: "1.0",
+          kind: "relation-collection",
+          source: { id: "answer:a", type: "answer" },
+          rel: "related",
+          target_type: "document",
+          generated_at: "2026-08-06T00:00:00Z",
+          checksum: checksumOf([]),
+          items: [],
+          cursor: { next: null },
+        });
+        if (delays.collection) return void setTimeout(() => sendJson(res, 200, body), delays.collection);
+        return sendJson(res, 200, body);
+      }
+      if (url.pathname === "/claim.json") {
+        const body = {
+          aadp_version: "1.0",
+          id: "claim:c1",
+          type: "claim",
+          checksum: checksumOf({}),
+          updated_at: "2026-08-06T00:00:00Z",
+          canonical_url: "https://example.com/claims/c1",
+          data: {},
+        };
+        if (delays.claim) return void setTimeout(() => sendJson(res, 200, body), delays.claim);
+        return sendJson(res, 200, body);
+      }
       return sendJson(res, 404, { error: "not found" });
     });
+    return started;
+  }
 
-    // Room for the root and one collection page only.
+  it("does not start a later-group fetch while a collection is still paging", async () => {
+    server = await startBoundaryServer();
+    // Room for the root and the collection page. A prefetch reaching across the
+    // boundary would spend the second request on the claim instead, and which
+    // branch survived would then depend on completion timing.
     const budget = createRelationsTraversalBudget({ maxRequests: 2 });
-    await collectGraphV1(`${server.baseUrl}/answer.json`, options({ budget, followCollections: true }));
+    const graph = await collectGraphV1(`${server.baseUrl}/answer.json`, options({ budget, followCollections: true }));
 
-    // The collection page was attempted; nothing scheduled after it was.
     expect(server.requestLog).toEqual(["/answer.json", "/collection.json"]);
+    expect(server.requestLog).not.toContain("/claim.json");
+
+    // The later-group edge was planned and reported — it simply was never paid
+    // for, which is what makes this a schedule boundary rather than a drop.
+    const later = graph.edges.find((edge) => edge.edgeGroup === "answer.related_entity");
+    expect(later).toBeDefined();
+    expect(later!.status).toBe("budget-exhausted");
+    expect(graph.summary.partial).toBe(true);
+  });
+
+  it("produces the same result whichever branch would have completed first", async () => {
+    const shapeOf = (graph: Awaited<ReturnType<typeof collectGraphV1>>) =>
+      graph.edges.map((edge) => `${edge.edgeGroup}#${edge.index}:${edge.outcome}:${edge.status ?? "-"}`);
+
+    server = await startBoundaryServer({ collection: 25 });
+    const slowCollection = await collectGraphV1(
+      `${server.baseUrl}/answer.json`,
+      options({ budget: createRelationsTraversalBudget({ maxRequests: 2 }), followCollections: true })
+    );
+    const slowCollectionLog = [...server.requestLog];
+    await server.close();
+
+    server = await startBoundaryServer({ claim: 25 });
+    const slowClaim = await collectGraphV1(
+      `${server.baseUrl}/answer.json`,
+      options({ budget: createRelationsTraversalBudget({ maxRequests: 2 }), followCollections: true })
+    );
+
+    expect(shapeOf(slowClaim)).toEqual(shapeOf(slowCollection));
+    expect(server.requestLog).toEqual(slowCollectionLog);
+    expect(slowClaim.summary.stopReason).toBe(slowCollection.summary.stopReason);
   });
 
   it("charges collection pages against the caller's budget", async () => {
