@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pro
 
 ## Unreleased
 
+## 1.5.0
+
 Cross-module graph traversal (`docs/adr/0011-cross-module-graph-traversal.md`, `docs/vi/plans/implementation-plan-v1.5.0.md`). Additive only: AADP wire version stays `1.0`, and no released core, Relations `1.0`, Answer `1.0` or Evidence `1.0` schema, module version or wire contract changes. No public API changes for any consumer that does not opt into the `ail-aadp/traversal/v1.0` subpath.
 
 > **Release gate: CLOSED.** ADR-0011 was Accepted on 2026-08-12 and amended on 2026-08-14 to require one named production data set rather than two independently operated data sets. The packed-tarball clean-install run against the AI Lmao public graph passed on Node 20.18.1 with a complete graph and the traversal profile at 26/26. The accepted limitation is explicit: this proves production interoperability, not independent-owner interoperability. See `docs/records/implementation-record-v1.5.0.md`.
