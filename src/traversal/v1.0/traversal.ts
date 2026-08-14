@@ -20,7 +20,7 @@ import { chargeNode, crossOriginAttemptHook } from "../../modules/relations/v1.0
 import { iterateRelationCollection } from "../../modules/relations/v1.0/index.js";
 import {
   budgetResolutionStateFor,
-  recordSettledOutcome,
+  recordRootOutcome,
   replaySettledOutcomeForUrl,
   resolveCanonicalTarget,
   type CanonicalResolutionOptions,
@@ -144,14 +144,26 @@ export function traverseGraphV1(
         // Now that the id is known, the root becomes an ordinary canonical
         // target of this budget, so a later walk replays it rather than
         // re-requesting it.
-        recordSettledOutcome(resolutionState, entity.id, request.url, { ok: true, entity });
+        recordRootOutcome(resolutionState, request.url, { ok: true, entity });
         return { status: "resolved", entity };
       } catch (err) {
         if (isAbort(err)) throw err;
+        // A budget stop is not an outcome of the root — it is a condition of
+        // this walk — so it is never recorded: the next walk, with headroom,
+        // must be free to actually try.
         if (err instanceof AadpDiscoveryBudgetExceededError) {
           return { status: "budget-exhausted", message: err.message };
         }
-        return rootStatusFor(err);
+        const failure = rootStatusFor(err);
+        // A settled failure IS an outcome of that URL. Recording it means a
+        // stable 404/403/invalid root costs one request per budget, not one per
+        // walk — the same rule every other node of the graph already follows.
+        recordRootOutcome(resolutionState, request.url, {
+          ok: false,
+          status: failure.status as Exclude<typeof failure.status, "resolved">,
+          ...(failure.message ? { message: failure.message } : {}),
+        });
+        return failure;
       }
     }
     const resolution = await resolveCanonicalTarget(

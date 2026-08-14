@@ -241,6 +241,36 @@ describe("no double charge", () => {
     expect(second.edges.map((e) => e.outcome)).toEqual(first.edges.map((e) => e.outcome));
   });
 
+  it.each([
+    ["a 404 root", 404, "not-found"],
+    ["a 403 root", 403, "forbidden"],
+  ])("replays %s instead of re-requesting it on every walk", async (_label, status, expected) => {
+    server = await startServer((_req, res) => sendJson(res, status, { error: "nope" }));
+    // Capacity for exactly one attempt: if the second walk re-requested, it
+    // would report budget-exhausted instead of the outcome it already knows.
+    const budget = createRelationsTraversalBudget({ maxRequests: 1 });
+
+    const first = await collectGraphV1(`${server.baseUrl}/missing.json`, options({ budget }));
+    expect(first.nodes[0]!.status).toBe(expected);
+    expect(server.requestLog).toHaveLength(1);
+
+    const second = await collectGraphV1(`${server.baseUrl}/missing.json`, options({ budget }));
+    expect(second.nodes[0]!.status).toBe(expected);
+    expect(server.requestLog).toHaveLength(1);
+  });
+
+  it("replays a schema-invalid root without re-fetching it", async () => {
+    server = await startServer((_req, res) => sendJson(res, 200, { aadp_version: "1.0", not: "an entity" }));
+    const budget = createRelationsTraversalBudget({ maxRequests: 1 });
+
+    const first = await collectGraphV1(`${server.baseUrl}/broken.json`, options({ budget }));
+    expect(first.nodes[0]!.status).toBe("invalid");
+
+    const second = await collectGraphV1(`${server.baseUrl}/broken.json`, options({ budget }));
+    expect(second.nodes[0]!.status).toBe("invalid");
+    expect(server.requestLog).toHaveLength(1);
+  });
+
   it("does not write to budget.expandedTargets — expansion state is walk-local", async () => {
     server = await startDiamondServer();
     const budget = createRelationsTraversalBudget();

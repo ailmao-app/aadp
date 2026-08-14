@@ -81,6 +81,8 @@ export type TraversalCollectionPager = (request: TraversalCollectionRequest) => 
  * Edge group ranking (plan §"Ordering").
  * ------------------------------------------------------------------------- */
 
+const RELATIONS_COLLECTION_EDGE_GROUP = "relations.collection";
+
 const BUILTIN_EDGE_GROUP_RANK: ReadonlyMap<string, number> = new Map([
   ["relations.item", 0],
   ["relations.collection", 1],
@@ -322,16 +324,11 @@ export async function* walkTraversal(
         )
       : undefined;
 
-    // Row 2 is paged BEFORE the node is emitted, for two reasons: a
-    // collection's items must take their place in the schedule key like every
-    // other occurrence, and a collection that failed has to be on the expansion
-    // record the node carries — a record amended after the node was handed to
-    // the consumer would be a record the consumer never saw.
-    const paged = plan
-      ? await pageCollections(plan.collections, node, options, state)
-      : { planned: [] as PlannedTraversalEdge[], failures: [] };
-    if (plan) attachCollectionFailures(plan.expansions, paged.failures);
-
+    // The node is emitted straight after PURE planning — no network in between —
+    // so a consumer sees it before any collection is paged. It carries a
+    // SNAPSHOT of the expansion records: a collection failure discovered later
+    // is amended onto the records the `expansion` events carry, never onto an
+    // object already handed to the consumer.
     if (!state.emittedNodes.has(node.key)) {
       state.emittedNodes.add(node.key);
       state.progress.nodes += 1;
@@ -340,50 +337,47 @@ export async function* walkTraversal(
 
     if (!plan) continue;
 
-    const scheduled: Occurrence[] = [...plan.edges, ...paged.planned].map((planned) => ({
+    const occurrenceOf = (planned: PlannedTraversalEdge): Occurrence => ({
       planned,
       fromKey: node.key,
       landingDepth: node.depth + 1,
       parentDiscoveryIndex: node.discoveryIndex,
       parent: node.via,
       targetKey: canonicalTargetKey(planned.plan.target.id, planned.plan.target.url),
-    }));
-    scheduled.sort(compareSchedule);
-    prefetchBatch(scheduled, options, state);
+    });
+
+    // Collection items rank between `relations.item` and every later group, so
+    // the statically planned edges split around them: settle what ranks BEFORE
+    // a collection, stream the collection's own items at their rank, then
+    // settle the rest. Order is still exactly the schedule key's, but no page is
+    // ever held in memory beyond the item being settled.
+    const staticEdges = plan.edges.map(occurrenceOf).sort(compareSchedule);
+    const collectionRank = edgeGroupRank(RELATIONS_COLLECTION_EDGE_GROUP);
+    const before = staticEdges.filter((o) => edgeGroupRank(o.planned.plan.edgeGroup) < collectionRank);
+    const after = staticEdges.filter((o) => edgeGroupRank(o.planned.plan.edgeGroup) >= collectionRank);
+    prefetchBatch([...before, ...after], options, state);
+
+    const scheduled: Occurrence[] = [
+      ...before,
+      ...(plan.collections.length > 0 ? [PAGE_COLLECTIONS_HERE] : []),
+      ...after,
+    ];
 
     for (const occurrence of scheduled) {
+      if (occurrence === PAGE_COLLECTIONS_HERE) {
+        for await (const item of pageCollections(plan.collections, node, options, state, plan.expansions)) {
+          const settled = occurrenceOf(item);
+          state.progress.edges += 1;
+          const edge = await settleEdge(settled, options, state);
+          yield { type: "edge", edge };
+          yield* emitDiscovery(settled, edge, node, state, queue);
+        }
+        continue;
+      }
       state.progress.edges += 1;
       const edge = await settleEdge(occurrence, options, state);
       yield { type: "edge", edge };
-      // A root-level occurrence that reached a verdict is also a `reference`:
-      // the root's own references are what a consumer of a single entity asks
-      // for, and they carry the per-occurrence status the edge carries. Blocked
-      // occurrences have no verdict, so they produce no reference.
-      if (node.depth === 0 && edge.status !== undefined) {
-        const reference: GraphReferenceV1 = {
-          index: edge.index,
-          edgeGroup: edge.edgeGroup,
-          key: edge.to,
-          declaredTargetType: edge.declaredTargetType,
-          status: edge.status,
-          ...(edge.message ? { message: edge.message } : {}),
-        };
-        state.references.push(reference);
-        yield { type: "reference", reference };
-      }
-      // Every occurrence that reached a resolution contributes a node — a leaf
-      // target and an unresolvable one are both real nodes of the graph — but
-      // only a claimed expansion plans further edges.
-      if (edge.status !== undefined) {
-        state.discoveryIndex += 1;
-        queue.push({
-          key: occurrence.targetKey,
-          depth: occurrence.landingDepth,
-          discoveryIndex: state.discoveryIndex,
-          expand: edge.outcome === "expanded",
-          via: occurrence,
-        });
-      }
+      yield* emitDiscovery(occurrence, edge, node, state, queue);
     }
 
     for (const expansion of plan.expansions) {
@@ -431,17 +425,18 @@ export async function runTraversalWalk(
  * position in the paged sequence. Budget exhaustion while paging ends the walk
  * exactly as it does for any other request, and keeps the items already read.
  */
-async function pageCollections(
+async function* pageCollections(
   collections: readonly PlannedTraversalCollection[],
   node: PendingNode,
   options: TraversalWalkOptions,
-  state: GraphTraversalState
-): Promise<{ planned: PlannedTraversalEdge[]; failures: CollectionFailure[] }> {
+  state: GraphTraversalState,
+  expansions: GraphExtensionExpansionV1[]
+): AsyncGenerator<PlannedTraversalEdge> {
   const pager = options.pageCollection;
   const failures: CollectionFailure[] = [];
-  if (!pager || collections.length === 0) return { planned: [], failures };
+  if (!pager || collections.length === 0) return;
 
-  const planned: PlannedTraversalEdge[] = [];
+  let index = 0;
   for (const collection of collections) {
     if (state.stopReason === "budget") break;
     try {
@@ -450,20 +445,24 @@ async function pageCollections(
         expectation: collection.expectation,
         depth: node.depth,
       })) {
+        // Yielded one at a time: the caller settles and emits each item before
+        // the next is read, so a large collection never sits in memory and a
+        // consumer sees edges while later pages are still arriving.
+        //
         // Not counted in `progress.requests`: that counter tracks canonical
         // target resolutions, and one page carries many items. The authoritative
         // per-hop count is the budget's own, charged inside the released client.
-        planned.push({
+        yield {
           extensionField: collection.extensionField,
           adapter: collection.adapter,
           plan: {
             edgeGroup: collection.edgeGroup,
-            index: planned.length,
+            index: index++,
             target,
             declaredTargetType: collection.declaredTargetType,
             expandable: true,
           },
-        });
+        };
       }
     } catch (err) {
       // A budget stop is global — the walk may make no further request at all —
@@ -486,7 +485,60 @@ async function pageCollections(
       });
     }
   }
-  return { planned, failures };
+  // Amended onto the records the `expansion` EVENTS carry, which are emitted
+  // after this node's edges — never onto the node snapshot already delivered.
+  attachCollectionFailures(expansions, failures);
+}
+
+/**
+ * Marks the position in a node's schedule where its collections are paged.
+ * Collection items all rank together, so one marker is enough — and using a
+ * marker rather than a pre-materialized list is what lets the items be streamed.
+ */
+const PAGE_COLLECTIONS_HERE = Symbol("page-collections") as unknown as Occurrence;
+
+/**
+ * Emits what a settled edge discovered: the root-level `reference` view of the
+ * occurrence, and the queue entry for its target.
+ *
+ * A root-level occurrence that reached a verdict is also a `reference` — the
+ * root's own references are what a consumer of a single entity asks for, and
+ * they carry the same per-occurrence status. A blocked occurrence has no
+ * verdict, so it produces neither a reference nor a node.
+ */
+function* emitDiscovery(
+  occurrence: Occurrence,
+  edge: GraphEdgeV1,
+  node: PendingNode,
+  state: GraphTraversalState,
+  queue: PendingNode[]
+): Generator<GraphTraversalEventV1> {
+  if (edge.status === undefined) return;
+
+  if (node.depth === 0) {
+    const reference: GraphReferenceV1 = {
+      index: edge.index,
+      edgeGroup: edge.edgeGroup,
+      key: edge.to,
+      declaredTargetType: edge.declaredTargetType,
+      status: edge.status,
+      ...(edge.message ? { message: edge.message } : {}),
+    };
+    state.references.push(reference);
+    yield { type: "reference", reference };
+  }
+
+  // Every occurrence that reached a resolution contributes a node — a leaf
+  // target and an unresolvable one are both real nodes of the graph — but only
+  // a claimed expansion plans further edges.
+  state.discoveryIndex += 1;
+  queue.push({
+    key: occurrence.targetKey,
+    depth: occurrence.landingDepth,
+    discoveryIndex: state.discoveryIndex,
+    expand: edge.outcome === "expanded",
+    via: occurrence,
+  });
 }
 
 /** One collection that could not be paged, reported on its own extension's record. */
@@ -546,8 +598,12 @@ function buildNode(
     depth: node.depth,
     status: resolution.status,
     ...(resolution.entity ? { entity: resolution.entity } : {}),
-    ...(plan && plan.modules.length > 0 ? { modules: plan.modules } : {}),
-    ...(plan && plan.expansions.length > 0 ? { expansions: plan.expansions } : {}),
+    ...(plan && plan.modules.length > 0 ? { modules: [...plan.modules] } : {}),
+    // A COPY, not the live records. What the node states is the result of pure
+    // planning at the moment it was emitted; a runtime diagnostic discovered
+    // later (a collection that could not be paged) belongs to the `expansion`
+    // events that follow, not to an object the consumer already holds.
+    ...(plan && plan.expansions.length > 0 ? { expansions: plan.expansions.map((e) => ({ ...e })) } : {}),
     ...(resolution.message ? { message: resolution.message } : {}),
   };
 }

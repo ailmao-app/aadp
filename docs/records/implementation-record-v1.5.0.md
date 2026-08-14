@@ -115,13 +115,17 @@ adapter may plan edges out of this extension field".
    contract frozen by ADR-0011 was deliberately not widened for it.
 2. **A URL root is replayed by the shared layer, not by traversal.** The
    canonical cache is keyed by `{id, normalizedUrl}` and a bare root URL has no
-   id until it is fetched, so the shared layer gained two internal entry points
-   — `recordSettledOutcome` (the root becomes an ordinary canonical target once
-   its id is known) and `replaySettledOutcomeForUrl` (a later walk replays it by
-   URL). A repeat walk on one budget therefore makes **no** request at all, per
-   the accounting table, and no second cache exists on that budget. The
-   URL-keyed replay deliberately does not join an in-flight fetch: a URL alone
-   cannot prove it is the same canonical target the pending fetch will produce.
+   id until it is fetched, so the shared layer gained a URL-keyed root index
+   (`rootOutcomes`) with two internal entry points: `recordRootOutcome` and
+   `replaySettledOutcomeForUrl`. **Both** success and failure are recorded — a
+   stable `not-found`/`forbidden`/`invalid` root costs one request per budget,
+   not one per walk, so a repeat walk can never turn a settled outcome into
+   `budget-exhausted` through call history alone. On success the outcome is also
+   filed under the canonical key, so an edge pointing back at the root meets an
+   already-settled target. A budget stop is deliberately NOT recorded: it is a
+   condition of that walk, not an outcome of the URL. The URL-keyed replay never
+   joins an in-flight fetch — a URL alone cannot prove it is the same canonical
+   target the pending fetch will produce.
 3. **`already-expanded` outranks the type-mismatch verdict.** A blocked edge
    carries no status by contract, so an occurrence that declares the wrong
    `target_type` for a target already expanded elsewhere reports
@@ -131,15 +135,32 @@ adapter may plan edges out of this extension field".
    budget's own. **Open for maintainer decision before release:** whether the
    published field should instead count hops, which would make it agree with
    `budget.requestsMade` at the cost of no longer counting logical resolutions.
-5. **A collection that cannot be paged is reported, never dropped.** A 404, a
+5. **A collection is streamed, never materialized.** Its items are yielded one at
+   a time and each is settled and emitted before the next is read, so the node
+   and its early edges are observable while later pages are still arriving and no
+   page is held beyond the item being settled. Collection items rank between
+   `relations.item` and every later group, so the node's statically planned edges
+   are split around them and the schedule-key order is unchanged.
+6. **A node's `expansions` is a snapshot.** It states the result of pure planning
+   at the moment the node was emitted. A runtime diagnostic discovered later — a
+   collection that could not be paged — is amended onto the records the
+   `expansion` EVENTS carry, never onto an object the consumer already holds.
+7. **A collection that cannot be paged is reported, never dropped.** A 404, a
    blocked URL, a malformed page or a cursor cycle stops that one collection and
    is recorded on the expansion record that owns it (`message`), while the node
-   and every other edge continue. **Open for maintainer decision before
-   release:** whether such a walk should also be `partial`. It cannot be today —
-   `stopReason` has only `exhausted`/`budget`/`aborted`, and `partial` is defined
-   as "any stop reason other than exhausted", so marking it partial would need a
-   vocabulary change that ADR-0011 froze.
-6. **Early consumer return cancels only this walk's waiting.** `traverseGraphV1`
+   and every other edge continue.
+
+   **BLOCKING, open for maintainer decision before release:** such a walk still
+   terminates `stopReason: "exhausted"`, `partial: false`, so a graph missing a
+   whole branch is reported as complete. This cannot be fixed inside the frozen
+   vocabulary — `stopReason` has only `exhausted`/`budget`/`aborted` and
+   `partial` is defined as "any stop reason other than exhausted" — so closing it
+   needs an ADR-0011 amendment (a terminal stop reason for a recoverable
+   truncation, or a redefinition of `partial`), plus a conformance check ID and
+   HTTP tests for the 404/policy/schema/cursor cases. It is deliberately NOT
+   patched here: inventing an enum value in a bug fix is how a frozen contract
+   drifts.
+8. **Early consumer return cancels only this walk's waiting.** `traverseGraphV1`
    combines the caller's signal with a walk-local abort and hands the scheduler a
    cancel hook, because an async generator queues `return()` behind an in-flight
    `next()` — without it, breaking out of a `for await` would block for as long
@@ -180,6 +201,7 @@ record MUST NOT be described as gate-closed.
 | ADR-0011 Accepted before any Phase 1-6 artifact | Closed — Accepted 2026-08-12 |
 | No unbounded graph/memory/request | Closed — six budget dimensions plus `maxBufferedEvents` |
 | Deterministic ordering | Closed — `graph.ordering.deterministic` and `graph.ordering.mixed_order_equivalence` green |
-| Partial result never reported as complete | Closed — `complete` always carries `stopReason`/`partial` |
+| `complete` always carries `stopReason`/`partial` | Closed |
 | Core-only/single-module consumer unaffected | Closed — `graph.compat.core_only_unchanged` green, and every released Relations/Answer/Evidence test passes with no assertion relaxed |
+| Partial result never reported as complete | **OPEN for one case** — a collection truncated by a resolution failure still terminates `exhausted`/`partial: false`; see decision 7 |
 | Two neutral interoperability data sets | **OPEN** — see above |

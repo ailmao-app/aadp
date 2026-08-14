@@ -277,6 +277,13 @@ interface PendingFetch {
  */
 export interface BudgetResolutionState {
   outcomes: Map<string, CanonicalOutcome>;
+  /**
+   * Settled outcomes for URLs resolved without a declared id, keyed by
+   * normalized URL. Only a traversal root arrives that way; see
+   * `recordRootOutcome`. Kept beside `outcomes` rather than inside it because a
+   * failed root has no id, so it has no canonical key to occupy.
+   */
+  rootOutcomes: Map<string, CanonicalOutcome>;
   pending: Map<string, PendingFetch>;
   globalStops: Map<string, Error>;
   /**
@@ -391,6 +398,7 @@ export function budgetResolutionStateFor(
   if (!state) {
     const created: BudgetResolutionState = {
       outcomes: new Map(),
+      rootOutcomes: new Map(),
       pending: new Map(),
       globalStops: new Map(),
       contextDigest,
@@ -412,47 +420,55 @@ export function budgetResolutionStateFor(
 }
 
 /**
- * Replays an already-settled canonical outcome for a bare URL, when this budget
- * has one — the case a caller who holds a URL but not yet an id cannot express
- * through `resolveCanonicalTarget`, whose key needs both.
+ * Records the settled outcome of a URL resolved WITHOUT a declared id — the
+ * traversal root, and only it. Every other caller has a referring occurrence
+ * supplying `{id, url}` and goes through `resolveCanonicalTarget`.
  *
- * This exists for exactly one caller shape: a traversal ROOT given as a URL. It
- * has no referring occurrence to supply an id, so without this it would re-fetch
- * on every walk sharing a budget, spending requests the accounting table says a
- * repeat visit costs nothing. Keeping the lookup here — rather than letting a
- * caller memoize URL→id on its own — is what stops a second canonical cache from
- * appearing on one budget.
+ * A root is fetched before its id is known, so it cannot be keyed canonically up
+ * front. Both halves are recorded here:
  *
- * The scan is over settled outcomes only: an in-flight fetch is deliberately not
- * joined, because a URL alone cannot prove it is the same canonical target the
- * pending fetch will produce. A normalized-URL match is unambiguous — one URL
- * serves at most one entity, and the id half of the key comes from the document
- * that URL actually returned.
+ * - **always** under the normalized URL, so a later walk on this budget replays
+ *   it — including a stable `not-found`/`forbidden`/`invalid`, which must not be
+ *   re-requested on every walk any more than a success is. Without this, a
+ *   repeat walk could turn a settled `not-found` into `budget-exhausted` purely
+ *   because of call history;
+ * - **additionally** under the canonical `{id, url}` key on success, so an edge
+ *   elsewhere in the graph pointing back at the root meets an already-settled
+ *   target instead of paying for it again.
+ *
+ * Never overwrites: a key settles once per budget, and letting a later writer
+ * replace it would reintroduce exactly the order-dependent result this shared
+ * state exists to prevent.
  */
-/**
- * Records an outcome this budget obtained OUTSIDE `resolveCanonicalTarget` —
- * again, only the traversal root, which is fetched before its id is known and
- * so has no key to resolve under beforehand.
- *
- * Never overwrites: a canonical key settles once per budget, and letting a later
- * writer replace it would reintroduce exactly the order-dependent result the
- * shared cache exists to prevent.
- */
-export function recordSettledOutcome(
-  state: BudgetResolutionState,
-  id: string,
-  url: string,
-  outcome: CanonicalOutcome
-): void {
-  const key = canonicalTargetKey(id, url);
-  if (!state.outcomes.has(key)) state.outcomes.set(key, outcome);
+export function recordRootOutcome(state: BudgetResolutionState, url: string, outcome: CanonicalOutcome): void {
+  const normalized = normalizeTargetUrl(url);
+  if (!state.rootOutcomes.has(normalized)) state.rootOutcomes.set(normalized, outcome);
+  if (outcome.ok) {
+    const key = canonicalTargetKey(outcome.entity.id, url);
+    if (!state.outcomes.has(key)) state.outcomes.set(key, outcome);
+  }
 }
 
+/**
+ * Replays a settled outcome for a bare URL, for that same root-shaped caller.
+ *
+ * Checks the root index first, then falls back to scanning settled canonical
+ * outcomes — so a URL first met as an edge target (which did carry an id) is
+ * replayed too, rather than being fetched again merely because this walk arrived
+ * at it as a root.
+ *
+ * An in-flight fetch is deliberately never joined here: a URL alone cannot prove
+ * it is the same canonical target the pending fetch will produce. A settled
+ * normalized-URL match is unambiguous — one URL serves at most one entity, and
+ * the id half of a canonical key came from the document that URL returned.
+ */
 export function replaySettledOutcomeForUrl(
   state: BudgetResolutionState,
   url: string
 ): CanonicalOutcome | undefined {
   const normalized = normalizeTargetUrl(url);
+  const root = state.rootOutcomes.get(normalized);
+  if (root) return root;
   for (const [key, outcome] of state.outcomes) {
     // Key layout is `${id}\0${normalizedUrl}` — compare the URL half only.
     const separator = key.indexOf("\0");

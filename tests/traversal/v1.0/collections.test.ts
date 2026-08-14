@@ -17,7 +17,11 @@ import { relationsTraversalAdapter } from "../../../src/traversal/v1.0/adapters/
 import { BUILTIN_TRAVERSAL_ADAPTERS } from "../../../src/traversal/v1.0/adapters/builtins.js";
 import { createAdapterLookup } from "../../../src/traversal/v1.0/registry.js";
 import { planNodeExpansions } from "../../../src/traversal/v1.0/edge-planner.js";
-import { runTraversalWalk, type TraversalCollectionPager } from "../../../src/traversal/v1.0/state-machine.js";
+import {
+  runTraversalWalk,
+  walkTraversal,
+  type TraversalCollectionPager,
+} from "../../../src/traversal/v1.0/state-machine.js";
 import { collectGraphV1, type GraphTraversalOptions } from "../../../src/traversal/v1.0/index.js";
 import { sendJson, startServer, type TestServer } from "../../modules/answer/v1.0/client/server-helpers.js";
 import { entityOf } from "./entity-helpers.js";
@@ -175,14 +179,70 @@ describe("paging a collection", () => {
     expect(expansion && expansion.type === "expansion" && expansion.expansion.message).toContain("404 Not Found");
   });
 
-  it("keeps the failure on the node's own expansion record, not only on the flat list", async () => {
+  it("puts a late failure on the expansion event, never on the node already delivered", async () => {
     const failing: TraversalCollectionPager = async function* () {
       throw new Error("blocked by URL policy");
     };
     const outcome = await walkWith(failing);
+
+    // The node is emitted from pure planning, before any page is fetched, so its
+    // snapshot cannot know about a failure that had not happened yet — and it
+    // must not be mutated behind the consumer's back either.
     const node = outcome.events.find((e) => e.type === "node");
-    const expansions = node && node.type === "node" ? node.node.expansions : undefined;
-    expect(expansions?.[0]?.message).toContain("blocked by URL policy");
+    const snapshot = node && node.type === "node" ? node.node.expansions : undefined;
+    expect(snapshot?.[0]?.message).toBeUndefined();
+
+    const expansion = outcome.events.find((e) => e.type === "expansion");
+    expect(expansion && expansion.type === "expansion" && expansion.expansion.message).toContain(
+      "blocked by URL policy"
+    );
+  });
+
+  it("streams collection items instead of materializing the whole collection first", async () => {
+    // A pager that blocks after its first item: the node and that item's edge
+    // must already be observable while later pages are still outstanding.
+    let releaseSecond: (() => void) | undefined;
+    const blocking: TraversalCollectionPager = async function* () {
+      yield pagedTargets[0]!;
+      await new Promise<void>((resolve) => {
+        releaseSecond = resolve;
+      });
+      yield pagedTargets[1]!;
+    };
+
+    const events: string[] = [];
+    const walk = walkTraversal(sourceEntity, {
+      rootUrl: "https://example.com/entities/answer/a.json",
+      lookup,
+      resolve: async (request) => {
+        const target = pagedTargets.find((t) => t.url === request.url);
+        return target
+          ? { status: "resolved", entity: entityOf({ id: target.id, type: "document", canonical_url: target.url }) }
+          : { status: "not-found" };
+      },
+      pageCollection: blocking,
+      maxDepth: 3,
+      followCollections: true,
+      includeGeneratedSummarySources: false,
+    });
+
+    // Drive the walk in the background so the pull that blocks on the pager
+    // cannot deadlock the assertions.
+    const draining = (async () => {
+      for await (const event of walk) events.push(event.type);
+    })();
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    // The node and the first item's edge are already observable while the
+    // collection is still open — the walk is not holding it in memory.
+    expect(events).toContain("node");
+    expect(events.filter((type) => type === "edge")).toHaveLength(1);
+    expect(releaseSecond).toBeDefined();
+
+    releaseSecond!();
+    await draining;
+    expect(events.filter((type) => type === "edge")).toHaveLength(2);
+    expect(events.indexOf("node")).toBe(0);
   });
 
   it("stops the walk when paging exhausts the budget", async () => {
