@@ -1,220 +1,53 @@
 /**
- * Phase 0 type gate for `ail-aadp/traversal/v1.0` (ADR-0011).
+ * Type gate for `ail-aadp/traversal/v1.0` (ADR-0011).
  *
- * This file is TYPE-ONLY. It declares the proposed public surface and proves it
- * compiles against the RELEASED types of Relations/Answer/Evidence `1.0` before
- * ADR-0011 is Accepted. It is the single artifact the ADR's Status section
- * permits before acceptance, together with its `tsconfig.json` and the
- * `test:types` script.
+ * This file is TYPE-ONLY. Phase 0 declared the proposed public surface here and
+ * proved it compiled against the RELEASED types of Relations/Answer/Evidence
+ * `1.0` before ADR-0011 was Accepted. Phase 1 has landed the real module, so
+ * the surface is now IMPORTED from `src/traversal/v1.0/index.js` and every
+ * assertion below still holds unchanged — which is what makes this gate
+ * meaningful rather than a copy asserting against itself.
  *
  * Rules this file MUST keep:
- * - no runtime code — every value is `declare`d, nothing is constructed;
- * - no import from `src/traversal/**` — that directory must not exist yet;
- * - no stub implementation created merely to make an assertion pass.
- *
- * When Phase 1 lands the real module, the declarations below are replaced by an
- * `import type { ... } from "../../src/traversal/v1.0/index.js"` and every
- * assertion here must still hold unchanged.
+ * - no runtime code — nothing is constructed, nothing is called;
+ * - no stub implementation created merely to make an assertion pass. The three
+ *   functions still `declare`d below are the ones Phase 3 (streaming) and
+ *   Phase 5 (conformance) implement; they stay declarations until then, so
+ *   this gate never asserts against a stub written to satisfy it.
  */
 
-import type { EntityV1, ManifestV1, RetryOptions, UrlPolicy } from "../../src/client/v1.0/index.js";
-import type { ModuleSemanticIssue } from "../../src/module-registry/index.js";
+import type { EntityV1, RetryOptions, UrlPolicy } from "../../src/client/v1.0/index.js";
 import type { CheckResult, ConformanceSummary } from "../../src/conformance/index.js";
 import type {
   RelationTargetV1,
-  RelationsClientOptions,
   RelationsTraversalBudgetState,
 } from "../../src/modules/relations/v1.0/index.js";
 import type { AnswerTargetResolutionStatus } from "../../src/modules/answer/v1.0/index.js";
+import { registerBuiltinTraversalAdapters } from "../../src/traversal/v1.0/index.js";
+import type {
+  CrossModuleGraphV1,
+  EdgeExpansionOutcomeV1,
+  ExtensionExpansionOutcomeV1,
+  GraphEdgeV1,
+  GraphExtensionExpansionV1,
+  GraphNodeStatusV1,
+  GraphNodeV1,
+  GraphTraversalConformanceOptions,
+  GraphTraversalConformanceReport,
+  GraphTraversalEventV1,
+  GraphTraversalOptions,
+  GraphTraversalSummaryV1,
+  TraversalAdapter,
+  TraversalParseResult,
+  TraversalPlanContext,
+} from "../../src/traversal/v1.0/index.js";
 
 /* ------------------------------------------------------------------------- *
- * Proposed public surface — ADR-0011 §1-12, plan §"Typed API contract".
+ * Not yet implemented: Phase 3 owns the two streaming entry points and Phase 5
+ * owns the conformance runner. They stay type-only declarations here rather
+ * than becoming stubs in `src/traversal/**` written to satisfy this gate.
  * ------------------------------------------------------------------------- */
 
-/** EXTENSION scope: could the adapter run at all. */
-export type ExtensionExpansionOutcomeV1 =
-  | "planned"
-  | "no-edges"
-  | "unsupported-module"
-  | "invalid-extension";
-
-/** EDGE scope: what happened to this one occurrence. */
-export type EdgeExpansionOutcomeV1 =
-  | "expanded"
-  | "leaf"
-  | "depth-limit"
-  | "cycle"
-  | "already-expanded"
-  | "not-expanded"
-  | "budget-exhausted";
-
-/** NODE scope: the RELEASED vocabulary, no sixth value (ADR-0011 §4). */
-export type GraphNodeStatusV1 = AnswerTargetResolutionStatus;
-
-export interface TraversalAdapterKey {
-  moduleId: string;
-  moduleVersion: string;
-  extensionField: `x_${string}`;
-}
-
-export interface TraversalAdapterCapabilities {
-  sourceKinds: readonly string[];
-  edgeGroups: readonly string[];
-  fetchesTargets: boolean;
-}
-
-/** Both validator channels are kept separate (ADR-0011 §2). */
-export type TraversalParseResult<TDoc> =
-  | { ok: true; document: TDoc }
-  | { ok: false; errors: unknown[]; semanticIssues: ModuleSemanticIssue[] };
-
-export interface TraversalPlanContext {
-  depth: number;
-  nodeKey: string;
-  followCollections: boolean;
-  includeGeneratedSummarySources: boolean;
-}
-
-export interface TraversalEdgePlan {
-  edgeGroup: string;
-  index: number;
-  target: RelationTargetV1;
-  declaredTargetType: string;
-  expandable: boolean;
-}
-
-export interface TraversalAdapter<TDoc = unknown> {
-  readonly key: TraversalAdapterKey;
-  readonly capabilities: TraversalAdapterCapabilities;
-  parseExtension(entity: EntityV1): TraversalParseResult<TDoc>;
-  planEdges(document: TDoc, entity: EntityV1, context: TraversalPlanContext): TraversalEdgePlan[];
-}
-
-export interface GraphNodeV1<T = unknown> {
-  key: string;
-  depth: number;
-  status: GraphNodeStatusV1;
-  entity?: EntityV1<T>;
-  modules?: Array<{ id: string; version: string; extensionField: `x_${string}` }>;
-  /**
-   * ONE record per extension, never one outcome for the whole node (ADR-0011
-   * §2a). Edge fates stay on `GraphEdgeV1.outcome`.
-   */
-  expansions?: GraphExtensionExpansionV1[];
-  message?: string;
-}
-
-export interface GraphExtensionExpansionV1 {
-  key: string;
-  extensionField: `x_${string}`;
-  adapter?: TraversalAdapterKey;
-  outcome: ExtensionExpansionOutcomeV1;
-  plannedEdges: number;
-  errors?: unknown[];
-  semanticIssues?: ModuleSemanticIssue[];
-  message?: string;
-}
-
-export interface GraphEdgeV1 {
-  from: string;
-  to: string;
-  edgeGroup: string;
-  index: number;
-  extensionField: `x_${string}`;
-  declaredTargetType: string;
-  /** Absent when the edge was never attempted (depth-limit/cycle/already-expanded/budget). */
-  status?: GraphNodeStatusV1;
-  outcome: EdgeExpansionOutcomeV1;
-  message?: string;
-}
-
-export interface GraphReferenceV1 {
-  index: number;
-  edgeGroup: string;
-  key: string;
-  declaredTargetType: string;
-  status: GraphNodeStatusV1;
-  message?: string;
-}
-
-export interface GraphTraversalSummaryV1 {
-  stopReason: "exhausted" | "budget" | "aborted";
-  partial: boolean;
-  nodes: number;
-  edges: number;
-  requests: number;
-  unsupportedModules: Record<string, number>;
-}
-
-export type GraphTraversalEventV1 =
-  | { type: "node"; node: GraphNodeV1 }
-  | { type: "reference"; reference: GraphReferenceV1 }
-  | { type: "edge"; edge: GraphEdgeV1 }
-  | { type: "expansion"; expansion: GraphExtensionExpansionV1 }
-  | { type: "complete"; summary: GraphTraversalSummaryV1 };
-
-export interface CrossModuleGraphV1<T = unknown> {
-  nodes: GraphNodeV1<T>[];
-  references: GraphReferenceV1[];
-  edges: GraphEdgeV1[];
-  expansions: GraphExtensionExpansionV1[];
-  summary: GraphTraversalSummaryV1;
-}
-
-export interface GraphTraversalOptions extends RelationsClientOptions {
-  /** Caller-owned, borrowed by traversal (ADR-0011 §10). Required. */
-  budget: RelationsTraversalBudgetState;
-  adapters?: readonly TraversalAdapter[];
-  capabilities?: ReadonlyArray<{ moduleId: string; version: string }>;
-  rootUrl?: string;
-  declaredModules?: ManifestV1["modules"];
-  includeGeneratedSummarySources?: boolean; // default false
-  followCollections?: boolean; // default false (ADR-0011 §12.1)
-  maxBufferedEvents?: number; // default 256
-}
-
-/**
- * The common intersection of the three released runners' option types, minus the
- * six standalone traversal limits (they go through `budget`) and the fields that
- * are specific to one module. A profile composing three modules has to run under
- * the same deployment conventions they do.
- */
-export interface GraphTraversalConformanceOptions {
-  baseUrl?: string;
-  sampleRootUrl?: string;
-  timeoutMs?: number;
-  maxRedirects?: number;
-  maxResponseBytes?: number;
-  retry?: RetryOptions;
-  allowPrivateNetwork?: boolean;
-  urlPolicy?: UrlPolicy;
-  headers?: Record<string, string>;
-  crossOriginSafeHeaders?: string[];
-  /** Caller-owned. Replaces ONLY the six standalone limit fields (ADR-0011 §10). */
-  budget?: RelationsTraversalBudgetState;
-  failOnWarning?: boolean;
-  onCheck?: (result: CheckResult) => void;
-  signal?: AbortSignal;
-}
-
-export interface GraphTraversalConformanceReport {
-  report_version: "1";
-  aadp_version: "1.0";
-  /** `profile`, not `module` — this is a profile over three modules. */
-  profile: { id: "aadp:graph-traversal"; version: "1.0" };
-  package_version: string;
-  base_url?: string;
-  runner: { name: string; version: string };
-  started_at: string;
-  finished_at: string;
-  duration_ms: number;
-  status: "passed" | "failed" | "inconclusive";
-  summary: ConformanceSummary;
-  effective_limits: Record<string, number>;
-  checks: CheckResult[];
-}
-
-export declare function registerBuiltinTraversalAdapters(): void;
 export declare function traverseGraphV1(
   root: string | EntityV1,
   options: GraphTraversalOptions,
