@@ -245,6 +245,27 @@ describe("paging a collection", () => {
     expect(events.indexOf("node")).toBe(0);
   });
 
+  it.each([
+    ["404", () => new Error("404 Not Found")],
+    ["blocked URL", () => Object.assign(new Error("blocked"), { name: "BlockedUrlError" })],
+    ["invalid page", () => Object.assign(new Error("schema"), { name: "AadpSchemaValidationError" })],
+    ["cursor cycle", () => Object.assign(new Error("cursor repeated"), { name: "RelationsCursorCycleError" })],
+  ])("reports a walk truncated by %s as partial while the scheduler still exhausts", async (_label, makeError) => {
+    const failing: TraversalCollectionPager = async function* () {
+      throw makeError();
+    };
+    const outcome = await walkWith(failing);
+    // The two fields answer different questions: the scheduler DID run out of
+    // work, and the graph IS missing a branch.
+    expect(outcome.summary.stopReason).toBe("exhausted");
+    expect(outcome.summary.partial).toBe(true);
+  });
+
+  it("leaves a cleanly paged collection non-partial", async () => {
+    const outcome = await walkWith(pager);
+    expect(outcome.summary).toMatchObject({ stopReason: "exhausted", partial: false });
+  });
+
   it("stops the walk when paging exhausts the budget", async () => {
     const exhausting: TraversalCollectionPager = async function* () {
       const err = new Error("budget gone");
@@ -353,6 +374,47 @@ describe("over HTTP", () => {
     const graph = await collectGraphV1(`${server.baseUrl}/answer.json`, options());
     expect(server.requestLog).toEqual(["/answer.json"]);
     expect(graph.edges).toEqual([]);
+  });
+
+  it("does not start a later-group fetch while a collection is still paging", async () => {
+    // A node with a collection (rank 1) and an answer reference (rank 2). If the
+    // later-group fetch were prefetched across the collection boundary, the two
+    // would race for the last of the budget and completion timing would decide
+    // which branch survives.
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/answer.json") {
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          id: "answer:a",
+          type: "answer",
+          checksum: checksumOf({}),
+          updated_at: "2026-08-06T00:00:00Z",
+          canonical_url: "https://example.com/answers/a",
+          data: {},
+          x_relations: {
+            module: "aadp:relations",
+            version: "1.0",
+            kind: "relation-set",
+            items: [
+              {
+                rel: "related",
+                target_type: "document",
+                cardinality: "many",
+                collection: { url: `${server!.baseUrl}/collection.json`, pagination: "cursor" },
+              },
+            ],
+          },
+        });
+      }
+      return sendJson(res, 404, { error: "not found" });
+    });
+
+    // Room for the root and one collection page only.
+    const budget = createRelationsTraversalBudget({ maxRequests: 2 });
+    await collectGraphV1(`${server.baseUrl}/answer.json`, options({ budget, followCollections: true }));
+
+    // The collection page was attempted; nothing scheduled after it was.
+    expect(server.requestLog).toEqual(["/answer.json", "/collection.json"]);
   });
 
   it("charges collection pages against the caller's budget", async () => {

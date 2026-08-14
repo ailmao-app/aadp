@@ -34,6 +34,7 @@ import {
   fanInEntities,
   fixtureEntity,
   fixtureResolver,
+  FIXTURE_ORIGIN,
   FIXTURE_URLS,
   generatedSummaryEntities,
   multiOutcomeEntities,
@@ -409,6 +410,94 @@ const traversalChecks: GraphTraversalCheck[] = [
           : fail(`Expected invalid-options, got ${(err as Error).name}.`);
       }
       return fail("A root with no canonical_url and no rootUrl was accepted.");
+    },
+  },
+  {
+    id: "graph.traversal.collection_failure_partial",
+    group: "graph.traversal",
+    title: "A collection that cannot be paged makes the walk partial, and stops nothing else",
+    level: "error",
+    async run(context) {
+      const collectionUrl = `${FIXTURE_ORIGIN}/collections/related`;
+      const root = fixtureEntity({
+        id: "answer:a",
+        type: "answer",
+        canonical_url: FIXTURE_URLS.answer,
+        // One reachable reference and one collection that will fail: the branch
+        // that works must still be reported in full.
+        x_answer: answerWrapper({
+          related_entities: [{ target_type: "claim", target: { id: "claim:c1", url: FIXTURE_URLS.claimOne } }],
+        }),
+        x_relations: relationSet([
+          {
+            rel: "related",
+            target_type: "document",
+            cardinality: "many",
+            collection: { url: collectionUrl, pagination: "cursor" },
+          },
+        ]),
+      });
+      const entities = {
+        [FIXTURE_URLS.answer]: root,
+        [FIXTURE_URLS.claimOne]: claimEntity("claim:c1", FIXTURE_URLS.claimOne),
+        [FIXTURE_URLS.evidence]: evidenceEntity(),
+      };
+
+      const failures = [
+        ["404", () => new Error("404 Not Found")],
+        ["blocked URL", () => Object.assign(new Error("blocked by URL policy"), { name: "BlockedUrlError" })],
+        ["invalid page", () => Object.assign(new Error("schema validation failed"), { name: "AadpSchemaValidationError" })],
+        ["cursor cycle", () => Object.assign(new Error("cursor repeated"), { name: "RelationsCursorCycleError" })],
+      ] as const;
+
+      for (const [label, makeError] of failures) {
+        const fixture = fixtureResolver(entities);
+        const outcome = await runTraversalWalk(root, {
+          rootUrl: FIXTURE_URLS.answer,
+          lookup: context.lookup,
+          resolve: fixture.resolve,
+          // eslint-disable-next-line require-yield -- the pager only ever throws
+          pageCollection: async function* () {
+            throw makeError();
+          },
+          maxDepth: 3,
+          followCollections: true,
+          includeGeneratedSummarySources: false,
+        });
+
+        if (!outcome.summary.partial) {
+          return fail(`A collection that failed with ${label} was still reported as a complete graph.`);
+        }
+        if (outcome.summary.stopReason !== "exhausted") {
+          return fail(
+            `A recoverable collection failure changed the scheduler's stop reason to "${outcome.summary.stopReason}".`
+          );
+        }
+        const reached = edgesOf(outcome).some((edge) => edge.edgeGroup === "answer.related_entity");
+        if (!reached) return fail(`A collection failing with ${label} suppressed an unrelated branch.`);
+
+        const record = expansionsOf(outcome).find((expansion) => expansion.extensionField === "x_relations");
+        if (!record?.message?.includes(collectionUrl)) {
+          return fail(`A collection failing with ${label} left no diagnostic naming it.`);
+        }
+      }
+
+      // A collection that pages cleanly must NOT make the walk partial.
+      const clean = fixtureResolver({ ...entities, [FIXTURE_URLS.document]: documentEntity() });
+      const healthy = await runTraversalWalk(root, {
+        rootUrl: FIXTURE_URLS.answer,
+        lookup: context.lookup,
+        resolve: clean.resolve,
+        pageCollection: async function* () {
+          yield { id: "document:d", url: FIXTURE_URLS.document };
+        },
+        maxDepth: 3,
+        followCollections: true,
+        includeGeneratedSummarySources: false,
+      });
+      return healthy.summary.partial === false && healthy.summary.stopReason === "exhausted"
+        ? PASS
+        : fail("A collection that paged cleanly was reported as partial.");
     },
   },
   {

@@ -369,6 +369,28 @@ conformance check, exercised with responses completing in reverse order.
 including budget exhaustion and abort, so a consumer never has to infer
 completeness from the iterator merely ending.
 
+The two fields answer **different questions** and are deliberately independent:
+
+- `stopReason` describes how the scheduler finished — it ran out of scheduled
+  work, the budget stopped it, or the caller aborted it.
+- `partial` states whether the graph is missing anything the walk set out to
+  produce.
+
+`partial` MUST be `true` for a budget stop, for an abort, **and** for a
+recoverable branch failure that left work unreported — the case that forced this
+amendment is a `relations.collection` that could not be paged (404, blocked URL,
+malformed page, cursor cycle): the scheduler really did exhaust its queue, yet a
+whole branch is absent from the graph.
+
+`exhausted` therefore no longer implies `partial: false`. The alternative
+considered was a fourth `stopReason` for truncation, and it was rejected: the
+scheduler's own ending is accurately described by the three existing values, and
+a consumer asking "can I treat this graph as complete?" must not have to
+enumerate stop reasons to find out. The three-value `stopReason` vocabulary is
+unchanged, so no released enum grows.
+
+A conformance check (`graph.traversal.collection_failure_partial`) pins this.
+
 There is deliberately **no total-event limit**: `maxBufferedEvents` bounds the
 buffer, and the budget's six dimensions bound the work. A third limit would add
 another partial-stop path to account for and test while bounding no additional

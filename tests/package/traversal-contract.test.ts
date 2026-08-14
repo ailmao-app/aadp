@@ -78,7 +78,7 @@ describe("published traversal subpath", () => {
     expect(result).toEqual({
       status: "passed",
       profile: { id: "aadp:graph-traversal", version: "1.0" },
-      total: 25,
+      total: 26,
       failed: 0,
       packageVersion: "string",
     });

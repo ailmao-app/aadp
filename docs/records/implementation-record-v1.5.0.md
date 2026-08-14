@@ -95,7 +95,7 @@ adapter may plan edges out of this extension field".
 
 ### Phase 5 — conformance profile and package surface
 
-- Profile `aadp:graph-traversal@1.0` with 25 stable check IDs, reusing the core
+- Profile `aadp:graph-traversal@1.0` with 26 stable check IDs, reusing the core
   `CheckResult`/`ConformanceSummary` shapes. The report is `profile`-scoped, not
   `module`-scoped: it composes three modules and certifies none of them alone.
 - The profile certifies a traversal **implementation** against ADR-0011, so it
@@ -145,22 +145,21 @@ adapter may plan edges out of this extension field".
    at the moment the node was emitted. A runtime diagnostic discovered later — a
    collection that could not be paged — is amended onto the records the
    `expansion` EVENTS carry, never onto an object the consumer already holds.
-7. **A collection that cannot be paged is reported, never dropped.** A 404, a
-   blocked URL, a malformed page or a cursor cycle stops that one collection and
-   is recorded on the expansion record that owns it (`message`), while the node
-   and every other edge continue.
-
-   **BLOCKING, open for maintainer decision before release:** such a walk still
-   terminates `stopReason: "exhausted"`, `partial: false`, so a graph missing a
-   whole branch is reported as complete. This cannot be fixed inside the frozen
-   vocabulary — `stopReason` has only `exhausted`/`budget`/`aborted` and
-   `partial` is defined as "any stop reason other than exhausted" — so closing it
-   needs an ADR-0011 amendment (a terminal stop reason for a recoverable
-   truncation, or a redefinition of `partial`), plus a conformance check ID and
-   HTTP tests for the 404/policy/schema/cursor cases. It is deliberately NOT
-   patched here: inventing an enum value in a bug fix is how a frozen contract
-   drifts.
-8. **Early consumer return cancels only this walk's waiting.** `traverseGraphV1`
+7. **`partial` is independent of `stopReason` (ADR-0011 §9, amended).** A
+   collection that cannot be paged (404, blocked URL, malformed page, cursor
+   cycle) stops that one collection, is named on the expansion record that owns
+   it, and leaves the walk `stopReason: "exhausted"` — the scheduler really did
+   run out of work — with `partial: true`, because the graph is missing a branch.
+   The rejected alternative was a fourth `stopReason` for truncation: the
+   scheduler's ending is already described accurately, and a consumer asking "is
+   this graph complete?" must not have to enumerate stop reasons. No released
+   enum grew. Pinned by `graph.traversal.collection_failure_partial`.
+8. **Work after a collection is never prefetched across it.** Prefetch is scoped
+   to the segment being settled, so a page request and a later-group target can
+   never compete for the last of the budget — which branch survives would
+   otherwise depend on completion timing, the one thing the schedule key exists
+   to remove from the result.
+9. **Early consumer return cancels only this walk's waiting.** `traverseGraphV1`
    combines the caller's signal with a walk-local abort and hands the scheduler a
    cancel hook, because an async generator queues `return()` behind an in-flight
    `next()` — without it, breaking out of a `for await` would block for as long
@@ -203,5 +202,5 @@ record MUST NOT be described as gate-closed.
 | Deterministic ordering | Closed — `graph.ordering.deterministic` and `graph.ordering.mixed_order_equivalence` green |
 | `complete` always carries `stopReason`/`partial` | Closed |
 | Core-only/single-module consumer unaffected | Closed — `graph.compat.core_only_unchanged` green, and every released Relations/Answer/Evidence test passes with no assertion relaxed |
-| Partial result never reported as complete | **OPEN for one case** — a collection truncated by a resolution failure still terminates `exhausted`/`partial: false`; see decision 7 |
+| Partial result never reported as complete | Closed — ADR-0011 §9 amended so `partial` is independent of `stopReason`; a recoverable branch failure yields `exhausted`/`partial: true`, pinned by `graph.traversal.collection_failure_partial` |
 | Two neutral interoperability data sets | **OPEN** — see above |

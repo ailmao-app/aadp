@@ -503,9 +503,13 @@ export interface CrossModuleGraphV1<T = unknown> {
 }
 
 export interface GraphTraversalSummaryV1 {
-  /** Lý do dừng. `"exhausted"` = đã thử hết mọi edge đã lên lịch. */
+  /** Scheduler kết thúc THẾ NÀO. `"exhausted"` = đã thử hết mọi edge đã lên lịch. */
   stopReason: "exhausted" | "budget" | "aborted";
-  /** true với mọi `stopReason` khác `"exhausted"`. */
+  /**
+   * Graph có THIẾU gì không — độc lập với `stopReason` (ADR-0011 §9). true với
+   * budget stop, abort, VÀ recoverable branch failure (vd collection không page
+   * được) dù scheduler vẫn `exhausted`.
+   */
   partial: boolean;
   nodes: number;
   /** Gồm CẢ edge bị chặn trước fetch (depth-limit/cycle/already-expanded/budget). */
@@ -781,6 +785,7 @@ resolution-context digest của mọi fetch trong walk nhất quán.
   | `graph.ordering.mixed_order_equivalence` | Đảo thứ tự reference cho cùng graph và cùng số request | error |
   | `graph.budget.no_double_charge` | Fan-in ⇒ 1 node charge, 1 request | error |
   | `graph.budget.partial_not_complete` | Dừng vì budget ⇒ `partial: true`, `stopReason: "budget"` | error |
+  | `graph.traversal.collection_failure_partial` | Collection không page được (404/blocked/schema/cursor-cycle) ⇒ `stopReason: "exhausted"` nhưng `partial: true`; nhánh khác vẫn emit đủ ([ADR-0011 §9](../../adr/0011-cross-module-graph-traversal.md)) | error |
   | `graph.budget.no_request_after_abort` | Sau abort, request count không tăng | error |
   | `graph.streaming.terminal_event` | `complete` phát đúng một lần | error |
   | `graph.streaming.bounded_memory` | Buffer không vượt `maxBufferedEvents` | warning |

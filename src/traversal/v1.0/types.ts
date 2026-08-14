@@ -191,7 +191,15 @@ export interface GraphReferenceV1 {
 }
 
 export interface GraphTraversalSummaryV1 {
+  /** How the scheduler finished. `"exhausted"` = it ran out of scheduled work. */
   stopReason: "exhausted" | "budget" | "aborted";
+  /**
+   * Whether the graph is missing anything the walk set out to produce —
+   * INDEPENDENT of `stopReason` (ADR-0011 §9). True for a budget stop, for an
+   * abort, and for a recoverable branch failure such as a collection that could
+   * not be paged, where the scheduler still exhausts its queue. Never infer
+   * completeness from `stopReason` alone.
+   */
   partial: boolean;
   nodes: number;
   edges: number;

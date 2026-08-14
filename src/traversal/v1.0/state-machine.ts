@@ -179,20 +179,35 @@ export interface TraversalProgress {
   edges: number;
   requests: number;
   unsupportedModules: Record<string, number>;
+  /**
+   * Set when a recoverable branch failure left work unreported — a collection
+   * that could not be paged, today. Tracked separately from `stopReason`
+   * because the scheduler really did exhaust its queue: what is missing is data,
+   * not scheduled work (ADR-0011 §9).
+   */
+  incomplete: boolean;
 }
 
 export function createTraversalProgress(): TraversalProgress {
-  return { nodes: 0, edges: 0, requests: 0, unsupportedModules: {} };
+  return { nodes: 0, edges: 0, requests: 0, unsupportedModules: {}, incomplete: false };
 }
 
-/** Freezes the current counters into a terminal summary. `partial` follows `stopReason`. */
+/**
+ * Freezes the current counters into a terminal summary.
+ *
+ * `stopReason` says how the scheduler finished; `partial` says whether the graph
+ * is missing anything. They are independent (ADR-0011 §9): a walk can exhaust
+ * its queue and still be partial, because a branch failed recoverably along the
+ * way. Deriving `partial` from `stopReason` is what let a graph missing a whole
+ * collection be reported as complete.
+ */
 export function summaryFrom(
   progress: TraversalProgress,
   stopReason: GraphTraversalSummaryV1["stopReason"]
 ): GraphTraversalSummaryV1 {
   return {
     stopReason,
-    partial: stopReason !== "exhausted",
+    partial: stopReason !== "exhausted" || progress.incomplete,
     nodes: progress.nodes,
     edges: progress.edges,
     requests: progress.requests,
@@ -355,30 +370,40 @@ export async function* walkTraversal(
     const collectionRank = edgeGroupRank(RELATIONS_COLLECTION_EDGE_GROUP);
     const before = staticEdges.filter((o) => edgeGroupRank(o.planned.plan.edgeGroup) < collectionRank);
     const after = staticEdges.filter((o) => edgeGroupRank(o.planned.plan.edgeGroup) >= collectionRank);
-    prefetchBatch([...before, ...after], options, state);
+    const pages = plan.collections.length > 0;
 
-    const scheduled: Occurrence[] = [
-      ...before,
-      ...(plan.collections.length > 0 ? [PAGE_COLLECTIONS_HERE] : []),
-      ...after,
-    ];
-
-    for (const occurrence of scheduled) {
-      if (occurrence === PAGE_COLLECTIONS_HERE) {
-        for await (const item of pageCollections(plan.collections, node, options, state, plan.expansions)) {
-          const settled = occurrenceOf(item);
-          state.progress.edges += 1;
-          const edge = await settleEdge(settled, options, state);
-          yield { type: "edge", edge };
-          yield* emitDiscovery(settled, edge, node, state, queue);
-        }
-        continue;
+    async function* settle(occurrences: readonly Occurrence[]): AsyncGenerator<GraphTraversalEventV1> {
+      for (const occurrence of occurrences) {
+        state.progress.edges += 1;
+        const edge = await settleEdge(occurrence, options, state);
+        yield { type: "edge", edge };
+        yield* emitDiscovery(occurrence, edge, node, state, queue);
       }
-      state.progress.edges += 1;
-      const edge = await settleEdge(occurrence, options, state);
-      yield { type: "edge", edge };
-      yield* emitDiscovery(occurrence, edge, node, state, queue);
     }
+
+    // Prefetch is scoped to the segment being settled, never across the
+    // collection boundary. Starting a later-group fetch before paging finishes
+    // would let a page request and an `answer.*` request compete for the last of
+    // the budget, so which branch survives would depend on completion timing —
+    // the one thing the schedule key exists to take out of the result.
+    prefetchBatch(before, options, state);
+    yield* settle(before);
+
+    if (pages) {
+      for await (const item of pageCollections(plan.collections, node, options, state, plan.expansions)) {
+        const settled = occurrenceOf(item);
+        state.progress.edges += 1;
+        const edge = await settleEdge(settled, options, state);
+        yield { type: "edge", edge };
+        yield* emitDiscovery(settled, edge, node, state, queue);
+      }
+    }
+
+    // A budget exhausted while paging stops everything after it: the remaining
+    // static edges are still reported — `settleEdge` gives each of them
+    // `budget-exhausted` — but nothing further is ever requested.
+    if (state.stopReason !== "budget") prefetchBatch(after, options, state);
+    yield* settle(after);
 
     for (const expansion of plan.expansions) {
       if (expansion.outcome === "unsupported-module") {
@@ -474,10 +499,12 @@ async function* pageCollections(
       if (isAbortStop(err)) throw err;
 
       // Anything else (404, blocked URL, malformed page, cursor cycle) stops
-      // this ONE collection and is reported on the expansion record that owns
-      // it. It must never be dropped silently: a consumer would otherwise
-      // receive a graph missing a whole branch with nothing to diagnose or
-      // retry. `plannedEdges` keeps counting only the items actually read.
+      // this ONE collection. The walk continues, but the graph is now missing
+      // items it set out to produce, so it is `partial` even though the
+      // scheduler will still exhaust its queue — and the failure is named on the
+      // expansion record that owns it, so a consumer can diagnose and retry.
+      // `plannedEdges` keeps counting only the items actually read.
+      state.progress.incomplete = true;
       failures.push({
         extensionField: collection.extensionField,
         url: collection.url,
@@ -489,13 +516,6 @@ async function* pageCollections(
   // after this node's edges — never onto the node snapshot already delivered.
   attachCollectionFailures(expansions, failures);
 }
-
-/**
- * Marks the position in a node's schedule where its collections are paged.
- * Collection items all rank together, so one marker is enough — and using a
- * marker rather than a pre-materialized list is what lets the items be streamed.
- */
-const PAGE_COLLECTIONS_HERE = Symbol("page-collections") as unknown as Occurrence;
 
 /**
  * Emits what a settled edge discovered: the root-level `reference` view of the

@@ -29,6 +29,7 @@ const EXPECTED_CHECK_IDS = [
   "graph.traversal.edge_outcome_per_occurrence",
   "graph.traversal.blocked_edge_emitted",
   "graph.traversal.root_identity",
+  "graph.traversal.collection_failure_partial",
   "graph.traversal.type_mismatch_scoped",
   "graph.ordering.property_order_independent",
   "graph.ordering.deterministic",
