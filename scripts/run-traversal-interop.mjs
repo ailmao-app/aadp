@@ -31,6 +31,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { evaluateAcceptance } from "./interop-acceptance.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -92,11 +93,33 @@ if (!["true", "false"].includes(args["maintainer-operated"])) {
 }
 
 const outDir = path.resolve(repoRoot, args.out ?? path.join("docs", "records", "conformance", "1.5.0"));
-const budgetLimits = {
-  maxDepth: Number(args["max-depth"] ?? 3),
-  maxNodes: Number(args["max-nodes"] ?? 50),
-  maxRequests: Number(args["max-requests"] ?? 100),
-};
+
+/**
+ * Any of the six ADR-0008 dimensions may be set; the rest keep the budget
+ * factory's own reference defaults. Whatever the caller passes, the report
+ * records the limits read back from the BUDGET, not these inputs — that is what
+ * makes a run reproducible from its own evidence.
+ */
+const budgetLimits = {};
+for (const [flag, field, minimum] of [
+  ["max-depth", "maxDepth", 0],
+  ["max-nodes", "maxNodes", 0],
+  ["max-requests", "maxRequests", 1],
+  ["max-total-bytes", "maxTotalBytes", 1],
+  ["max-cross-origin-requests", "maxCrossOriginRequests", 0],
+  ["deadline-ms", "deadlineMs", 1],
+]) {
+  if (args[flag] === undefined) continue;
+  const value = Number(args[flag]);
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < minimum) {
+    fail(`--${flag} must be an integer >= ${minimum}, got ${JSON.stringify(args[flag])}`);
+  }
+  budgetLimits[field] = value;
+}
+// Keep a walk against someone else's deployment modest unless told otherwise.
+budgetLimits.maxDepth ??= 3;
+budgetLimits.maxNodes ??= 50;
+budgetLimits.maxRequests ??= 100;
 
 const enginesFloor = (
   JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")).engines?.node ?? ""
@@ -195,11 +218,22 @@ console.log(
           }
         : null,
       budget: {
-        limits: ${JSON.stringify(budgetLimits)},
+        // Read back from the budget itself, so every one of ADR-0008's six
+        // dimensions is recorded at the value actually in force — including the
+        // ones the caller never passed.
+        effective_limits: {
+          maxDepth: budget.maxDepth,
+          maxNodes: budget.maxNodes,
+          maxRequests: budget.maxRequests,
+          maxTotalBytes: budget.maxTotalBytes,
+          maxCrossOriginRequests: budget.maxCrossOriginRequests,
+          deadlineMs: budget.deadlineMs,
+        },
+        requested_limits: ${JSON.stringify(budgetLimits)},
         nodesVisited: budget.nodesVisited,
         requestsMade: budget.requestsMade,
         crossOriginRequestsMade: budget.crossOriginRequestsMade,
-        bytesRead: budget.bytesRead ?? null,
+        bytesFetched: budget.bytesFetched,
       },
       profile: { status: profile.status, summary: profile.summary, package_version: profile.package_version },
     })
@@ -228,6 +262,17 @@ const slug = args.name
   .replace(/[^a-z0-9]+/g, "-")
   .replace(/^-|-$/g, "");
 mkdirSync(outDir, { recursive: true });
+
+const acceptance = evaluateAcceptance({
+  graph: result.graph,
+  failure: result.failure,
+  profile: result.profile,
+  effectiveLimits: result.budget.effective_limits,
+  loopback: allowLoopback,
+  linkedNodeModules: args["offline-node-modules"] === "true",
+  atEnginesFloor: result.node_version === `v${enginesFloor}`,
+  rootUrl: args.url,
+});
 
 const evidence = {
   phase: "1.5.0 Phase 6 — neutral interoperability",
@@ -267,20 +312,34 @@ const evidence = {
   graph: result.graph,
   conformance_profile: result.profile,
   failure: result.failure ?? null,
-  result: result.failure ? "failed" : "passed",
+  // Every acceptance condition by name — a run is evidence only when all the
+  // required ones hold, never merely because nothing threw.
+  acceptance_checks: acceptance.checks,
+  failed_checks: acceptance.failed_checks,
+  eligible_for_release_gate: acceptance.eligible_for_release_gate,
+  result: acceptance.result,
 };
 
-const evidenceFile = path.join(outDir, `${slug}.json`);
+// Timestamp + tarball digest in the name: a rerun on another Node, another
+// tarball or other options is a DIFFERENT run, and raw evidence is append-only.
+const stamp = result.started_at.replace(/[:.]/g, "-");
+const shortDigest = tarballDigest.slice("sha256:".length, "sha256:".length + 12);
+const evidenceFile = path.join(outDir, `${slug}-${stamp}-${shortDigest}.json`);
 writeFileSync(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`);
 
 console.log("[5/5] done");
 console.log(`      evidence: ${path.relative(repoRoot, evidenceFile)}`);
-console.log(`      result:   ${evidence.result}`);
+console.log(`      result:   ${evidence.result} (release-gate eligible: ${evidence.eligible_for_release_gate})`);
 console.log(`      nodes ${result.graph?.summary?.nodes ?? 0}, edges ${result.graph?.summary?.edges ?? 0}, ` +
   `summary.requests ${evidence.accounting.summary_requests}, budget.requestsMade ${evidence.accounting.budget_requests_made}`);
 console.log(`      profile: ${result.profile.status} (${result.profile.summary.passed}/${result.profile.summary.total})`);
+for (const check of acceptance.checks.filter((c) => !c.passed)) {
+  console.log(`      ${check.required ? "FAILED" : "note"}  ${check.id}${check.message ? ` — ${check.message}` : ""}`);
+}
 
 rmSync(packDir, { recursive: true, force: true });
 rmSync(installDir, { recursive: true, force: true });
 
-if (evidence.result !== "passed") process.exit(1);
+// A failed run keeps its report — it is how a deployment's problem gets
+// diagnosed — but the exit code never lets it be mistaken for a closed gate.
+if (!evidence.eligible_for_release_gate) process.exit(1);

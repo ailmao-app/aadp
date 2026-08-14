@@ -236,21 +236,42 @@ It builds and packs the tarball, records the tarball's sha256, creates a clean
 install from that tarball alone, and runs the walk from a probe that imports only
 published subpaths (`ail-aadp/traversal/v1.0` plus `ail-aadp/modules/relations/v1.0`
 for the budget factory the caller is required to own). Into
-`docs/records/conformance/1.5.0/<slug>.json` it writes the data-set identity, the
-Node version and whether it is the `engines.node` floor, the tarball name and
-digest, the exact command as invoked, the six budget limits, **both**
-`summary.requests` and `budget.requestsMade`, the whole graph, and the
-`aadp:graph-traversal@1.0` profile result.
+`docs/records/conformance/1.5.0/<slug>-<timestamp>-<tarball digest>.json` it
+writes the data-set identity, the Node version and whether it is the
+`engines.node` floor, the tarball name and digest, the exact command as invoked
+(flags included), **all six** ADR-0008 budget limits read back from the budget
+itself rather than from the CLI input, **both** `summary.requests` and
+`budget.requestsMade`, the whole graph, and the `aadp:graph-traversal@1.0`
+profile result. The file name carries a timestamp and digest because raw
+evidence is append-only: a rerun on another Node or another tarball is a
+different run and must not overwrite the first.
 
-Refusals are deliberate: a missing name/URL/owner, or a non-HTTPS URL, exits
-non-zero and writes nothing. `--allow-loopback` and `--offline-node-modules`
-exist only to validate the script itself against a local fixture, and any run
-using them is stamped in its own output as not being evidence.
+**A run is evidence only if it says so.** The traversal contract reports 404s,
+forbidden targets, invalid documents, budget stops and truncated collections as
+RESULTS rather than exceptions, so "nothing threw" proves nothing. Every
+condition is checked by name (`scripts/interop-acceptance.mjs`, unit-tested in
+`tests/package/interop-acceptance.test.ts`) and recorded in the report as
+`acceptance_checks`, with a single `eligible_for_release_gate` verdict: the walk
+did not throw, a graph exists, the root resolved, `stopReason` is `exhausted`,
+`partial` is false, the profile passed with zero failures, all six budget limits
+were recorded, the target was a real deployment, and the install was a real clean
+install. Running above the `engines.node` floor is reported but does not
+disqualify — the gate simply also needs one run at the floor.
 
-The pipeline was exercised against a local fixture on 2026-08-14 (both a linked
-and a real `npm install` clean install; walk and profile both passed, 26/26), so
-what remains is genuinely only the external input: two data sets meeting the
-ownership rule, and a run at Node 20.18.1.
+Refusals are deliberate: a missing name/URL/owner, a non-HTTPS URL, or an
+out-of-range budget value exits non-zero and writes nothing. `--allow-loopback`
+and `--offline-node-modules` exist only to validate the script itself against a
+local fixture; such a run is stamped in its own output, records
+`result: "pipeline-validation"`, is never `eligible_for_release_gate`, and exits
+non-zero. A failed run against a real deployment keeps its report — that is how
+a deployment's problem gets diagnosed — but can never be mistaken for a closed
+gate.
+
+The pipeline was exercised against a local fixture on 2026-08-14 — both a linked
+and a real `npm install` clean install; the walk and the profile both passed
+(26/26) — and correctly refused to call either one evidence. What remains is
+genuinely only the external input: two data sets meeting the ownership rule, and
+a run at Node 20.18.1.
 
 ## Release gate status
 
