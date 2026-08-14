@@ -8,7 +8,7 @@
 | Chủ đề | Cross-module graph traversal và composition |
 | Dependency | Relations `1.0`, Answer `1.0`, Evidence `1.0` stable — bằng chứng ở [implementation record 1.4.0](../../records/implementation-record-v1.4.0.md), mục "Closed gates" và "External interoperability evidence (closed 2026-08-10)" |
 | Wire impact | KHÔNG đổi core schema, KHÔNG đổi `aadp:relations@1.0`, `aadp:answer@1.0`, `aadp:evidence@1.0`. Chỉ thêm package API mới (minor bump theo [roadmap §1](release-roadmap.md)) |
-| Review | [review-20260811-194300](../../../.claude/review/review-20260811-194300.md) — bản này được viết lại để đóng finding P1-1..P1-4 và P2-5; P2-6 được đóng bằng cập nhật roadmap §2/§12 |
+| Review | Review nội bộ `review-20260811-194300` (không commit vào repository) — bản này được viết lại để đóng finding P1-1..P1-4 và P2-5; P2-6 được đóng bằng cập nhật roadmap §2/§12 |
 | Owner | AADP maintainers |
 
 Tài liệu này là **kế hoạch, không phải nguồn normative**. Nguồn binding là
