@@ -44,3 +44,7 @@ export {
 } from "./registry.js";
 
 export { registerBuiltinTraversalAdapters, BUILTIN_TRAVERSAL_ADAPTERS } from "./adapters/builtins.js";
+
+// Thrown before the first request of a walk. The state machine behind it stays
+// internal until the streaming phase exposes `traverseGraphV1`.
+export { InvalidGraphTraversalOptionsError } from "./options.js";
