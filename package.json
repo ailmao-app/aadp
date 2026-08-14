@@ -62,6 +62,10 @@
       "types": "./dist/modules/evidence/v1.0/index.d.ts",
       "import": "./dist/modules/evidence/v1.0/index.js"
     },
+    "./traversal/v1.0": {
+      "types": "./dist/traversal/v1.0/index.d.ts",
+      "import": "./dist/traversal/v1.0/index.js"
+    },
     "./conformance": {
       "types": "./dist/conformance/index.d.ts",
       "import": "./dist/conformance/index.js"

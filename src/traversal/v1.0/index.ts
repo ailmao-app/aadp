@@ -50,3 +50,12 @@ export { InvalidGraphTraversalOptionsError } from "./options.js";
 
 export { traverseGraphV1 } from "./traversal.js";
 export { collectGraphV1 } from "./collect.js";
+
+// Conformance profile `aadp:graph-traversal@1.0`. Check IDs are package API.
+export {
+  runGraphTraversalConformance,
+  GRAPH_TRAVERSAL_CHECKS,
+  InvalidGraphTraversalConformanceOptionsError,
+  type GraphTraversalCheck,
+  type GraphCheckLevel,
+} from "./conformance/index.js";
