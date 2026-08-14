@@ -130,11 +130,18 @@ adapter may plan edges out of this extension field".
    carries no status by contract, so an occurrence that declares the wrong
    `target_type` for a target already expanded elsewhere reports
    `already-expanded` rather than `invalid`.
-4. **`summary.requests` counts canonical target resolutions**, not HTTP hops: one
-   collection page carries many items. The authoritative per-hop count is the
-   budget's own. **Open for maintainer decision before release:** whether the
-   published field should instead count hops, which would make it agree with
-   `budget.requestsMade` at the cost of no longer counting logical resolutions.
+4. **Two accounting units, decided 2026-08-14 and locked in ADR-0011 §9.**
+   `summary.requests` counts the logical canonical-target resolutions **this walk
+   started**; `budget.requestsMade` counts physical HTTP attempts across the
+   whole shared budget. `summary.requests` does not increase for a cache hit, an
+   in-flight join, a collection page, a retry or redirect hop, or work spent on
+   the budget before this walk began.
+
+   Implementing the decision exposed a real defect: the counter had been
+   incremented for every key the WALK had not seen yet, so a second walk on a
+   warm budget reported four requests while making none. Resolutions now carry
+   `replayed`, set from the shared layer's own `isCanonicalTargetKnown`, and only
+   a resolution this walk started is counted.
 5. **A collection is streamed, never materialized.** Its items are yielded one at
    a time and each is settled and emitted before the next is read, so the node
    and its early edges are observable while later pages are still arriving and no
@@ -178,9 +185,12 @@ The release gate requires **two** neutral data sets that:
 - include **at least one** owner who is not the AADP maintainers;
 - are exercised from a packed-tarball clean install importing only
   `ail-aadp/traversal/v1.0`;
+- are run on **Node 20.18.1**, the `engines.node` floor — a newer version may be
+  run in addition, but evidence at the floor is required;
 - have their raw reports stored under `docs/records/conformance/1.5.0/`, together
-  with the Node version, tarball digest, command, options/budget and request
-  counts of each run.
+  with the Node version, tarball filename and digest, the command, the options
+  and six budget limits, and **both** `summary.requests` and
+  `budget.requestsMade` under the semantics decided above.
 
 | Field | Data set A | Data set B |
 |---|---|---|

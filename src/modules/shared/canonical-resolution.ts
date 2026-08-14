@@ -450,6 +450,22 @@ export function recordRootOutcome(state: BudgetResolutionState, url: string, out
 }
 
 /**
+ * True when this budget has already settled `{id, url}`, or has a fetch for it
+ * in flight — i.e. a caller resolving it now would replay or join rather than
+ * start anything.
+ *
+ * Exists so a caller can report its own logical work honestly: a graph walk's
+ * `requests` counter means "resolutions this walk started", and a replay or a
+ * join costs it nothing. Physical HTTP attempts stay on `budget.requestsMade`.
+ * Predicate only — it never registers interest, so asking cannot change what a
+ * later resolve does.
+ */
+export function isCanonicalTargetKnown(state: BudgetResolutionState, id: string, url: string): boolean {
+  const key = canonicalTargetKey(id, url);
+  return state.outcomes.has(key) || state.pending.has(key);
+}
+
+/**
  * Replays a settled outcome for a bare URL, for that same root-shaped caller.
  *
  * Checks the root index first, then falls back to scanning settled canonical

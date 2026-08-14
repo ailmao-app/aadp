@@ -14,6 +14,7 @@ import { createPermissiveUrlPolicy } from "../../../src/client/url-policy.js";
 import { createRelationsTraversalBudget } from "../../../src/modules/relations/v1.0/index.js";
 import { observeCanonicalResolutions } from "../../../src/modules/shared/canonical-resolution.js";
 import { checksumOf } from "../../../src/canonical-json/checksum.js";
+import { canonicalize } from "../../../src/canonical-json/canonicalize.js";
 import {
   collectGraphV1,
   traverseGraphV1,
@@ -276,6 +277,128 @@ describe("no double charge", () => {
     const budget = createRelationsTraversalBudget();
     await collectGraphV1(`${server.baseUrl}/answer.json`, options({ budget }));
     expect(budget.expandedTargets.size).toBe(0);
+  });
+});
+
+describe("two accounting units", () => {
+  // `summary.requests` = logical resolutions THIS walk started.
+  // `budget.requestsMade` = physical HTTP attempts on the whole shared budget.
+  it("counts a retried resolution once, while the budget counts both attempts", async () => {
+    // A leaf target with no extensions, so the only resolutions in play are the
+    // root and this one — the retry is the only variable.
+    let attempts = 0;
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/answer.json") {
+        return sendJson(
+          res,
+          200,
+          answerEntity(server!.baseUrl, [{ id: "document:d", path: "/document.json", type: "document" }])
+        );
+      }
+      if (url.pathname === "/document.json") {
+        attempts += 1;
+        if (attempts === 1) return sendJson(res, 503, { error: "try again" });
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          id: "document:d",
+          type: "document",
+          checksum: checksumOf({}),
+          updated_at: UPDATED_AT,
+          canonical_url: "https://example.com/documents/d",
+          data: {},
+        });
+      }
+      return sendJson(res, 404, { error: "not found" });
+    });
+
+    const budget = createRelationsTraversalBudget();
+    const graph = await collectGraphV1(
+      `${server.baseUrl}/answer.json`,
+      options({ budget, retry: { maxAttempts: 2, baseDelayMs: 0 } })
+    );
+
+    expect(attempts).toBe(2);
+    // Root + document: two logical resolutions, whatever the transport had to do.
+    expect(graph.summary.requests).toBe(2);
+    expect(budget.requestsMade).toBe(3);
+  });
+
+  it("counts a collection page on the budget but never in summary.requests", async () => {
+    server = await startServer((_req, res, url) => {
+      if (url.pathname === "/answer.json") {
+        return sendJson(res, 200, {
+          aadp_version: "1.0",
+          id: "answer:a",
+          type: "answer",
+          checksum: checksumOf({}),
+          updated_at: UPDATED_AT,
+          canonical_url: "https://example.com/answers/a",
+          data: {},
+          x_relations: {
+            module: "aadp:relations",
+            version: "1.0",
+            kind: "relation-set",
+            items: [
+              {
+                rel: "related",
+                target_type: "document",
+                cardinality: "many",
+                collection: { url: `${server!.baseUrl}/collection.json`, pagination: "cursor" },
+              },
+            ],
+          },
+        });
+      }
+      if (url.pathname === "/collection.json") {
+        return sendJson(
+          res,
+          200,
+          canonicalize({
+            aadp_version: "1.0",
+            module: "aadp:relations",
+            module_version: "1.0",
+            kind: "relation-collection",
+            source: { id: "answer:a", type: "answer" },
+            rel: "related",
+            target_type: "document",
+            generated_at: UPDATED_AT,
+            checksum: checksumOf([]),
+            items: [],
+            cursor: { next: null },
+          })
+        );
+      }
+      return sendJson(res, 404, { error: "not found" });
+    });
+
+    const budget = createRelationsTraversalBudget();
+    const graph = await collectGraphV1(`${server.baseUrl}/answer.json`, options({ budget, followCollections: true }));
+
+    expect(server.requestLog).toEqual(["/answer.json", "/collection.json"]);
+    expect(graph.summary.requests).toBe(1); // the root alone
+    expect(budget.requestsMade).toBe(2); // the page is transport work
+  });
+
+  it("counts a fan-in target once — the join is free", async () => {
+    server = await startDiamondServer();
+    const budget = createRelationsTraversalBudget();
+    const graph = await collectGraphV1(`${server.baseUrl}/answer.json`, options({ budget }));
+    // Root, two claims, one shared evidence entity.
+    expect(graph.summary.requests).toBe(4);
+    expect(budget.requestsMade).toBe(4);
+  });
+
+  it("reports only this walk's own work when the budget was already used", async () => {
+    server = await startDiamondServer();
+    const budget = createRelationsTraversalBudget();
+    const first = await collectGraphV1(`${server.baseUrl}/answer.json`, options({ budget }));
+    expect(first.summary.requests).toBe(4);
+
+    // Every resolution of the second walk is a replay, so it started none.
+    const second = await collectGraphV1(`${server.baseUrl}/answer.json`, options({ budget }));
+    expect(second.summary.requests).toBe(0);
+    expect(second.nodes).toHaveLength(first.nodes.length);
+    expect(budget.requestsMade).toBe(4);
   });
 });
 

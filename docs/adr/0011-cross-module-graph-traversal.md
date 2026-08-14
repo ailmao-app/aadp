@@ -391,6 +391,27 @@ unchanged, so no released enum grows.
 
 A conformance check (`graph.traversal.collection_failure_partial`) pins this.
 
+#### Two accounting units, deliberately not merged
+
+`summary.requests` and the budget's own counter measure different things, and
+neither is derivable from the other:
+
+| Counter | Scope | Counts |
+|---|---|---|
+| `summary.requests` | this graph walk alone | logical canonical-target resolutions the walk STARTED |
+| `budget.requestsMade` | the whole caller-owned shared budget | physical HTTP attempts — original attempt, retries, redirect hops and collection pages |
+
+`summary.requests` MUST NOT increase for a cache hit, for joining a resolution
+already in flight, for a collection-page fetch, for a retry or redirect hop of
+one resolution, or for HTTP work spent on the budget before this walk began.
+
+The summary describes the graph walk's logical work, and a canonical resolution
+is the unit that matches graph semantics: one logical resolution may produce
+zero, one or many HTTP attempts depending on cache, retry and redirect. Transport
+accounting already has an authoritative home on the budget the caller owns, so
+restating it here would mix two layers and force the pager and HTTP layers to
+emit accounting that only duplicates a counter that already exists.
+
 There is deliberately **no total-event limit**: `maxBufferedEvents` bounds the
 buffer, and the budget's six dimensions bound the work. A third limit would add
 another partial-stop path to account for and test while bounding no additional

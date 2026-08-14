@@ -53,6 +53,15 @@ export interface TraversalNodeResolution {
   /** Present only for `resolved`. */
   entity?: EntityV1;
   message?: string;
+  /**
+   * True when this outcome was replayed from the budget's shared state — a
+   * settled canonical outcome, or a fetch already in flight that this walk
+   * merely joined — rather than started by this walk.
+   *
+   * `summary.requests` counts logical resolutions this walk STARTED, so a
+   * replay must not increment it (ADR-0011 §10 "Two accounting units").
+   */
+  replayed?: boolean;
 }
 
 /**
@@ -724,8 +733,12 @@ function resolveKey(
   const started = state.inFlight.get(key);
   if (started) return started;
 
-  state.progress.requests += 1;
   const pending = Promise.resolve(options.resolve(request)).then((resolution) => {
+    // Counted only when this walk actually STARTED the resolution. A replay of
+    // a settled outcome, or a join onto a fetch already in flight on this
+    // budget, is logically free — the physical HTTP attempts behind it live in
+    // `budget.requestsMade`, which the caller owns.
+    if (!resolution.replayed) state.progress.requests += 1;
     state.resolutions.set(key, resolution);
     state.inFlight.delete(key);
     return resolution;
@@ -810,8 +823,8 @@ async function resolveRoot(
     return { key, depth: 0, discoveryIndex: 0, expand: true };
   }
 
-  state.progress.requests += 1;
   const resolution = await options.resolve({ url: options.rootUrl, depth: 0 });
+  if (!resolution.replayed) state.progress.requests += 1;
   const key = canonicalTargetKey(resolution.entity?.id ?? "", options.rootUrl);
   state.resolutions.set(key, resolution);
   const resolved = resolution.status === "resolved" && resolution.entity !== undefined;

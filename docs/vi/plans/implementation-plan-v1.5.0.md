@@ -514,6 +514,12 @@ export interface GraphTraversalSummaryV1 {
   nodes: number;
   /** Gồm CẢ edge bị chặn trước fetch (depth-limit/cycle/already-expanded/budget). */
   edges: number;
+  /**
+   * Số logical canonical-target resolution mà CHÍNH walk này bắt đầu. KHÔNG đếm
+   * cache hit, join vào fetch đang bay, collection page, retry/redirect hop.
+   * Số HTTP attempt vật lý nằm ở `budget.requestsMade` do caller sở hữu
+   * ([ADR-0011 §9](../../adr/0011-cross-module-graph-traversal.md) "Two accounting units").
+   */
   requests: number;
   /** Số expansion record `unsupported-module`, theo module id khai trong payload. */
   unsupportedModules: Record<string, number>;

@@ -20,6 +20,7 @@ import { chargeNode, crossOriginAttemptHook } from "../../modules/relations/v1.0
 import { iterateRelationCollection } from "../../modules/relations/v1.0/index.js";
 import {
   budgetResolutionStateFor,
+  isCanonicalTargetKnown,
   recordRootOutcome,
   replaySettledOutcomeForUrl,
   resolveCanonicalTarget,
@@ -116,8 +117,12 @@ export function traverseGraphV1(
       const replayed = replaySettledOutcomeForUrl(resolutionState, request.url);
       if (replayed) {
         return replayed.ok
-          ? { status: "resolved", entity: replayed.entity }
-          : { status: replayed.status, ...(replayed.message ? { message: replayed.message } : {}) };
+          ? { status: "resolved", entity: replayed.entity, replayed: true }
+          : {
+              status: replayed.status,
+              ...(replayed.message ? { message: replayed.message } : {}),
+              replayed: true,
+            };
       }
       try {
         const entity = await fetchEntity(
@@ -166,6 +171,9 @@ export function traverseGraphV1(
         return failure;
       }
     }
+    // Asked BEFORE resolving: afterwards the key is settled either way, and the
+    // walk's own `requests` counter only counts resolutions it started.
+    const replayed = isCanonicalTargetKnown(resolutionState, request.declaredId, request.url);
     const resolution = await resolveCanonicalTarget(
       resolutionState,
       { id: request.declaredId, url: request.url },
@@ -183,8 +191,8 @@ export function traverseGraphV1(
     }
     const { outcome } = resolution;
     return outcome.ok
-      ? { status: "resolved", entity: outcome.entity }
-      : { status: outcome.status, ...(outcome.message ? { message: outcome.message } : {}) };
+      ? { status: "resolved", entity: outcome.entity, replayed }
+      : { status: outcome.status, ...(outcome.message ? { message: outcome.message } : {}), replayed };
   };
 
   // Row 2 paging is the released Relations client's own: cursor-cycle

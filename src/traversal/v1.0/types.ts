@@ -203,6 +203,13 @@ export interface GraphTraversalSummaryV1 {
   partial: boolean;
   nodes: number;
   edges: number;
+  /**
+   * Number of logical canonical-target resolutions started by this walk.
+   *
+   * Excludes cache hits, in-flight joins, collection-page fetches, retries and
+   * redirect hops. For physical HTTP attempts, inspect the caller-owned
+   * `budget.requestsMade` counter.
+   */
   requests: number;
   unsupportedModules: Record<string, number>;
 }
