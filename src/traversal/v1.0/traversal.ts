@@ -17,6 +17,7 @@ import {
 import { AadpDiscoveryBudgetExceededError } from "../../client/discovery-budget.js";
 import { BlockedUrlError } from "../../client/url-policy.js";
 import { chargeNode, crossOriginAttemptHook } from "../../modules/relations/v1.0/client/budget.js";
+import { iterateRelationCollection } from "../../modules/relations/v1.0/index.js";
 import {
   budgetResolutionStateFor,
   resolveCanonicalTarget,
@@ -27,6 +28,7 @@ import { streamTraversal } from "./scheduler.js";
 import {
   createTraversalProgress,
   walkTraversal,
+  type TraversalCollectionPager,
   type TraversalNodeResolution,
   type TraversalNodeResolver,
 } from "./state-machine.js";
@@ -147,11 +149,18 @@ export function traverseGraphV1(
       : { status: outcome.status, ...(outcome.message ? { message: outcome.message } : {}) };
   };
 
+  // Row 2 paging is the released Relations client's own: cursor-cycle
+  // detection, per-page validation against the expectation, and per-hop
+  // request/byte/cross-origin accounting all stay where they were shipped.
+  const pageCollection: TraversalCollectionPager = (request) =>
+    iterateRelationCollection(request.url, request.expectation, requestOptions, budget);
+
   const progress = createTraversalProgress();
   const walk = walkTraversal(root, {
     rootUrl: effective.rootUrl,
     lookup: effective.lookup,
     resolve,
+    pageCollection,
     maxDepth: budget.maxDepth,
     followCollections: effective.followCollections,
     includeGeneratedSummarySources: effective.includeGeneratedSummarySources,

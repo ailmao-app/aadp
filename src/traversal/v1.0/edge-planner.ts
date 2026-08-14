@@ -25,11 +25,51 @@ export interface PlannedTraversalEdge {
   plan: TraversalEdgePlan;
 }
 
+/**
+ * A paginated collection an adapter found, for the scheduler to page (edge
+ * matrix row 2).
+ *
+ * A collection link carries a page URL and no target identity, and its edges
+ * are one per item of each fetched page — producing them takes a request, which
+ * a pure adapter may not make. So the adapter reports WHERE the collection is
+ * and the scheduler decides whether and how far to page it.
+ */
+export interface TraversalCollectionPlan {
+  edgeGroup: string;
+  url: string;
+  declaredTargetType: string;
+  /** What every item of this collection must agree with — checked by the released client. */
+  expectation: { sourceId: string; sourceType: string; rel: string; targetType: string };
+}
+
+export interface PlannedTraversalCollection extends TraversalCollectionPlan {
+  extensionField: `x_${string}`;
+  adapter: TraversalAdapterKey;
+}
+
+/**
+ * INTERNAL capability, feature-detected on an adapter. Deliberately not part of
+ * the public `TraversalAdapter` contract frozen by ADR-0011: row 2 belongs to
+ * the Relations module alone at `1.0`, and widening the public adapter surface
+ * for it would freeze a second method into the SemVer surface for a case no
+ * third-party adapter has yet.
+ */
+export interface CollectionPlanningAdapter<TDoc = unknown> {
+  planCollections(document: TDoc, entity: EntityV1, context: TraversalPlanContext): TraversalCollectionPlan[];
+}
+
+function asCollectionPlanner(adapter: TraversalAdapter): CollectionPlanningAdapter | undefined {
+  const candidate = adapter as Partial<CollectionPlanningAdapter>;
+  return typeof candidate.planCollections === "function" ? (candidate as CollectionPlanningAdapter) : undefined;
+}
+
 export interface NodeExpansionPlan {
   /** One record per `x_*` field on the entity, in extension-field name order. */
   expansions: GraphExtensionExpansionV1[];
   /** Candidate edges in the order their adapters produced them. */
   edges: PlannedTraversalEdge[];
+  /** Collections for the scheduler to page, in the order their adapters found them. */
+  collections: PlannedTraversalCollection[];
   /** Every `x_*` carrying a readable module envelope, by adapter key rank. */
   modules: Array<{ id: string; version: string; extensionField: `x_${string}` }>;
 }
@@ -98,6 +138,7 @@ export function planNodeExpansions(
 
   const expansions: GraphExtensionExpansionV1[] = [];
   const edges: PlannedTraversalEdge[] = [];
+  const collections: PlannedTraversalCollection[] = [];
   const modules: NodeExpansionPlan["modules"] = [];
 
   for (const field of fields) {
@@ -146,12 +187,24 @@ export function planNodeExpansions(
     for (const plan of plans) {
       edges.push({ extensionField: field, adapter: adapter.key, plan });
     }
+
+    const planner = asCollectionPlanner(adapter);
+    const planned = planner ? planner.planCollections(parsed.document, entity, context) : [];
+    for (const collection of planned) {
+      collections.push({ ...collection, extensionField: field, adapter: adapter.key });
+    }
+
+    // A collection is planned work even before it is paged, so an extension
+    // whose only output is a collection is `planned`, not `no-edges` — the
+    // alternative would report "this extension had nothing to expand" about an
+    // extension that is about to produce edges.
+    const plannedEdges = plans.length + planned.length;
     expansions.push({
       key,
       extensionField: field,
       adapter: adapter.key,
-      outcome: plans.length > 0 ? "planned" : "no-edges",
-      plannedEdges: plans.length,
+      outcome: plannedEdges > 0 ? "planned" : "no-edges",
+      plannedEdges,
     });
   }
 
@@ -162,5 +215,5 @@ export function planNodeExpansions(
       compareCodePoints(a.extensionField, b.extensionField)
   );
 
-  return { expansions, edges, modules };
+  return { expansions, edges, collections, modules };
 }

@@ -16,8 +16,12 @@
  * the first walk expanded, making results depend on call history.
  */
 import type { EntityV1 } from "../../client/v1.0/index.js";
-import { canonicalTargetKey } from "../../modules/relations/v1.0/index.js";
-import { planNodeExpansions, type PlannedTraversalEdge } from "./edge-planner.js";
+import { canonicalTargetKey, type RelationTargetV1 } from "../../modules/relations/v1.0/index.js";
+import {
+  planNodeExpansions,
+  type PlannedTraversalCollection,
+  type PlannedTraversalEdge,
+} from "./edge-planner.js";
 import type { TraversalAdapterLookup } from "./registry.js";
 import type {
   EdgeExpansionOutcomeV1,
@@ -56,6 +60,21 @@ export interface TraversalNodeResolution {
  * as an opaque call made at most once per canonical key.
  */
 export type TraversalNodeResolver = (request: TraversalNodeRequest) => Promise<TraversalNodeResolution>;
+
+export interface TraversalCollectionRequest {
+  url: string;
+  expectation: { sourceId: string; sourceType: string; rel: string; targetType: string };
+  depth: number;
+}
+
+/**
+ * Pages one relation collection, yielding its item hints in wire order (edge
+ * matrix row 2). Backed by the released `iterateRelationCollection`, so cursor
+ * cycles, page validation and per-hop accounting are the module's own — there
+ * is no page limit here, because paging is bounded by the budget's six
+ * dimensions alone (ADR-0011 §12.1).
+ */
+export type TraversalCollectionPager = (request: TraversalCollectionRequest) => AsyncIterable<RelationTargetV1>;
 
 /* ------------------------------------------------------------------------- *
  * Edge group ranking (plan §"Ordering").
@@ -190,6 +209,8 @@ export interface TraversalWalkOptions {
   rootUrl: string;
   lookup: TraversalAdapterLookup;
   resolve: TraversalNodeResolver;
+  /** Absent means row 2 plans nothing — a walk with no way to page cannot follow a collection. */
+  pageCollection?: TraversalCollectionPager;
   maxDepth: number;
   followCollections: boolean;
   includeGeneratedSummarySources: boolean;
@@ -301,7 +322,13 @@ export async function* walkTraversal(
       options.lookup
     );
 
-    const scheduled: Occurrence[] = plan.edges.map((planned) => ({
+    // Row 2 is paged BEFORE any of this node's edges are settled, so a
+    // collection's items take their place in the schedule key like every other
+    // occurrence — emission order stays a function of the input, not of when a
+    // page happened to come back.
+    const fromCollections = await pageCollections(plan.collections, node, options, state);
+
+    const scheduled: Occurrence[] = [...plan.edges, ...fromCollections].map((planned) => ({
       planned,
       fromKey: node.key,
       landingDepth: node.depth + 1,
@@ -381,6 +408,70 @@ export async function runTraversalWalk(
     step = await walk.next();
   }
   return { events, references: step.value.references, summary: step.value.summary };
+}
+
+/**
+ * Pages every collection this node planned, turning each page item into a
+ * candidate edge of the `relations.collection` group.
+ *
+ * `index` runs across the whole edge group for this node — items of the first
+ * collection, then the second — so a consumer can trace an edge back to its
+ * position in the paged sequence. Budget exhaustion while paging ends the walk
+ * exactly as it does for any other request, and keeps the items already read.
+ */
+async function pageCollections(
+  collections: readonly PlannedTraversalCollection[],
+  node: PendingNode,
+  options: TraversalWalkOptions,
+  state: GraphTraversalState
+): Promise<PlannedTraversalEdge[]> {
+  const pager = options.pageCollection;
+  if (!pager || collections.length === 0) return [];
+
+  const planned: PlannedTraversalEdge[] = [];
+  for (const collection of collections) {
+    if (state.stopReason === "budget") break;
+    try {
+      for await (const target of pager({
+        url: collection.url,
+        expectation: collection.expectation,
+        depth: node.depth,
+      })) {
+        // Not counted in `progress.requests`: that counter tracks canonical
+        // target resolutions, and one page carries many items. The authoritative
+        // per-hop count is the budget's own, charged inside the released client.
+        planned.push({
+          extensionField: collection.extensionField,
+          adapter: collection.adapter,
+          plan: {
+            edgeGroup: collection.edgeGroup,
+            index: planned.length,
+            target,
+            declaredTargetType: collection.declaredTargetType,
+            expandable: true,
+          },
+        });
+      }
+    } catch (err) {
+      // A collection that cannot be paged stops that collection, not the node:
+      // its own items simply do not appear. A budget stop is global, though —
+      // the walk may make no further request at all.
+      if (isBudgetStop(err)) {
+        state.stopReason = "budget";
+        break;
+      }
+      if (isAbortStop(err)) throw err;
+    }
+  }
+  return planned;
+}
+
+function isBudgetStop(err: unknown): boolean {
+  return err instanceof Error && err.name === "AadpDiscoveryBudgetExceededError";
+}
+
+function isAbortStop(err: unknown): boolean {
+  return err instanceof Error && (err.name === "AbortedError" || err.name === "AbortError");
 }
 
 /** The declared module id of an extension traversal could not dispatch, for the summary tally. */

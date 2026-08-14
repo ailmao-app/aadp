@@ -12,6 +12,10 @@ import {
   type RelationSetV1,
 } from "../../../modules/relations/v1.0/index.js";
 import type {
+  CollectionPlanningAdapter,
+  TraversalCollectionPlan,
+} from "../edge-planner.js";
+import type {
   TraversalAdapter,
   TraversalEdgePlan,
   TraversalParseResult,
@@ -27,7 +31,7 @@ export const RELATIONS_COLLECTION_EDGE_GROUP = "relations.collection";
  * so the adapter declares the wildcard source kind; what rejects a malformed
  * payload is `validateRelationsDocument`, not a type check here.
  */
-export const relationsTraversalAdapter: TraversalAdapter<RelationSetV1> = {
+export const relationsTraversalAdapter = {
   key: {
     moduleId: "aadp:relations",
     moduleVersion: "1.0",
@@ -54,14 +58,9 @@ export const relationsTraversalAdapter: TraversalAdapter<RelationSetV1> = {
    * that flattened wire order for this edge group on this entity, so a consumer
    * can trace an edge back to the occurrence that produced it.
    *
-   * Row 2 (`items[].collection`) is deliberately NOT planned here. A collection
-   * link carries a page URL and no target identity, and its edges are one per
-   * item of each fetched page — producing them requires paging the collection,
-   * which is a request. Adapters are pure and cannot fetch (ADR-0011 §2), so
-   * collection edges belong to the scheduler, which reads
-   * `context.followCollections` when it pages. This adapter still declares the
-   * `relations.collection` edge group because those edges originate from its
-   * extension field.
+   * Row 2 (`items[].collection`) is reported by `planCollections` instead: its
+   * edges are one per item of each fetched page, and fetching is the
+   * scheduler's job.
    */
   planEdges(document: RelationSetV1, _entity: EntityV1, _context: TraversalPlanContext): TraversalEdgePlan[] {
     const plans: TraversalEdgePlan[] = [];
@@ -79,4 +78,42 @@ export const relationsTraversalAdapter: TraversalAdapter<RelationSetV1> = {
     }
     return plans;
   },
-};
+
+  /**
+   * Row 2 of the edge matrix. Reports every `items[].collection` so the
+   * scheduler can page it — still pure: it makes no request and only names
+   * where one would go.
+   *
+   * Gated on `context.followCollections` (default `false`, ADR-0011 §12.1): a
+   * collection can be arbitrarily large, so no release quietly widens a walk's
+   * fetch surface without the caller asking for it. There is no page limit —
+   * paging is bounded by the budget's six dimensions alone.
+   *
+   * `expectation` is what the released client checks every page against, so a
+   * collection endpoint cannot swap in items belonging to a different source or
+   * relation midway through paging.
+   */
+  planCollections(
+    document: RelationSetV1,
+    entity: EntityV1,
+    context: TraversalPlanContext
+  ): TraversalCollectionPlan[] {
+    if (!context.followCollections) return [];
+    const plans: TraversalCollectionPlan[] = [];
+    for (const item of document.items) {
+      if (!item.collection) continue;
+      plans.push({
+        edgeGroup: RELATIONS_COLLECTION_EDGE_GROUP,
+        url: item.collection.url,
+        declaredTargetType: item.target_type,
+        expectation: {
+          sourceId: entity.id,
+          sourceType: entity.type,
+          rel: item.rel,
+          targetType: item.target_type,
+        },
+      });
+    }
+    return plans;
+  },
+} satisfies TraversalAdapter<RelationSetV1> & CollectionPlanningAdapter<RelationSetV1>;
