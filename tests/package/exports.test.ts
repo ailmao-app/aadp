@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { packAndExtractTarball, cleanupTarball, BUILD_TIMEOUT_MS, type PackedTarball } from "./tarball-helpers.js";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { packAndExtractTarball, cleanupTarball, BUILD_TIMEOUT_MS, PACKED_IMPORT_TIMEOUT_MS, type PackedTarball } from "./tarball-helpers.js";
 
 /**
  * Locks the public export surface (AADP-COMPAT-001 §4.1): every subpath in
@@ -14,6 +14,8 @@ import { packAndExtractTarball, cleanupTarball, BUILD_TIMEOUT_MS, type PackedTar
  */
 
 let tarball: PackedTarball;
+
+vi.setConfig({ testTimeout: PACKED_IMPORT_TIMEOUT_MS });
 
 beforeAll(() => {
   tarball = packAndExtractTarball();
@@ -171,6 +173,20 @@ describe("published package: every public entry point resolves from the tarball"
       "EVIDENCE_CHECKS",
       "InvalidEvidenceConformanceOptionsError",
     ],
+    "traversal/v1.0": [
+      "registerBuiltinTraversalAdapters",
+      "registerTraversalAdapter",
+      "getTraversalAdapter",
+      "listTraversalAdapters",
+      "BUILTIN_TRAVERSAL_ADAPTERS",
+      "traverseGraphV1",
+      "collectGraphV1",
+      "InvalidGraphTraversalOptionsError",
+      // Conformance profile `aadp:graph-traversal@1.0`
+      "runGraphTraversalConformance",
+      "GRAPH_TRAVERSAL_CHECKS",
+      "InvalidGraphTraversalConformanceOptionsError",
+    ],
     "conformance": ["runConformance", "renderTextReport", "renderJsonReport", "renderJUnitReport", "exitCodeFor", "CHECKS", "collectAdvertisedUrls", "InvalidConformanceOptionsError", "UnsupportedConformanceVersionError", "SUPPORTED_CONFORMANCE_VERSIONS"],
     "server": ["defineAADP", "defineResource", "AadpServerError", "notFound", "invalidRequest", "unsupportedType", "upstreamUnavailable", "rateLimited", "unauthorized", "forbidden"],
     "scaffold": ["scaffoldInit", "scaffoldAddResource", "ScaffoldFileExistsError", "initTemplate", "resourceTemplate", "toCamelCase"],
@@ -210,6 +226,26 @@ describe("published package: every public entry point resolves from the tarball"
     const mod = await importFromTarball(".");
     for (const name of ["validateAnswerV1", "validateAnswerEntityV1", "registerAnswerModule", "answerSchema", "runAnswerConformance"]) {
       expect(mod, `"${name}" must not be re-exported from the package root`).not.toHaveProperty(name);
+    }
+  });
+
+  it("does not re-export traversal from the root or from any module subpath (ADR-0011 §11)", async () => {
+    const traversalNames = ["traverseGraphV1", "collectGraphV1", "registerBuiltinTraversalAdapters", "runGraphTraversalConformance"];
+    for (const subpath of [".", "modules/relations/v1.0", "modules/answer/v1.0", "modules/evidence/v1.0", "conformance"]) {
+      const mod = await importFromTarball(subpath);
+      for (const name of traversalNames) {
+        expect(mod, `"${name}" must not be reachable from ail-aadp/${subpath}`).not.toHaveProperty(name);
+      }
+    }
+  });
+
+  it("never exports the shared canonical-resolution layer (ADR-0011 §10)", async () => {
+    const internals = ["resolveCanonicalTarget", "budgetResolutionStateFor", "observeCanonicalResolutions", "releaseNode"];
+    for (const subpath of [".", "traversal/v1.0", "modules/relations/v1.0", "modules/answer/v1.0", "modules/evidence/v1.0"]) {
+      const mod = await importFromTarball(subpath);
+      for (const name of internals) {
+        expect(mod, `"${name}" is internal and must not be exported from ail-aadp/${subpath}`).not.toHaveProperty(name);
+      }
     }
   });
 

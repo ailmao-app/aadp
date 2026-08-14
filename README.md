@@ -564,6 +564,37 @@ AADP_BASE_URL=https://example.com \
   npx vitest run tests/conformance/v1.0/conformance.test.ts
 ```
 
+## Walk a cross-module graph
+
+`ail-aadp/traversal/v1.0` follows references across the Relations, Answer and Evidence modules from one root entity. It is a client-side capability, not a wire contract: nothing new appears on the wire, and [ADR-0011](docs/adr/0011-cross-module-graph-traversal.md) is its binding source.
+
+Importing the subpath registers nothing — a consumer opts in explicitly:
+
+```ts
+import { createRelationsTraversalBudget } from "ail-aadp/modules/relations/v1.0";
+import { registerBuiltinTraversalAdapters, traverseGraphV1 } from "ail-aadp/traversal/v1.0";
+
+registerBuiltinTraversalAdapters();
+
+const budget = createRelationsTraversalBudget({ maxDepth: 3, maxNodes: 100 });
+
+for await (const event of traverseGraphV1("https://example.com/ai/v1.0/entities/answer/pricing.json", { budget })) {
+  if (event.type === "edge") console.log(event.edge.edgeGroup, event.edge.outcome);
+  if (event.type === "complete") console.log(event.summary.stopReason, event.summary.partial);
+}
+```
+
+Use `collectGraphV1()` for the whole graph at once; it drains the same iterator, so the content and order are identical.
+
+Things worth knowing before you wire it into production:
+
+- **The budget is yours.** Traversal borrows it, never creates one, never raises a default and never adds a dimension. A 404, a blocked URL, an unsupported module or a malformed extension is an outcome on a node/edge/expansion record — not an exception. Invalid *options* do throw, before the first request.
+- **One budget means one request configuration.** The shared resolution layer keys a `UrlPolicy` by object identity, so two calls meant to share a budget must pass the very same policy instance — two structurally identical `createStrictUrlPolicy()` results are two different contexts and the second call is rejected.
+- **Collections and generated-summary sources are opt-in** (`followCollections`, `includeGeneratedSummarySources`), both default `false`. Paging is bounded by the budget alone; there is no page limit anywhere in this API.
+- **Exactly one `complete` event** ends a stream — unless you `break` out early, in which case cleanup runs and no outcome is declared. Check `summary.stopReason`/`summary.partial` rather than assuming the iterator ending means the walk finished.
+
+`runGraphTraversalConformance()` certifies a traversal implementation against ADR-0011. It runs against an in-package fixture matrix and makes no request, so it works offline in your own CI.
+
 ## Package exports
 
 | Import | Contents |
@@ -580,6 +611,7 @@ AADP_BASE_URL=https://example.com \
 | `ail-aadp/modules/relations/v1.0` | Relations Module v1.0 — types, schema/semantic validation, client/traversal, conformance |
 | `ail-aadp/modules/answer/v1.0` | Answer Module v1.0 — types, schema/semantic validation, entity-context validator, client, conformance |
 | `ail-aadp/modules/evidence/v1.0` | Evidence & Provenance Module v1.0 — claim/evidence types, schema/semantic validation, entity-context validator, graph client, conformance |
+| `ail-aadp/traversal/v1.0` | Cross-module graph traversal — adapter registry, streaming `traverseGraphV1()`/`collectGraphV1()`, `aadp:graph-traversal@1.0` conformance profile |
 | `ail-aadp/schemas/v1.0/*` | v1.0 JSON Schemas |
 | `ail-aadp/schemas/v0.1/*` | v0.1 JSON Schemas |
 | `ail-aadp/schemas/modules/relations/v1.0/*` | Relations Module v1.0 JSON Schemas |
