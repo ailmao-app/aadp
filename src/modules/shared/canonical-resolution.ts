@@ -35,7 +35,7 @@ import {
   UnsupportedAadpVersionError,
   BlockedUrlError,
 } from "../../client/v1.0/index.js";
-import { canonicalTargetKey, releaseNode } from "../relations/v1.0/client/budget.js";
+import { canonicalTargetKey, normalizeTargetUrl, releaseNode } from "../relations/v1.0/client/budget.js";
 import { resolutionContextDigest, type ResolutionContextOptions } from "./resolution-context.js";
 import type { EntityV1 } from "../../client/v1.0/types.js";
 import type { RelationTargetV1 } from "../relations/v1.0/types.js";
@@ -277,6 +277,13 @@ interface PendingFetch {
  */
 export interface BudgetResolutionState {
   outcomes: Map<string, CanonicalOutcome>;
+  /**
+   * Settled outcomes for URLs resolved without a declared id, keyed by
+   * normalized URL. Only a traversal root arrives that way; see
+   * `recordRootOutcome`. Kept beside `outcomes` rather than inside it because a
+   * failed root has no id, so it has no canonical key to occupy.
+   */
+  rootOutcomes: Map<string, CanonicalOutcome>;
   pending: Map<string, PendingFetch>;
   globalStops: Map<string, Error>;
   /**
@@ -391,6 +398,7 @@ export function budgetResolutionStateFor(
   if (!state) {
     const created: BudgetResolutionState = {
       outcomes: new Map(),
+      rootOutcomes: new Map(),
       pending: new Map(),
       globalStops: new Map(),
       contextDigest,
@@ -412,6 +420,64 @@ export function budgetResolutionStateFor(
 }
 
 /**
+ * Records the settled outcome of a URL resolved WITHOUT a declared id — the
+ * traversal root, and only it. Every other caller has a referring occurrence
+ * supplying `{id, url}` and goes through `resolveCanonicalTarget`.
+ *
+ * A root is fetched before its id is known, so it cannot be keyed canonically up
+ * front. Both halves are recorded here:
+ *
+ * - **always** under the normalized URL, so a later walk on this budget replays
+ *   it — including a stable `not-found`/`forbidden`/`invalid`, which must not be
+ *   re-requested on every walk any more than a success is. Without this, a
+ *   repeat walk could turn a settled `not-found` into `budget-exhausted` purely
+ *   because of call history;
+ * - **additionally** under the canonical `{id, url}` key on success, so an edge
+ *   elsewhere in the graph pointing back at the root meets an already-settled
+ *   target instead of paying for it again.
+ *
+ * Never overwrites: a key settles once per budget, and letting a later writer
+ * replace it would reintroduce exactly the order-dependent result this shared
+ * state exists to prevent.
+ */
+export function recordRootOutcome(state: BudgetResolutionState, url: string, outcome: CanonicalOutcome): void {
+  const normalized = normalizeTargetUrl(url);
+  if (!state.rootOutcomes.has(normalized)) state.rootOutcomes.set(normalized, outcome);
+  if (outcome.ok) {
+    const key = canonicalTargetKey(outcome.entity.id, url);
+    if (!state.outcomes.has(key)) state.outcomes.set(key, outcome);
+  }
+}
+
+/**
+ * Replays a settled outcome for a bare URL, for that same root-shaped caller.
+ *
+ * Checks the root index first, then falls back to scanning settled canonical
+ * outcomes — so a URL first met as an edge target (which did carry an id) is
+ * replayed too, rather than being fetched again merely because this walk arrived
+ * at it as a root.
+ *
+ * An in-flight fetch is deliberately never joined here: a URL alone cannot prove
+ * it is the same canonical target the pending fetch will produce. A settled
+ * normalized-URL match is unambiguous — one URL serves at most one entity, and
+ * the id half of a canonical key came from the document that URL returned.
+ */
+export function replaySettledOutcomeForUrl(
+  state: BudgetResolutionState,
+  url: string
+): CanonicalOutcome | undefined {
+  const normalized = normalizeTargetUrl(url);
+  const root = state.rootOutcomes.get(normalized);
+  if (root) return root;
+  for (const [key, outcome] of state.outcomes) {
+    // Key layout is `${id}\0${normalizedUrl}` — compare the URL half only.
+    const separator = key.indexOf("\0");
+    if (separator !== -1 && key.slice(separator + 1) === normalized) return outcome;
+  }
+  return undefined;
+}
+
+/**
  * One canonical target's resolution as seen by a caller: either a settled
  * canonical outcome, or a global stop (budget exhaustion / this caller's own
  * abort) that ends the caller's whole remaining walk with a partial result.
@@ -420,13 +486,22 @@ export function budgetResolutionStateFor(
  * contract.
  */
 export type CanonicalResolution =
-  | { status: "outcome"; outcome: CanonicalOutcome }
-  | { status: "stopped"; message: string };
+  | { status: "outcome"; outcome: CanonicalOutcome; started: boolean }
+  | { status: "stopped"; message: string; started: boolean };
 
 /**
  * Resolves `target` through the budget's shared state: replays a settled
  * outcome, joins an in-flight fetch, or starts one — exactly once per
  * canonical key for the lifetime of the budget.
+ *
+ * `started` reports the decision THIS invocation made, at the moment it made it:
+ * `true` only for the call that actually created the fetch, `false` for a cache
+ * replay, for joining a fetch already in flight, and for a call that stopped
+ * before starting anything. It is reported from inside the synchronous
+ * decision point rather than left for the caller to infer: asking a predicate
+ * first and acting afterwards is a check-then-act race, and two concurrent
+ * walks sharing a budget would both conclude they had started the same
+ * resolution.
  *
  * `seedTargetType` is only the type whichever reference triggered the fetch
  * declared; it is NOT applied to the returned outcome. A caller MUST
@@ -458,13 +533,13 @@ export async function resolveCanonicalTarget(
     // the key visited before the throw) and misreport it `invalid`. See
     // `BudgetResolutionState.globalStops`.
     observe("stopped");
-    return { status: "stopped", message: priorStop.message };
+    return { status: "stopped", message: priorStop.message, started: false };
   }
 
   const settled = outcomes.get(key);
   if (settled) {
     observe("cache");
-    return { status: "outcome", outcome: settled };
+    return { status: "outcome", outcome: settled, started: false };
   }
 
   // No settled outcome yet. Join an in-flight fetch for this canonical key
@@ -479,9 +554,15 @@ export async function resolveCanonicalTarget(
   let entry = pending.get(key);
   if (!entry && options.signal?.aborted) {
     observe("stopped");
-    return { status: "stopped", message: new AbortedError(target.url, options.signal.reason).message };
+    return {
+      status: "stopped",
+      message: new AbortedError(target.url, options.signal.reason).message,
+      started: false,
+    };
   }
-  observe(entry ? "join" : "fetch");
+  // The decision, taken here and reported as taken — no caller may re-derive it.
+  const started = entry === undefined;
+  observe(started ? "fetch" : "join");
   if (!entry) {
     const controller = new AbortController();
     const promise = fetchCanonicalTarget(target, seedTargetType, options, controller.signal, context);
@@ -526,9 +607,9 @@ export async function resolveCanonicalTarget(
 
   entry.waiters++;
   try {
-    return { status: "outcome", outcome: await raceSignal(entry.promise, options.signal, target.url) };
+    return { status: "outcome", outcome: await raceSignal(entry.promise, options.signal, target.url), started };
   } catch (err) {
-    if (isGlobalStop(err)) return { status: "stopped", message: (err as Error).message };
+    if (isGlobalStop(err)) return { status: "stopped", message: (err as Error).message, started };
     throw err;
   } finally {
     entry.waiters--;

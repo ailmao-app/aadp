@@ -71,6 +71,7 @@ contract. Such a change requires a new protocol version and an ADR.
 - [ADR-0008: Module traversal and authorization](adr/0008-module-traversal-and-authorization.md)
 - [ADR-0009: Answer Module terminology and security boundary](adr/0009-answer-module-terminology-and-security.md)
 - [ADR-0010: Evidence Module citation, provenance and security boundary](adr/0010-evidence-citation-provenance-and-security.md)
+- [ADR-0011: Cross-module graph traversal](adr/0011-cross-module-graph-traversal.md) — **Proposed**
 
 ADRs retain the Context/Decision/Consequences format. They are not rewritten as
 protocol specifications.
