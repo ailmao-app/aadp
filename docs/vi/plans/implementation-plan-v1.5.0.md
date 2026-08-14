@@ -4,7 +4,7 @@
 
 | Thuộc tính | Giá trị |
 |---|---|
-| Trạng thái | Implementation Draft — Phase 0 **Complete** ([ADR-0011](../../adr/0011-cross-module-graph-traversal.md) **Accepted** 2026-08-12, type gate `npm run test:types` pass); Phase 1-2 `Ready`, Phase 3-6 vẫn chặn theo dependency riêng |
+| Trạng thái | **Complete** (2026-08-14) — Phase 0-6 đóng. [ADR-0011](../../adr/0011-cross-module-graph-traversal.md) **Accepted** 2026-08-12, **amended** 2026-08-14 (§11: gate Phase 6 là **một** production data set). Bằng chứng ở [implementation record 1.5.0](../../records/implementation-record-v1.5.0.md) |
 | Chủ đề | Cross-module graph traversal và composition |
 | Dependency | Relations `1.0`, Answer `1.0`, Evidence `1.0` stable — bằng chứng ở [implementation record 1.4.0](../../records/implementation-record-v1.4.0.md), mục "Closed gates" và "External interoperability evidence (closed 2026-08-10)" |
 | Wire impact | KHÔNG đổi core schema, KHÔNG đổi `aadp:relations@1.0`, `aadp:answer@1.0`, `aadp:evidence@1.0`. Chỉ thêm package API mới (minor bump theo [roadmap §1](release-roadmap.md)) |
@@ -29,12 +29,12 @@ Bảng per-work-item bắt buộc theo [document conventions §4](../../document
 | # | Work package | Trạng thái | Điều kiện mở khóa |
 |---:|---|---|---|
 | 0 | [ADR-0011](../../adr/0011-cross-module-graph-traversal.md) cross-module traversal | **`Complete`** (2026-08-12) | Đã đóng: ba open question chốt ở [ADR §12](../../adr/0011-cross-module-graph-traversal.md), type gate `npm run test:types` pass, ADR `Accepted` |
-| 1 | Traversal adapter registry + capability negotiation | **`Ready`** | Phase 0 ✓ |
-| 2 | Edge matrix + traversal state machine | **`Ready`** | Phase 0 ✓ |
-| 3 | Streaming API + deterministic ordering | `Blocked` | Phase 2 (Phase 0 ✓) |
-| 4 | Shared budget/accounting contract | `Blocked` | Phase 2 (Phase 0 ✓) |
-| 5 | Conformance profile `aadp:graph-traversal@1.0` | `Blocked` | Phase 1-4 |
-| 6 | Two neutral data sets + interoperability run | `Blocked` | Phase 5 + owner/deployment được định danh (§"Release gate") |
+| 1 | Traversal adapter registry + capability negotiation | **`Complete`** (2026-08-14) | Registry exact-match, per-call adapter set, capability allowlist; test đầy đủ |
+| 2 | Edge matrix + traversal state machine | **`Complete`** (2026-08-14) | Đủ 5 hàng edge matrix, root identity, walk-local expansion, cycle vs fan-in |
+| 3 | Streaming API + deterministic ordering | **`Complete`** (2026-08-14) | `traverseGraphV1`/`collectGraphV1`, bounded buffer, terminal `complete`, ordering độc lập timing |
+| 4 | Shared budget/accounting contract | **`Complete`** (2026-08-14) | Budget do caller sở hữu, shared canonical resolution, hai đơn vị accounting tách bạch |
+| 5 | Conformance profile `aadp:graph-traversal@1.0` | **`Complete`** (2026-08-14) | 26 check ID ổn định, public subpath `ail-aadp/traversal/v1.0` |
+| 6 | Một production data set + interoperability run | **`Complete`** (2026-08-14) | AI Lmao public graph, packed-tarball clean install, Node 20.18.1; report ghi trong implementation record |
 
 ## Mục tiêu
 
@@ -503,13 +503,23 @@ export interface CrossModuleGraphV1<T = unknown> {
 }
 
 export interface GraphTraversalSummaryV1 {
-  /** Lý do dừng. `"exhausted"` = đã thử hết mọi edge đã lên lịch. */
+  /** Scheduler kết thúc THẾ NÀO. `"exhausted"` = đã thử hết mọi edge đã lên lịch. */
   stopReason: "exhausted" | "budget" | "aborted";
-  /** true với mọi `stopReason` khác `"exhausted"`. */
+  /**
+   * Graph có THIẾU gì không — độc lập với `stopReason` (ADR-0011 §9). true với
+   * budget stop, abort, VÀ recoverable branch failure (vd collection không page
+   * được) dù scheduler vẫn `exhausted`.
+   */
   partial: boolean;
   nodes: number;
   /** Gồm CẢ edge bị chặn trước fetch (depth-limit/cycle/already-expanded/budget). */
   edges: number;
+  /**
+   * Số logical canonical-target resolution mà CHÍNH walk này bắt đầu. KHÔNG đếm
+   * cache hit, join vào fetch đang bay, collection page, retry/redirect hop.
+   * Số HTTP attempt vật lý nằm ở `budget.requestsMade` do caller sở hữu
+   * ([ADR-0011 §9](../../adr/0011-cross-module-graph-traversal.md) "Two accounting units").
+   */
   requests: number;
   /** Số expansion record `unsupported-module`, theo module id khai trong payload. */
   unsupportedModules: Record<string, number>;
@@ -781,6 +791,7 @@ resolution-context digest của mọi fetch trong walk nhất quán.
   | `graph.ordering.mixed_order_equivalence` | Đảo thứ tự reference cho cùng graph và cùng số request | error |
   | `graph.budget.no_double_charge` | Fan-in ⇒ 1 node charge, 1 request | error |
   | `graph.budget.partial_not_complete` | Dừng vì budget ⇒ `partial: true`, `stopReason: "budget"` | error |
+  | `graph.traversal.collection_failure_partial` | Collection không page được (404/blocked/schema/cursor-cycle) ⇒ `stopReason: "exhausted"` nhưng `partial: true`; nhánh khác vẫn emit đủ ([ADR-0011 §9](../../adr/0011-cross-module-graph-traversal.md)) | error |
   | `graph.budget.no_request_after_abort` | Sau abort, request count không tăng | error |
   | `graph.streaming.terminal_event` | `complete` phát đúng một lần | error |
   | `graph.streaming.bounded_memory` | Buffer không vượt `maxBufferedEvents` | warning |
@@ -800,10 +811,12 @@ resolution-context digest của mọi fetch trong walk nhất quán.
   `x_evidence`, depth boundary (`maxDepth=0`, landing `== maxDepth`, landing
   `> maxDepth`), unsupported module, unsupported version, budget stop, abort,
   collection paging.
-- Hai neutral data set (Phase 6) phải có **tên, URL và owner cụ thể ghi trong
-  implementation record** trước khi gate được coi là đóng; "hai data set" không có
-  định danh thì không tái lập và không audit được. Data set MUST do hai bên khác
-  nhau vận hành, và ít nhất một bên không phải AADP maintainers.
+- Một production data set (Phase 6) phải có **tên, HTTPS URL và owner cụ thể ghi
+  trong implementation record** trước khi gate được coi là đóng; data set không
+  có định danh thì không tái lập và không audit được. Theo amendment ADR-0011 ngày
+  2026-08-14, external owner không còn là release prerequisite. Trade-off được
+  chấp nhận: gate chứng minh packed client chạy end-to-end với deployment HTTPS
+  thật, không chứng minh independent-owner interoperability.
 
 ## Typed API contract
 
@@ -948,7 +961,8 @@ resolution layer.
 - Partial result không bị báo complete: `complete` luôn mang `stopReason`/`partial`.
 - Core-only/single-module consumer không regression: `graph.compat.core_only_unchanged`
   xanh, và **toàn bộ test Relations/Answer/Evidence hiện có pass mà không sửa một dòng**.
-- Hai neutral data set đạt interoperability tests, với tên/URL/owner ghi trong
+- Một production data set đạt interoperability test từ packed-tarball clean
+  install tại Node floor, với tên/HTTPS URL/owner và raw report ghi trong
   implementation record `1.5.0`.
 - ADR-0011 Accepted trước mọi artifact của Phase 1-6.
 
@@ -961,5 +975,6 @@ resolution layer.
   ở [ADR-0011 §12.1](../../adr/0011-cross-module-graph-traversal.md): default
   `false`, không có `maxPages`, paging chỉ bị chặn bởi budget. Rủi ro còn lại là
   của caller nào opt in — mỗi page tiêu budget như mọi fetch khác.
-- Hai neutral data set và owner của chúng chưa được định danh — đây là gate về
-  môi trường/nhân sự, không phải code, giống hệt gate đã kéo từ `1.3.0` sang `1.4.0`.
+- Gate một production data set đã đóng bằng AI Lmao public graph. Rủi ro còn lại
+  được chấp nhận là chưa có evidence từ owner/operator độc lập; một external run
+  tương lai có thể bổ sung bằng chứng mà không thay đổi release gate.

@@ -2,10 +2,17 @@
 
 ## Status
 
-**Accepted** (2026-08-12) — for package `ail-aadp@1.5.0`. Accepted after §12
-settled the three questions this ADR carried while `Proposed`, and after the
-Phase 0 type gate (`npm run test:types`) proved the whole public surface below
-compiles against the released Relations/Answer/Evidence `1.0` types.
+**Accepted** (2026-08-12), **amended** (2026-08-14) — for package
+`ail-aadp@1.5.0`. Accepted after §12 settled the three questions this ADR carried
+while `Proposed`, and after the Phase 0 type gate (`npm run test:types`) proved
+the whole public surface below compiles against the released
+Relations/Answer/Evidence `1.0` types.
+
+Two amendments were made on 2026-08-14, both at maintainer direction and both
+recorded where they apply: §9 separates `partial` from `stopReason`, so a
+recoverable branch failure is never reported as a complete graph; §11 reduces the
+Phase 6 interoperability gate from two independently operated data sets to one
+named production data set, with the narrowed claim stated explicitly there.
 
 The gate as committed at acceptance was **incomplete**: it omitted
 `GraphNodeV1.expansions`, and the plan's contract left `TraversalPlanContext` and
@@ -369,6 +376,49 @@ conformance check, exercised with responses completing in reverse order.
 including budget exhaustion and abort, so a consumer never has to infer
 completeness from the iterator merely ending.
 
+The two fields answer **different questions** and are deliberately independent:
+
+- `stopReason` describes how the scheduler finished — it ran out of scheduled
+  work, the budget stopped it, or the caller aborted it.
+- `partial` states whether the graph is missing anything the walk set out to
+  produce.
+
+`partial` MUST be `true` for a budget stop, for an abort, **and** for a
+recoverable branch failure that left work unreported — the case that forced this
+amendment is a `relations.collection` that could not be paged (404, blocked URL,
+malformed page, cursor cycle): the scheduler really did exhaust its queue, yet a
+whole branch is absent from the graph.
+
+`exhausted` therefore no longer implies `partial: false`. The alternative
+considered was a fourth `stopReason` for truncation, and it was rejected: the
+scheduler's own ending is accurately described by the three existing values, and
+a consumer asking "can I treat this graph as complete?" must not have to
+enumerate stop reasons to find out. The three-value `stopReason` vocabulary is
+unchanged, so no released enum grows.
+
+A conformance check (`graph.traversal.collection_failure_partial`) pins this.
+
+#### Two accounting units, deliberately not merged
+
+`summary.requests` and the budget's own counter measure different things, and
+neither is derivable from the other:
+
+| Counter | Scope | Counts |
+|---|---|---|
+| `summary.requests` | this graph walk alone | logical canonical-target resolutions the walk STARTED |
+| `budget.requestsMade` | the whole caller-owned shared budget | physical HTTP attempts — original attempt, retries, redirect hops and collection pages |
+
+`summary.requests` MUST NOT increase for a cache hit, for joining a resolution
+already in flight, for a collection-page fetch, for a retry or redirect hop of
+one resolution, or for HTTP work spent on the budget before this walk began.
+
+The summary describes the graph walk's logical work, and a canonical resolution
+is the unit that matches graph semantics: one logical resolution may produce
+zero, one or many HTTP attempts depending on cache, retry and redirect. Transport
+accounting already has an authoritative home on the budget the caller owns, so
+restating it here would mix two layers and force the pager and HTTP layers to
+emit accounting that only duplicates a counter that already exists.
+
 There is deliberately **no total-event limit**: `maxBufferedEvents` bounds the
 buffer, and the budget's six dimensions bound the work. A third limit would add
 another partial-stop path to account for and test while bounding no additional
@@ -415,10 +465,21 @@ and `graph.compat.*`; message text is not.
 this profile puts nothing on the wire, so it is not a protocol surface and it
 does not make this ADR a wire contract.
 
-The "two neutral data sets" release gate is only closed when both data sets are
-recorded by **name, URL and owner** in the `1.5.0` implementation record, with at
-least one owner outside the AADP maintainers. An unnamed data set is neither
-reproducible nor auditable.
+The Phase 6 release gate is closed by **one real production data set**, recorded
+by name, HTTPS URL and owner in the `1.5.0` implementation record and exercised
+from a packed-tarball clean install at the supported Node floor. An unnamed data
+set is neither reproducible nor auditable.
+
+This is an amendment made by maintainer direction on 2026-08-14. The original
+Accepted text required two data sets operated by different parties, with at
+least one owner outside the AADP maintainers. That stronger condition was
+rejected as a release prerequisite because no independent operator was
+available: it made release timing depend on external participation rather than
+on a property the package could verify. The accepted trade-off is explicit: one
+production run proves the packed client interoperates end to end with a real
+HTTPS deployment, but it does **not** prove independent implementation or
+independent-owner interoperability. A future external run may strengthen the
+evidence without reopening or weakening this gate.
 
 ### 12. Settled before acceptance: paging, concurrency, specification
 

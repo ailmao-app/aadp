@@ -1,0 +1,186 @@
+{
+  "phase": "1.5.0 Phase 6 — neutral interoperability",
+  "data_set": {
+    "name": "AI Lmao Public Knowledge Graph",
+    "url": "https://ailmao.com/ai/v1.0/entities/answer/what-is-ai-lmao.json",
+    "owner": "Trong Nhan / AI Lmao",
+    "operated_by_aadp_maintainers": true
+  },
+  "run": {
+    "node_version": "v20.20.2",
+    "tarball": "ail-aadp-1.4.0.tgz",
+    "tarball_digest": "sha256:4bbd7826302bbbaf3a29001e6bd40f7e88f4588609783595f9de80de7eb44550",
+    "clean_install": "yes",
+    "command": "node scripts/run-traversal-interop.mjs --name AI Lmao Public Knowledge Graph --url https://ailmao.com/ai/v1.0/entities/answer/what-is-ai-lmao.json --owner Trong Nhan / AI Lmao --maintainer-operated true",
+    "node_engines_floor": "20.18.1",
+    "node_at_engines_floor": false,
+    "imports": [
+      "ail-aadp/traversal/v1.0",
+      "ail-aadp/modules/relations/v1.0"
+    ],
+    "started_at": "2026-08-14T13:14:02.646Z",
+    "finished_at": "2026-08-14T13:14:03.961Z",
+    "duration_ms": 1315
+  },
+  "budget": {
+    "effective_limits": {
+      "maxDepth": 3,
+      "maxNodes": 50,
+      "maxRequests": 100,
+      "maxTotalBytes": 67108864,
+      "maxCrossOriginRequests": 100,
+      "deadlineMs": 300000
+    },
+    "requested_limits": {
+      "maxDepth": 3,
+      "maxNodes": 50,
+      "maxRequests": 100
+    },
+    "nodesVisited": 4,
+    "requestsMade": 4,
+    "crossOriginRequestsMade": 0,
+    "bytesFetched": 4870
+  },
+  "accounting": {
+    "summary_requests": 4,
+    "budget_requests_made": 4
+  },
+  "graph": {
+    "summary": {
+      "stopReason": "exhausted",
+      "partial": false,
+      "nodes": 4,
+      "edges": 3,
+      "requests": 4,
+      "unsupportedModules": {}
+    },
+    "nodes": [
+      {
+        "key": "answer:what-is-ai-lmao\u0000https://ailmao.com/ai/v1.0/entities/answer/what-is-ai-lmao.json",
+        "depth": 0,
+        "status": "resolved"
+      },
+      {
+        "key": "claim:ailons-are-fictional\u0000https://ailmao.com/ai/v1.0/entities/claim/ailons-are-fictional.json",
+        "depth": 1,
+        "status": "resolved"
+      },
+      {
+        "key": "evidence:terms-of-service\u0000https://ailmao.com/ai/v1.0/entities/evidence/terms-of-service.json",
+        "depth": 2,
+        "status": "resolved"
+      },
+      {
+        "key": "evidence:about-page\u0000https://ailmao.com/ai/v1.0/entities/evidence/about-page.json",
+        "depth": 2,
+        "status": "resolved"
+      }
+    ],
+    "edges": [
+      {
+        "edgeGroup": "answer.related_entity",
+        "index": 0,
+        "outcome": "expanded",
+        "status": "resolved"
+      },
+      {
+        "edgeGroup": "evidence.evidence_ref",
+        "index": 0,
+        "outcome": "leaf",
+        "status": "resolved"
+      },
+      {
+        "edgeGroup": "evidence.evidence_ref",
+        "index": 1,
+        "outcome": "leaf",
+        "status": "resolved"
+      }
+    ],
+    "expansions": [
+      {
+        "extensionField": "x_answer",
+        "outcome": "planned",
+        "plannedEdges": 1
+      },
+      {
+        "extensionField": "x_evidence",
+        "outcome": "planned",
+        "plannedEdges": 2
+      }
+    ]
+  },
+  "conformance_profile": {
+    "status": "passed",
+    "summary": {
+      "total": 26,
+      "passed": 26,
+      "failed": 0,
+      "warnings": 0,
+      "skipped": 0,
+      "inconclusive": 0
+    },
+    "package_version": "1.4.0"
+  },
+  "failure": null,
+  "acceptance_checks": [
+    {
+      "id": "walk.did_not_throw",
+      "required": true,
+      "passed": true
+    },
+    {
+      "id": "walk.produced_graph",
+      "required": true,
+      "passed": true
+    },
+    {
+      "id": "graph.root_resolved",
+      "required": true,
+      "passed": true,
+      "message": "root status resolved"
+    },
+    {
+      "id": "graph.exhausted",
+      "required": true,
+      "passed": true,
+      "message": "stopReason exhausted"
+    },
+    {
+      "id": "graph.not_partial",
+      "required": true,
+      "passed": true,
+      "message": "partial false"
+    },
+    {
+      "id": "profile.passed",
+      "required": true,
+      "passed": true,
+      "message": "profile passed, 0 failed"
+    },
+    {
+      "id": "budget.six_limits_recorded",
+      "required": true,
+      "passed": true,
+      "message": "recorded maxDepth, maxNodes, maxRequests, maxTotalBytes, maxCrossOriginRequests, deadlineMs"
+    },
+    {
+      "id": "run.real_deployment",
+      "required": true,
+      "passed": true
+    },
+    {
+      "id": "run.clean_install",
+      "required": true,
+      "passed": true
+    },
+    {
+      "id": "run.at_engines_floor",
+      "required": false,
+      "passed": false,
+      "message": "ran above the engines.node floor"
+    }
+  ],
+  "failed_checks": [],
+  "eligible_for_release_gate": true,
+  "result": "passed"
+}
