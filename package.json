@@ -109,6 +109,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
+    "test:types": "tsc -p tests/types/tsconfig.json",
     "validate": "node dist/validator/cli.js",
     "conformance": "node dist/conformance/cli.js",
     "docs:check": "node scripts/check-doc-links.mjs",

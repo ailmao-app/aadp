@@ -8,8 +8,8 @@
 | Phạm vi | npm package từ `1.0.8` đến `2.0.0` |
 | Owner quyết định | AADP maintainers |
 | Wire contract hiện hành | AADP `1.0` |
-| Release hiện hành | `ail-aadp@1.1.0`, AADP wire `1.0` |
-| Plan đang chuẩn bị | [`implementation-plan-v1.2.0.md`](implementation-plan-v1.2.0.md) |
+| Release hiện hành | `ail-aadp@1.4.0`, AADP wire `1.0` |
+| Plan đang chuẩn bị | [`implementation-plan-v1.5.0.md`](implementation-plan-v1.5.0.md) |
 
 ## 1. Quy tắc versioning
 
@@ -47,10 +47,10 @@ Không tạo release rỗng chỉ để đạt số version trong roadmap. Patch
 | `1.0.11` | Production certification và release operations | Đã phát hành | Không |
 | `1.1.0` | Bounded traversal controls và conformance profiles | Đã phát hành | Không đổi core schema |
 | `1.1.x` | Stabilization cho public API 1.1 | Có điều kiện | Không |
-| `1.2.0` | Module infrastructure và Relations pilot | Implementation Ready | Extension/module riêng |
-| `1.3.0` | Answer Module | Chờ Relations ổn định | Module riêng |
-| `1.4.0` | Evidence & Provenance Module | Implementation xong; chờ external conformance run | Module riêng |
-| `1.5.0` | Cross-module graph traversal và composition | Chờ ba module ổn định | Không đổi core schema |
+| `1.2.0` | Module infrastructure và Relations pilot | Đã phát hành (2026-08-06) | Extension/module riêng |
+| `1.3.0` | Answer Module | Đã phát hành (2026-08-06); `1.3.1` security patch (2026-08-08) | Module riêng |
+| `1.4.0` | Evidence & Provenance Module | Gates closed (2026-08-10); chờ release verification trên commit được tag | Module riêng |
+| `1.5.0` | Cross-module graph traversal và composition | Phase 0 xong (ADR-0011 Accepted), đang implement | Không đổi core schema |
 | `1.6.0` | Experimental AI Usage Policy | Chờ ADR và legal review | `x_ai_usage` experimental |
 | `1.7.0` | Auth-aware retrieval helpers | Chờ security ADR | Không đổi manifest schema |
 | `1.8.0` | Certification và implementation attestations | Chờ nhiều implementation | Report/profile contract |
@@ -329,11 +329,15 @@ sửa artifact đã công bố.
 
 ## 12. Release 1.4.0 — Evidence & Provenance Module
 
-Trạng thái: **implementation hoàn tất**, ADR-0010 Accepted (2026-08-09),
-specification/conformance nay là normative. Gate còn lại duy nhất là external
-conformance run trên deployment HTTPS thật (kế thừa từ `1.3.0`, xem §10) — cần
-môi trường và owner, không phải code. Chi tiết ở
-[implementation record 1.4.0](../../records/implementation-record-v1.4.0.md).
+Trạng thái: **implementation hoàn tất và toàn bộ gate đã đóng**. ADR-0010 Accepted
+(2026-08-09), specification/conformance nay là normative. Gate external
+conformance kế thừa từ `1.3.0` (xem §10) **đã đóng ngày 2026-08-10**: run thật
+trên deployment HTTPS, clean install từ packed tarball trên Node engine floor,
+cả report Answer `1.0` lẫn Evidence `1.0` đều `passed`. Record ghi rõ "Open gates:
+None"; việc còn lại trước khi tag là release verification thông thường trên đúng
+commit được tag, không phải gate. Bằng chứng ở
+[implementation record 1.4.0](../../records/implementation-record-v1.4.0.md),
+mục "Closed gates" và "External interoperability evidence (closed 2026-08-10)".
 
 Issue coverage:
 
@@ -379,12 +383,26 @@ reporting và conformance correctness. Không thêm vocabulary wire mới trong 
 
 ## 14. Release 1.5.0 — Cross-module graph traversal
 
+Trạng thái: **Implementation Draft**, Phase 0 đã đóng. Chi tiết
+và toàn bộ contract ở
+[implementation plan 1.5.0](implementation-plan-v1.5.0.md).
+
+Dependency đã xanh: Relations `1.0`, Answer `1.0`, Evidence `1.0` stable, và gate
+external interoperability của `1.4.0` đã đóng ngày 2026-08-10 — xem §12 và
+[implementation record 1.4.0](../../records/implementation-record-v1.4.0.md).
+[ADR-0011](../../adr/0011-cross-module-graph-traversal.md) đã **Accepted** ngày
+2026-08-12: ba open question được chốt ở §12 (collection default `false` và
+không có `maxPages`, `concurrency` không public, không publish specification
+riêng), và type gate `npm run test:types` đã pass. Runtime implementation của
+Phase 1-2 được phép bắt đầu từ commit acceptance trở đi.
+
 Mục tiêu: cung cấp application service/client orchestration thống nhất sau khi
 Relations, Answer và Evidence đều ổn định.
 
 Candidate scope:
 
-- Module registry và capability negotiation qua module ID/version.
+- Traversal adapter registry (tách khỏi module registry validation-only) và
+  capability negotiation exact-match qua module ID/version.
 - Typed traversal plan: entity → relations → answer → claim/evidence/source.
 - Shared depth/request/entity/byte/deadline budget.
 - Cross-module cycle guard và deduplication theo canonical target.
@@ -399,9 +417,9 @@ consumer command
       │
       ▼
 graph traversal service
-      ├── module registry
-      ├── traversal/budget policy
-      ├── dedupe/cycle guard
+      ├── traversal adapter registry   (capability + expand)
+      ├── traversal/budget policy      (budget do caller sở hữu)
+      ├── dedupe/cycle guard           (shared canonical resolution, keyed by budget)
       └── typed partial result
       │
       ▼
@@ -415,9 +433,11 @@ Release gate:
 
 - Không có unbounded traversal/memory accumulation.
 - Core-only và single-module consumer không regression.
-- Deterministic ordering hoặc ordering semantics được tài liệu hóa.
+- Deterministic ordering không phụ thuộc timing, có test đảo thứ tự hoàn tất.
 - Partial/inconclusive result không bị báo thành conformant hoàn chỉnh.
-- Interoperability test với ít nhất hai reference data sets trung lập.
+- Interoperability test với ít nhất hai reference data sets trung lập, mỗi data
+  set có **tên, URL và owner ghi trong implementation record**; ít nhất một owner
+  không phải AADP maintainers.
 
 ## 15. Release 1.5.x — Cross-module stabilization
 

@@ -55,11 +55,12 @@ function referencedRepoPaths(command: string): string[] {
   return command.split(/\s+/).filter((token) => /^[\w.@-]+(?:\/[\w.@-]+)+\.[a-z]+$/i.test(token));
 }
 
-// `build` and `test` are development-only entry points that run
+// `build` and the `test*` scripts are development-only entry points that run
 // devDependency binaries (tsc, vitest) a consumer install never has, so
-// requiring their config to be packaged would prove nothing.
+// requiring their config to be packaged would prove nothing. `test:types`
+// additionally reads `tests/`, which is deliberately not published.
 const consumerRunnable = Object.entries(pkg.scripts).filter(
-  ([name]) => name !== "build" && name !== "test"
+  ([name]) => name !== "build" && name !== "test" && !name.startsWith("test:")
 );
 
 describe("published package: every npm script's files are actually packaged", () => {
