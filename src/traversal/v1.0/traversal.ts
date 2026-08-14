@@ -11,9 +11,12 @@ import {
   fetchEntity,
   AadpRequestError,
   AadpSchemaValidationError,
+  AbortedError,
   type EntityV1,
 } from "../../client/v1.0/index.js";
+import { AadpDiscoveryBudgetExceededError } from "../../client/discovery-budget.js";
 import { BlockedUrlError } from "../../client/url-policy.js";
+import { chargeNode, crossOriginAttemptHook } from "../../modules/relations/v1.0/client/budget.js";
 import {
   budgetResolutionStateFor,
   resolveCanonicalTarget,
@@ -30,6 +33,11 @@ import {
 import type { GraphTraversalEventV1, GraphTraversalOptions } from "./types.js";
 
 const CONTEXT = "traverseGraphV1";
+
+/** A cancellation raised by the caller's own signal, not a failure of the walk. */
+function isAbort(err: unknown): boolean {
+  return err instanceof AbortedError || (err instanceof Error && err.name === "AbortError");
+}
 
 /**
  * Maps a failed ROOT fetch onto the released status vocabulary. Target
@@ -79,11 +87,42 @@ export function traverseGraphV1(
   const resolutionState = budgetResolutionStateFor(budget, requestOptions);
 
   const resolve: TraversalNodeResolver = async (request) => {
+    // A URL root has no declared id, so it cannot go through the shared layer,
+    // which is keyed by canonical `{id, normalizedUrl}`: there is nothing to
+    // look it up by until it has been fetched once. A second walk on the same
+    // budget therefore re-fetches the ROOT (every referenced target is still a
+    // cache hit), and `chargeNode` still dedupes its node charge. Caching it by
+    // URL here would mean a second canonical cache on one budget — precisely
+    // what the shared layer exists to prevent.
     if (request.declaredId === undefined) {
       try {
-        const entity = await fetchEntity(request.url, requestOptions, budget);
+        const entity = await fetchEntity(
+          request.url,
+          {
+            ...requestOptions,
+            // The root's own origin defines `rootOrigin`, so only a mid-request
+            // redirect can make this fire — but ADR-0008's per-hop guarantee
+            // applies to the root fetch too, not just to resolved targets.
+            onBeforeAttempt: crossOriginAttemptHook(
+              budget,
+              effective.rootOrigin,
+              `${CONTEXT} root`,
+              options.onBeforeAttempt
+            ),
+          },
+          budget
+        );
+        // The root is a node like any other, charged under its real id/url now
+        // that both are known — no occurrence pointed at it to charge it. A
+        // later edge back to the same {id, url} then sees an already-visited
+        // target instead of paying for it twice.
+        chargeNode(budget, entity.id, request.url, `${CONTEXT} root`);
         return { status: "resolved", entity };
       } catch (err) {
+        if (isAbort(err)) throw err;
+        if (err instanceof AadpDiscoveryBudgetExceededError) {
+          return { status: "budget-exhausted", message: err.message };
+        }
         return rootStatusFor(err);
       }
     }
@@ -95,6 +134,11 @@ export function traverseGraphV1(
       CONTEXT
     );
     if (resolution.status === "stopped") {
+      // The shared layer reports budget exhaustion and this caller's own abort
+      // through one `stopped` channel. They are different terminal states —
+      // `budget` is a result, an abort is the caller's own decision — so they
+      // are told apart here rather than collapsed into one stop reason.
+      if (options.signal?.aborted) throw new AbortedError(resolution.message);
       return { status: "budget-exhausted", message: resolution.message };
     }
     const { outcome } = resolution;

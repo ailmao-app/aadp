@@ -137,6 +137,13 @@ interface GraphTraversalState {
   discoveryIndex: number;
   references: GraphReferenceV1[];
   progress: TraversalProgress;
+  /**
+   * Set once the budget is exhausted. From then on the walk plans no further
+   * request: remaining scheduled edges settle as `budget-exhausted` and the
+   * terminal summary says `budget`, so a partial graph is never reported as a
+   * complete one.
+   */
+  stopReason?: "budget";
 }
 
 /**
@@ -349,9 +356,13 @@ export async function* walkTraversal(
       }
       yield { type: "expansion", expansion };
     }
+
+    // Reported everything this node had to say; a budget stop ends the walk
+    // here rather than dequeuing work it can no longer pay for.
+    if (state.stopReason === "budget") break;
   }
 
-  return { references: state.references, summary: summaryFrom(state.progress, "exhausted") };
+  return { references: state.references, summary: summaryFrom(state.progress, state.stopReason ?? "exhausted") };
 }
 
 /**
@@ -405,6 +416,11 @@ async function settleEdge(
   options: TraversalWalkOptions,
   state: GraphTraversalState
 ): Promise<GraphEdgeV1> {
+  // Once the budget is gone every remaining occurrence is still reported — it
+  // is a real reference on the wire — but nothing else is ever requested.
+  if (state.stopReason === "budget") {
+    return edgeOf(occurrence, "budget-exhausted", "The traversal budget was exhausted before this edge was tried.");
+  }
   if (occurrence.landingDepth > options.maxDepth) {
     return edgeOf(
       occurrence,
@@ -439,6 +455,12 @@ async function settleEdge(
   const settled = { ...edgeOf(occurrence, "expanded"), status: resolution.status };
   if (resolution.message) settled.message = resolution.message;
 
+  if (resolution.status === "budget-exhausted") {
+    // This occurrence WAS attempted, so it keeps its resolution status; the
+    // walk stops after the node it is part of finishes reporting.
+    state.stopReason = "budget";
+    return { ...settled, outcome: "not-expanded" };
+  }
   if (resolution.status !== "resolved" || !resolution.entity) {
     return { ...settled, outcome: "not-expanded" };
   }
@@ -566,6 +588,7 @@ async function resolveRoot(
   const key = canonicalTargetKey(resolution.entity?.id ?? "", options.rootUrl);
   state.resolutions.set(key, resolution);
   const resolved = resolution.status === "resolved" && resolution.entity !== undefined;
+  if (resolution.status === "budget-exhausted") state.stopReason = "budget";
   if (resolved) state.expandedKeys.add(key);
   return { key, depth: 0, discoveryIndex: 0, expand: resolved };
 }
