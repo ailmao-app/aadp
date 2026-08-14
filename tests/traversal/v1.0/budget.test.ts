@@ -415,22 +415,46 @@ describe("two accounting units", () => {
     });
 
     const budget = createRelationsTraversalBudget();
-    const walkA = collectGraphV1(`${server.baseUrl}/answer.json`, options({ budget }));
-    await evidenceReached;
-    // B starts while A's evidence fetch is still open, so B can only join it.
-    const walkB = collectGraphV1(`${server.baseUrl}/answer.json`, options({ budget }));
-    releaseEvidence!();
+    // Watch the shared layer's OWN decisions. Waiting for the `join` event is
+    // what proves B met a fetch in flight; simply starting B and releasing would
+    // also pass if A had settled first and B merely read the cache — the very
+    // interleaving that must not decide the counter.
+    const evidenceDecisions: string[] = [];
+    let secondDecision: () => void;
+    const secondDecisionMade = new Promise<void>((resolve) => {
+      secondDecision = resolve;
+    });
+    const stopObserving = observeCanonicalResolutions(budget, (event) => {
+      if (!event.url.endsWith("/evidence.json")) return;
+      evidenceDecisions.push(event.kind);
+      if (evidenceDecisions.length === 2) secondDecision();
+    });
 
-    const [a, b] = await Promise.all([walkA, walkB]);
+    try {
+      const walkA = collectGraphV1(`${server.baseUrl}/answer.json`, options({ budget }));
+      await evidenceReached;
+      const walkB = collectGraphV1(`${server.baseUrl}/answer.json`, options({ budget }));
+      await secondDecisionMade;
+      releaseEvidence!();
 
-    expect(server.requestLog.filter((p) => p === "/evidence.json")).toHaveLength(1);
-    // Four canonical targets exist; between them the two walks may claim each
-    // one exactly once.
-    expect(a.summary.requests + b.summary.requests).toBe(4);
-    expect(budget.requestsMade).toBe(4);
-    // Both still see the whole graph — joining costs nothing and hides nothing.
-    expect(a.nodes).toHaveLength(4);
-    expect(b.nodes).toHaveLength(4);
+      const [a, b] = await Promise.all([walkA, walkB]);
+
+      // B decided while A was still pending, so the decision must be `join`.
+      expect(evidenceDecisions).toEqual(["fetch", "join"]);
+      expect(server.requestLog.filter((p) => p === "/evidence.json")).toHaveLength(1);
+      // Four canonical targets exist; between them the two walks may claim each
+      // one exactly once.
+      expect(a.summary.requests + b.summary.requests).toBe(4);
+      expect(budget.requestsMade).toBe(4);
+      // Both still see the whole graph — joining costs nothing and hides nothing.
+      expect(a.nodes).toHaveLength(4);
+      expect(b.nodes).toHaveLength(4);
+    } finally {
+      stopObserving();
+      // Never leave the server holding a response open: a failed assertion above
+      // would otherwise hang cleanup rather than report the failure.
+      releaseEvidence!();
+    }
   });
 
   it("counts nothing for a target a stopped call never started", async () => {

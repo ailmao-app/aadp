@@ -137,19 +137,27 @@ adapter may plan edges out of this extension field".
    in-flight join, a collection page, a retry or redirect hop, or work spent on
    the budget before this walk began.
 
-   Implementing the decision exposed two real defects. First, the counter had
-   been incremented for every key the WALK had not seen yet, so a second walk on
-   a warm budget reported four requests while making none. Second — and only
-   visible under concurrency — the first fix asked a predicate before resolving
-   and acted on the answer afterwards, so two walks sharing a budget could both
-   read "not known yet" and both claim the same logical resolution.
+   Implementing the decision exposed a real defect: the counter had been
+   incremented for every key the WALK had not seen yet, so a second walk on a
+   warm budget reported four requests while making none.
 
-   `resolveCanonicalTarget` now REPORTS the decision it took, at the moment it
-   took it: `started` is true only for the call that actually created the fetch,
-   and false for a cache replay, a join, or a call that stopped before starting
-   anything. Traversal maps that to `replayed` rather than re-deriving it, so
-   the counter cannot be raced. Pinned by a concurrent-join test that holds the
-   shared response open, and by an already-aborted test.
+   The first fix asked the shared state a predicate before resolving and acted
+   on the answer afterwards. That was replaced: `resolveCanonicalTarget` now
+   REPORTS the decision it took, at the moment it took it — `started` is true
+   only for the call that created the fetch, and false for a cache replay, a
+   join, or a call that stopped before starting anything.
+
+   **What the change is worth, stated precisely.** The predicate was not
+   reachable-race-prone in the shape it shipped in: nothing awaited between the
+   read and `pending.set`, which is synchronous, so no second walk could
+   interleave — a mutation test restoring the predicate does NOT fail. The value
+   of reporting the decision is that correctness no longer depends on that
+   accident of statement order: inserting any await between the two would have
+   silently reintroduced double counting. The accompanying tests therefore pin
+   the CONTRACT (`tests/modules/shared/canonical-resolution.test.ts`: exactly one
+   of two concurrent callers is `started`; a replay and a pre-start stop are
+   not), and the traversal-level test pins the observable accounting (one fetch,
+   one join, `requests` summing to the number of logical fetches).
 5. **A collection is streamed, never materialized.** Its items are yielded one at
    a time and each is settled and emitted before the next is read, so the node
    and its early edges are observable while later pages are still arriving and no
