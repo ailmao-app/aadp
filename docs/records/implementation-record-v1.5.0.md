@@ -3,19 +3,17 @@
 | Field | Value |
 |---|---|
 | Document type | Implementation record |
-| Status | **Gate OPEN.** Phases 1-5 complete and green; Phase 6 (neutral interoperability) is **not** performed — no data set has been identified, so no release may be tagged from this record yet |
+| Status | **Implementation and release gates complete.** Phases 1-5 are green; Phase 6 passed against the AI Lmao production graph from a packed-tarball clean install on Node 20.18.1 |
 | Audience | Package maintainers and release reviewers |
 | Scope | Cross-module graph traversal `ail-aadp/traversal/v1.0` and the conformance profile `aadp:graph-traversal@1.0` |
 | Wire impact | AADP wire version stays `1.0`. No released core, Relations `1.0`, Answer `1.0` or Evidence `1.0` schema, module version or wire contract changed. `1.5.0` publishes **no specification**: cross-module traversal is a client-side capability, and [ADR-0011](../adr/0011-cross-module-graph-traversal.md) is its binding source |
-| Binding source | [ADR-0011](../adr/0011-cross-module-graph-traversal.md) (**Accepted** 2026-08-12) |
+| Binding source | [ADR-0011](../adr/0011-cross-module-graph-traversal.md) (**Accepted** 2026-08-12, **amended** 2026-08-14: §9 `partial` independent of `stopReason`, §11 one production data set) |
 | Vietnamese internal edition | [`../vi/plans/implementation-plan-v1.5.0.md`](../vi/plans/implementation-plan-v1.5.0.md) |
 
 ## Abstract
 
-This memo records what `1.5.0` has delivered so far, the decisions worth
-remembering, and — deliberately — the one gate that is **still open**. It is
-written while that gate is open so a reviewer can see exactly what is missing
-rather than inferring it from an absence.
+This memo records what `1.5.0` delivered, the decisions worth remembering and
+the evidence that closed every release gate.
 
 It is informational and does not override any specification or schema.
 Requirement words follow [the AADP documentation conventions](../document-conventions.md).
@@ -189,37 +187,45 @@ adapter may plan edges out of this extension field".
    as the pending fetch. A fetch another walk on the same budget is still waiting
    on is never cancelled by it.
 
-## Open gate — Phase 6, neutral interoperability
+## Closed gate — Phase 6 production interoperability
 
-**Nothing here is done, and nothing below may be filled in from anything other
-than a run that actually happened.**
+The fields below come from a run that actually happened; none was filled in from
+a proposed or reconstructed result.
 
-The release gate requires **two** neutral data sets that:
+By the ADR-0011 amendment of 2026-08-14, the release gate requires **one** real
+production data set that:
 
-- are identified by name, HTTPS URL and owner in this record;
-- are operated by **two different parties**;
-- include **at least one** owner who is not the AADP maintainers;
-- are exercised from a packed-tarball clean install importing only
+- is identified by name, HTTPS URL and owner in this record;
+- is exercised from a packed-tarball clean install importing only
   `ail-aadp/traversal/v1.0`;
-- are run on **Node 20.18.1**, the `engines.node` floor — a newer version may be
+- is run on **Node 20.18.1**, the `engines.node` floor — a newer version may be
   run in addition, but evidence at the floor is required;
-- have their raw reports stored under `docs/records/conformance/1.5.0/`, together
+- has its raw report stored under `docs/records/conformance/1.5.0/`, together
   with the Node version, tarball filename and digest, the command, the options
   and six budget limits, and **both** `summary.requests` and
   `budget.requestsMade` under the semantics decided above.
 
-| Field | Data set A | Data set B |
-|---|---|---|
-| Name | *not identified* | *not identified* |
-| URL | *not identified* | *not identified* |
-| Owner | *not identified* | *not identified* |
-| Operated by AADP maintainers? | — | — |
-| Report | *not run* | *not run* |
+| Field | Production data set |
+|---|---|
+| Name | AI Lmao Public Knowledge Graph |
+| URL | `https://ailmao.com/ai/v1.0/entities/answer/what-is-ai-lmao.json` |
+| Owner | Trong Nhan / AI Lmao |
+| Operated by AADP maintainers? | Yes |
+| Node | `v20.18.1` — engines floor |
+| Result | Passed; graph exhausted and non-partial, profile 26/26 |
+| Report | [`conformance/1.5.0/ai-lmao-public-knowledge-graph-2026-08-14T13-16-53-572Z-4bbd7826302b.json`](conformance/1.5.0/ai-lmao-public-knowledge-graph-2026-08-14T13-16-53-572Z-4bbd7826302b.json) |
 
-Until both rows are filled from real runs, `1.5.0` MUST NOT be tagged and this
-record MUST NOT be described as gate-closed.
+The original two-owner gate was stronger, but it made the release depend on an
+external operator who was not available. The maintainer accepted the narrower,
+explicit claim: this evidence proves end-to-end production interoperability,
+not independent-owner or independent-implementation interoperability.
 
-### The runner is ready; the data sets are not
+A second run against the same data set on Node `v20.20.2` is stored alongside it
+([`conformance/1.5.0/ai-lmao-public-knowledge-graph-2026-08-14T13-14-02-646Z-4bbd7826302b.json`](conformance/1.5.0/ai-lmao-public-knowledge-graph-2026-08-14T13-14-02-646Z-4bbd7826302b.json)),
+above the engines floor rather than at it. It is supporting evidence only: the
+gate is closed by the floor run above.
+
+### How the evidence was produced
 
 `scripts/run-traversal-interop.mjs` (`npm run interop:traversal`) performs one
 data set's run end to end and writes its raw evidence:
@@ -267,11 +273,10 @@ non-zero. A failed run against a real deployment keeps its report — that is ho
 a deployment's problem gets diagnosed — but can never be mistaken for a closed
 gate.
 
-The pipeline was exercised against a local fixture on 2026-08-14 — both a linked
-and a real `npm install` clean install; the walk and the profile both passed
-(26/26) — and correctly refused to call either one evidence. What remains is
-genuinely only the external input: two data sets meeting the ownership rule, and
-a run at Node 20.18.1.
+The pipeline was first exercised against a local fixture on 2026-08-14 — both a
+linked and a real `npm install` clean install — and correctly refused to call
+either one evidence. The production run above then passed on Node 20.18.1 and is
+eligible for the release gate.
 
 ## Release gate status
 
@@ -283,4 +288,4 @@ a run at Node 20.18.1.
 | `complete` always carries `stopReason`/`partial` | Closed |
 | Core-only/single-module consumer unaffected | Closed — `graph.compat.core_only_unchanged` green, and every released Relations/Answer/Evidence test passes with no assertion relaxed |
 | Partial result never reported as complete | Closed — ADR-0011 §9 amended so `partial` is independent of `stopReason`; a recoverable branch failure yields `exhausted`/`partial: true`, pinned by `graph.traversal.collection_failure_partial` |
-| Two neutral interoperability data sets | **OPEN** — see above |
+| One production interoperability data set | Closed — AI Lmao public graph, Node 20.18.1, packed-tarball clean install; see raw report above |
