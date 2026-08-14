@@ -381,10 +381,13 @@ describe("over HTTP", () => {
    * reference (`answer.related_entity`, rank 2), so there is real later-group
    * work for a prefetch to reach across the collection boundary and start.
    *
-   * `delays` lets the same graph be served with the two branches completing in
-   * opposite orders.
+   * `hooks` lets a test observe when each branch is requested and hold the
+   * collection response open — a deferred rather than a timer, so the
+   * assertions are about ordering rather than about how fast CI happens to be.
    */
-  async function startBoundaryServer(delays: { collection?: number; claim?: number } = {}): Promise<TestServer> {
+  async function startBoundaryServer(
+    hooks: { onCollection?: () => Promise<void> | void; onClaim?: () => void } = {}
+  ): Promise<TestServer> {
     const sealedAnswer = (base: string) => {
       const wrapper: Record<string, unknown> = {
         module: "aadp:answer",
@@ -442,11 +445,11 @@ describe("over HTTP", () => {
           items: [],
           cursor: { next: null },
         });
-        if (delays.collection) return void setTimeout(() => sendJson(res, 200, body), delays.collection);
-        return sendJson(res, 200, body);
+        return void Promise.resolve(hooks.onCollection?.()).then(() => sendJson(res, 200, body));
       }
       if (url.pathname === "/claim.json") {
-        const body = {
+        hooks.onClaim?.();
+        return sendJson(res, 200, {
           aadp_version: "1.0",
           id: "claim:c1",
           type: "claim",
@@ -454,9 +457,7 @@ describe("over HTTP", () => {
           updated_at: "2026-08-06T00:00:00Z",
           canonical_url: "https://example.com/claims/c1",
           data: {},
-        };
-        if (delays.claim) return void setTimeout(() => sendJson(res, 200, body), delays.claim);
-        return sendJson(res, 200, body);
+        });
       }
       return sendJson(res, 404, { error: "not found" });
     });
@@ -482,27 +483,43 @@ describe("over HTTP", () => {
     expect(graph.summary.partial).toBe(true);
   });
 
-  it("produces the same result whichever branch would have completed first", async () => {
-    const shapeOf = (graph: Awaited<ReturnType<typeof collectGraphV1>>) =>
-      graph.edges.map((edge) => `${edge.edgeGroup}#${edge.index}:${edge.outcome}:${edge.status ?? "-"}`);
+  it("does not start the later segment until collection paging completes", async () => {
+    // Budget enough for everything, so nothing here is decided by exhaustion:
+    // this is purely about WHEN the later segment is allowed to start.
+    let claimStarted = false;
+    let reachedCollection: () => void;
+    const collectionReached = new Promise<void>((resolve) => {
+      reachedCollection = resolve;
+    });
+    let releaseCollection: () => void;
+    const collectionHeld = new Promise<void>((resolve) => {
+      releaseCollection = resolve;
+    });
 
-    server = await startBoundaryServer({ collection: 25 });
-    const slowCollection = await collectGraphV1(
-      `${server.baseUrl}/answer.json`,
-      options({ budget: createRelationsTraversalBudget({ maxRequests: 2 }), followCollections: true })
-    );
-    const slowCollectionLog = [...server.requestLog];
-    await server.close();
+    server = await startBoundaryServer({
+      onCollection: () => {
+        reachedCollection();
+        return collectionHeld;
+      },
+      onClaim: () => {
+        claimStarted = true;
+      },
+    });
 
-    server = await startBoundaryServer({ claim: 25 });
-    const slowClaim = await collectGraphV1(
-      `${server.baseUrl}/answer.json`,
-      options({ budget: createRelationsTraversalBudget({ maxRequests: 2 }), followCollections: true })
-    );
+    const walking = collectGraphV1(`${server.baseUrl}/answer.json`, options({ followCollections: true }));
 
-    expect(shapeOf(slowClaim)).toEqual(shapeOf(slowCollection));
-    expect(server.requestLog).toEqual(slowCollectionLog);
-    expect(slowClaim.summary.stopReason).toBe(slowCollection.summary.stopReason);
+    await collectionReached;
+    // The collection response is still open. Nothing scheduled after it may
+    // have been requested yet.
+    expect(claimStarted).toBe(false);
+    expect(server.requestLog).not.toContain("/claim.json");
+
+    releaseCollection!();
+    const graph = await walking;
+
+    expect(claimStarted).toBe(true);
+    expect(graph.edges.find((edge) => edge.edgeGroup === "answer.related_entity")?.outcome).toBe("expanded");
+    expect(graph.summary).toMatchObject({ stopReason: "exhausted", partial: false });
   });
 
   it("charges collection pages against the caller's budget", async () => {
