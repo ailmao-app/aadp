@@ -118,7 +118,8 @@
     "conformance": "node dist/conformance/cli.js",
     "docs:check": "node scripts/check-doc-links.mjs",
     "check:iana-ipv6": "node scripts/check-iana-ipv6-allowlist.mjs",
-    "check:release-consistency": "node scripts/check-release-consistency.mjs"
+    "check:release-consistency": "node scripts/check-release-consistency.mjs",
+    "interop:traversal": "node scripts/run-traversal-interop.mjs"
   },
   "dependencies": {
     "ajv": "^8.17.1",

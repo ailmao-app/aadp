@@ -219,6 +219,39 @@ The release gate requires **two** neutral data sets that:
 Until both rows are filled from real runs, `1.5.0` MUST NOT be tagged and this
 record MUST NOT be described as gate-closed.
 
+### The runner is ready; the data sets are not
+
+`scripts/run-traversal-interop.mjs` (`npm run interop:traversal`) performs one
+data set's run end to end and writes its raw evidence:
+
+```bash
+npm run interop:traversal -- \
+  --name "Example Orbit" \
+  --url "https://example.com/ai/v1.0/entities/answer/pricing.json" \
+  --owner "Example Orbit Ltd" \
+  --maintainer-operated false
+```
+
+It builds and packs the tarball, records the tarball's sha256, creates a clean
+install from that tarball alone, and runs the walk from a probe that imports only
+published subpaths (`ail-aadp/traversal/v1.0` plus `ail-aadp/modules/relations/v1.0`
+for the budget factory the caller is required to own). Into
+`docs/records/conformance/1.5.0/<slug>.json` it writes the data-set identity, the
+Node version and whether it is the `engines.node` floor, the tarball name and
+digest, the exact command as invoked, the six budget limits, **both**
+`summary.requests` and `budget.requestsMade`, the whole graph, and the
+`aadp:graph-traversal@1.0` profile result.
+
+Refusals are deliberate: a missing name/URL/owner, or a non-HTTPS URL, exits
+non-zero and writes nothing. `--allow-loopback` and `--offline-node-modules`
+exist only to validate the script itself against a local fixture, and any run
+using them is stamped in its own output as not being evidence.
+
+The pipeline was exercised against a local fixture on 2026-08-14 (both a linked
+and a real `npm install` clean install; walk and profile both passed, 26/26), so
+what remains is genuinely only the external input: two data sets meeting the
+ownership rule, and a run at Node 20.18.1.
+
 ## Release gate status
 
 | Gate | Status |
