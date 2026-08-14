@@ -450,22 +450,6 @@ export function recordRootOutcome(state: BudgetResolutionState, url: string, out
 }
 
 /**
- * True when this budget has already settled `{id, url}`, or has a fetch for it
- * in flight — i.e. a caller resolving it now would replay or join rather than
- * start anything.
- *
- * Exists so a caller can report its own logical work honestly: a graph walk's
- * `requests` counter means "resolutions this walk started", and a replay or a
- * join costs it nothing. Physical HTTP attempts stay on `budget.requestsMade`.
- * Predicate only — it never registers interest, so asking cannot change what a
- * later resolve does.
- */
-export function isCanonicalTargetKnown(state: BudgetResolutionState, id: string, url: string): boolean {
-  const key = canonicalTargetKey(id, url);
-  return state.outcomes.has(key) || state.pending.has(key);
-}
-
-/**
  * Replays a settled outcome for a bare URL, for that same root-shaped caller.
  *
  * Checks the root index first, then falls back to scanning settled canonical
@@ -502,13 +486,22 @@ export function replaySettledOutcomeForUrl(
  * contract.
  */
 export type CanonicalResolution =
-  | { status: "outcome"; outcome: CanonicalOutcome }
-  | { status: "stopped"; message: string };
+  | { status: "outcome"; outcome: CanonicalOutcome; started: boolean }
+  | { status: "stopped"; message: string; started: boolean };
 
 /**
  * Resolves `target` through the budget's shared state: replays a settled
  * outcome, joins an in-flight fetch, or starts one — exactly once per
  * canonical key for the lifetime of the budget.
+ *
+ * `started` reports the decision THIS invocation made, at the moment it made it:
+ * `true` only for the call that actually created the fetch, `false` for a cache
+ * replay, for joining a fetch already in flight, and for a call that stopped
+ * before starting anything. It is reported from inside the synchronous
+ * decision point rather than left for the caller to infer: asking a predicate
+ * first and acting afterwards is a check-then-act race, and two concurrent
+ * walks sharing a budget would both conclude they had started the same
+ * resolution.
  *
  * `seedTargetType` is only the type whichever reference triggered the fetch
  * declared; it is NOT applied to the returned outcome. A caller MUST
@@ -540,13 +533,13 @@ export async function resolveCanonicalTarget(
     // the key visited before the throw) and misreport it `invalid`. See
     // `BudgetResolutionState.globalStops`.
     observe("stopped");
-    return { status: "stopped", message: priorStop.message };
+    return { status: "stopped", message: priorStop.message, started: false };
   }
 
   const settled = outcomes.get(key);
   if (settled) {
     observe("cache");
-    return { status: "outcome", outcome: settled };
+    return { status: "outcome", outcome: settled, started: false };
   }
 
   // No settled outcome yet. Join an in-flight fetch for this canonical key
@@ -561,9 +554,15 @@ export async function resolveCanonicalTarget(
   let entry = pending.get(key);
   if (!entry && options.signal?.aborted) {
     observe("stopped");
-    return { status: "stopped", message: new AbortedError(target.url, options.signal.reason).message };
+    return {
+      status: "stopped",
+      message: new AbortedError(target.url, options.signal.reason).message,
+      started: false,
+    };
   }
-  observe(entry ? "join" : "fetch");
+  // The decision, taken here and reported as taken — no caller may re-derive it.
+  const started = entry === undefined;
+  observe(started ? "fetch" : "join");
   if (!entry) {
     const controller = new AbortController();
     const promise = fetchCanonicalTarget(target, seedTargetType, options, controller.signal, context);
@@ -608,9 +607,9 @@ export async function resolveCanonicalTarget(
 
   entry.waiters++;
   try {
-    return { status: "outcome", outcome: await raceSignal(entry.promise, options.signal, target.url) };
+    return { status: "outcome", outcome: await raceSignal(entry.promise, options.signal, target.url), started };
   } catch (err) {
-    if (isGlobalStop(err)) return { status: "stopped", message: (err as Error).message };
+    if (isGlobalStop(err)) return { status: "stopped", message: (err as Error).message, started };
     throw err;
   } finally {
     entry.waiters--;

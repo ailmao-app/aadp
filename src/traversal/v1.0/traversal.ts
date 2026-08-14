@@ -20,7 +20,6 @@ import { chargeNode, crossOriginAttemptHook } from "../../modules/relations/v1.0
 import { iterateRelationCollection } from "../../modules/relations/v1.0/index.js";
 import {
   budgetResolutionStateFor,
-  isCanonicalTargetKnown,
   recordRootOutcome,
   replaySettledOutcomeForUrl,
   resolveCanonicalTarget,
@@ -171,9 +170,6 @@ export function traverseGraphV1(
         return failure;
       }
     }
-    // Asked BEFORE resolving: afterwards the key is settled either way, and the
-    // walk's own `requests` counter only counts resolutions it started.
-    const replayed = isCanonicalTargetKnown(resolutionState, request.declaredId, request.url);
     const resolution = await resolveCanonicalTarget(
       resolutionState,
       { id: request.declaredId, url: request.url },
@@ -181,13 +177,19 @@ export function traverseGraphV1(
       requestOptions,
       CONTEXT
     );
+    // `started` is the decision the shared layer took atomically for THIS call:
+    // only the caller that actually created the fetch counts it as a logical
+    // resolution of its own. Two concurrent walks meeting the same target
+    // therefore split into one starter and one joiner, never two starters.
+    const replayed = !resolution.started;
+
     if (resolution.status === "stopped") {
       // The shared layer reports budget exhaustion and this caller's own abort
       // through one `stopped` channel. They are different terminal states —
       // `budget` is a result, an abort is the caller's own decision — so they
       // are told apart here rather than collapsed into one stop reason.
       if (signal.aborted) throw new AbortedError(resolution.message);
-      return { status: "budget-exhausted", message: resolution.message };
+      return { status: "budget-exhausted", message: resolution.message, replayed };
     }
     const { outcome } = resolution;
     return outcome.ok

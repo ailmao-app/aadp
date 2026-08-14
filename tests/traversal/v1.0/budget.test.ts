@@ -120,7 +120,10 @@ function evidenceEntity() {
  * `delayMs` holds the evidence response open long enough for a second waiter to
  * join the one in-flight fetch.
  */
-async function startDiamondServer(delayMs = 0): Promise<TestServer> {
+async function startDiamondServer(
+  delayMs = 0,
+  hooks: { onEvidence?: () => Promise<void> | void } = {}
+): Promise<TestServer> {
   const started = await startServer((_req, res, url) => {
     const evidenceUrl = `${started.baseUrl}/evidence.json`;
     if (url.pathname === "/answer.json") {
@@ -136,6 +139,9 @@ async function startDiamondServer(delayMs = 0): Promise<TestServer> {
     if (url.pathname === "/claim1.json") return sendJson(res, 200, claimEntity("claim:c1", evidenceUrl));
     if (url.pathname === "/claim2.json") return sendJson(res, 200, claimEntity("claim:c2", evidenceUrl));
     if (url.pathname === "/evidence.json") {
+      if (hooks.onEvidence) {
+        return void Promise.resolve(hooks.onEvidence()).then(() => sendJson(res, 200, evidenceEntity()));
+      }
       if (delayMs > 0) {
         setTimeout(() => sendJson(res, 200, evidenceEntity()), delayMs);
         return;
@@ -386,6 +392,61 @@ describe("two accounting units", () => {
     // Root, two claims, one shared evidence entity.
     expect(graph.summary.requests).toBe(4);
     expect(budget.requestsMade).toBe(4);
+  });
+
+  it("gives the credit for one shared fetch to exactly one of two concurrent walks", async () => {
+    // The failure this guards is a check-then-act race: if each walk asked "is
+    // this target known?" before resolving, both would read `no` and both would
+    // count the same logical resolution.
+    let reachedEvidence: () => void;
+    const evidenceReached = new Promise<void>((resolve) => {
+      reachedEvidence = resolve;
+    });
+    let releaseEvidence: () => void;
+    const evidenceHeld = new Promise<void>((resolve) => {
+      releaseEvidence = resolve;
+    });
+
+    server = await startDiamondServer(0, {
+      onEvidence: () => {
+        reachedEvidence();
+        return evidenceHeld;
+      },
+    });
+
+    const budget = createRelationsTraversalBudget();
+    const walkA = collectGraphV1(`${server.baseUrl}/answer.json`, options({ budget }));
+    await evidenceReached;
+    // B starts while A's evidence fetch is still open, so B can only join it.
+    const walkB = collectGraphV1(`${server.baseUrl}/answer.json`, options({ budget }));
+    releaseEvidence!();
+
+    const [a, b] = await Promise.all([walkA, walkB]);
+
+    expect(server.requestLog.filter((p) => p === "/evidence.json")).toHaveLength(1);
+    // Four canonical targets exist; between them the two walks may claim each
+    // one exactly once.
+    expect(a.summary.requests + b.summary.requests).toBe(4);
+    expect(budget.requestsMade).toBe(4);
+    // Both still see the whole graph — joining costs nothing and hides nothing.
+    expect(a.nodes).toHaveLength(4);
+    expect(b.nodes).toHaveLength(4);
+  });
+
+  it("counts nothing for a target a stopped call never started", async () => {
+    server = await startDiamondServer();
+    const budget = createRelationsTraversalBudget();
+    const controller = new AbortController();
+    controller.abort();
+
+    const graph = await collectGraphV1(
+      `${server.baseUrl}/answer.json`,
+      options({ budget, signal: controller.signal })
+    );
+
+    expect(graph.summary).toMatchObject({ stopReason: "aborted", partial: true, requests: 0 });
+    expect(server.requestLog).toEqual([]);
+    expect(budget.requestsMade).toBe(0);
   });
 
   it("reports only this walk's own work when the budget was already used", async () => {

@@ -137,11 +137,19 @@ adapter may plan edges out of this extension field".
    in-flight join, a collection page, a retry or redirect hop, or work spent on
    the budget before this walk began.
 
-   Implementing the decision exposed a real defect: the counter had been
-   incremented for every key the WALK had not seen yet, so a second walk on a
-   warm budget reported four requests while making none. Resolutions now carry
-   `replayed`, set from the shared layer's own `isCanonicalTargetKnown`, and only
-   a resolution this walk started is counted.
+   Implementing the decision exposed two real defects. First, the counter had
+   been incremented for every key the WALK had not seen yet, so a second walk on
+   a warm budget reported four requests while making none. Second — and only
+   visible under concurrency — the first fix asked a predicate before resolving
+   and acted on the answer afterwards, so two walks sharing a budget could both
+   read "not known yet" and both claim the same logical resolution.
+
+   `resolveCanonicalTarget` now REPORTS the decision it took, at the moment it
+   took it: `started` is true only for the call that actually created the fetch,
+   and false for a cache replay, a join, or a call that stopped before starting
+   anything. Traversal maps that to `replayed` rather than re-deriving it, so
+   the counter cannot be raced. Pinned by a concurrent-join test that holds the
+   shared response open, and by an already-aborted test.
 5. **A collection is streamed, never materialized.** Its items are yielded one at
    a time and each is settled and emitted before the next is read, so the node
    and its early edges are observable while later pages are still arriving and no
