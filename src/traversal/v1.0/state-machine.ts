@@ -19,6 +19,7 @@ import type { EntityV1 } from "../../client/v1.0/index.js";
 import { canonicalTargetKey, type RelationTargetV1 } from "../../modules/relations/v1.0/index.js";
 import {
   planNodeExpansions,
+  type NodeExpansionPlan,
   type PlannedTraversalCollection,
   type PlannedTraversalEdge,
 } from "./edge-planner.js";
@@ -302,33 +303,44 @@ export async function* walkTraversal(
   while (queue.length > 0) {
     const node = queue.shift()!;
     const resolution = state.resolutions.get(node.key)!;
+    const expands = node.expand && resolution.status === "resolved" && resolution.entity !== undefined;
+
+    // Planned BEFORE the node is emitted so the node itself can carry the
+    // per-node diagnostics its public shape promises (`modules`, `expansions`).
+    // The same planning result is then reused for the edge and expansion
+    // events, so nothing is validated or planned twice.
+    const plan = expands
+      ? planNodeExpansions(
+          resolution.entity!,
+          {
+            depth: node.depth,
+            nodeKey: node.key,
+            followCollections: options.followCollections,
+            includeGeneratedSummarySources: options.includeGeneratedSummarySources,
+          },
+          options.lookup
+        )
+      : undefined;
+
+    // Row 2 is paged BEFORE the node is emitted, for two reasons: a
+    // collection's items must take their place in the schedule key like every
+    // other occurrence, and a collection that failed has to be on the expansion
+    // record the node carries — a record amended after the node was handed to
+    // the consumer would be a record the consumer never saw.
+    const paged = plan
+      ? await pageCollections(plan.collections, node, options, state)
+      : { planned: [] as PlannedTraversalEdge[], failures: [] };
+    if (plan) attachCollectionFailures(plan.expansions, paged.failures);
 
     if (!state.emittedNodes.has(node.key)) {
       state.emittedNodes.add(node.key);
       state.progress.nodes += 1;
-      yield { type: "node", node: buildNode(node, resolution) };
+      yield { type: "node", node: buildNode(node, resolution, plan) };
     }
 
-    if (!node.expand || resolution.status !== "resolved" || !resolution.entity) continue;
+    if (!plan) continue;
 
-    const plan = planNodeExpansions(
-      resolution.entity,
-      {
-        depth: node.depth,
-        nodeKey: node.key,
-        followCollections: options.followCollections,
-        includeGeneratedSummarySources: options.includeGeneratedSummarySources,
-      },
-      options.lookup
-    );
-
-    // Row 2 is paged BEFORE any of this node's edges are settled, so a
-    // collection's items take their place in the schedule key like every other
-    // occurrence — emission order stays a function of the input, not of when a
-    // page happened to come back.
-    const fromCollections = await pageCollections(plan.collections, node, options, state);
-
-    const scheduled: Occurrence[] = [...plan.edges, ...fromCollections].map((planned) => ({
+    const scheduled: Occurrence[] = [...plan.edges, ...paged.planned].map((planned) => ({
       planned,
       fromKey: node.key,
       landingDepth: node.depth + 1,
@@ -376,7 +388,7 @@ export async function* walkTraversal(
 
     for (const expansion of plan.expansions) {
       if (expansion.outcome === "unsupported-module") {
-        const declared = declaredModuleId(resolution.entity, expansion);
+        const declared = declaredModuleId(resolution.entity!, expansion);
         if (declared) {
           state.progress.unsupportedModules[declared] = (state.progress.unsupportedModules[declared] ?? 0) + 1;
         }
@@ -424,9 +436,10 @@ async function pageCollections(
   node: PendingNode,
   options: TraversalWalkOptions,
   state: GraphTraversalState
-): Promise<PlannedTraversalEdge[]> {
+): Promise<{ planned: PlannedTraversalEdge[]; failures: CollectionFailure[] }> {
   const pager = options.pageCollection;
-  if (!pager || collections.length === 0) return [];
+  const failures: CollectionFailure[] = [];
+  if (!pager || collections.length === 0) return { planned: [], failures };
 
   const planned: PlannedTraversalEdge[] = [];
   for (const collection of collections) {
@@ -453,17 +466,52 @@ async function pageCollections(
         });
       }
     } catch (err) {
-      // A collection that cannot be paged stops that collection, not the node:
-      // its own items simply do not appear. A budget stop is global, though —
-      // the walk may make no further request at all.
+      // A budget stop is global — the walk may make no further request at all —
+      // and an abort is the caller's own decision, so both propagate.
       if (isBudgetStop(err)) {
         state.stopReason = "budget";
         break;
       }
       if (isAbortStop(err)) throw err;
+
+      // Anything else (404, blocked URL, malformed page, cursor cycle) stops
+      // this ONE collection and is reported on the expansion record that owns
+      // it. It must never be dropped silently: a consumer would otherwise
+      // receive a graph missing a whole branch with nothing to diagnose or
+      // retry. `plannedEdges` keeps counting only the items actually read.
+      failures.push({
+        extensionField: collection.extensionField,
+        url: collection.url,
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
   }
-  return planned;
+  return { planned, failures };
+}
+
+/** One collection that could not be paged, reported on its own extension's record. */
+interface CollectionFailure {
+  extensionField: `x_${string}`;
+  url: string;
+  message: string;
+}
+
+/**
+ * Folds collection failures into the expansion records of the extensions that
+ * owned them. The record's `outcome` is untouched — the extension really did
+ * parse and really did plan a collection; what failed is one reference inside
+ * it, which is exactly what `message` is for.
+ */
+function attachCollectionFailures(
+  expansions: GraphExtensionExpansionV1[],
+  failures: readonly CollectionFailure[]
+): void {
+  for (const failure of failures) {
+    const record = expansions.find((expansion) => expansion.extensionField === failure.extensionField);
+    if (!record) continue;
+    const note = `collection ${failure.url} could not be paged: ${failure.message}`;
+    record.message = record.message ? `${record.message}; ${note}` : note;
+  }
 }
 
 function isBudgetStop(err: unknown): boolean {
@@ -482,12 +530,24 @@ function declaredModuleId(entity: EntityV1, expansion: GraphExtensionExpansionV1
   return typeof module === "string" ? module : undefined;
 }
 
-function buildNode(node: PendingNode, resolution: TraversalNodeResolution): GraphNodeV1 {
+/**
+ * A node carries the per-node view of what traversal saw on it: every `x_*`
+ * with a readable module envelope, and one expansion record per extension.
+ * Both are absent on a node that was never expanded — a leaf or an unresolvable
+ * target has no extension story to tell, and an empty list would claim it does.
+ */
+function buildNode(
+  node: PendingNode,
+  resolution: TraversalNodeResolution,
+  plan?: NodeExpansionPlan
+): GraphNodeV1 {
   return {
     key: node.key,
     depth: node.depth,
     status: resolution.status,
     ...(resolution.entity ? { entity: resolution.entity } : {}),
+    ...(plan && plan.modules.length > 0 ? { modules: plan.modules } : {}),
+    ...(plan && plan.expansions.length > 0 ? { expansions: plan.expansions } : {}),
     ...(resolution.message ? { message: resolution.message } : {}),
   };
 }

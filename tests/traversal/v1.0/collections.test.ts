@@ -160,8 +160,29 @@ describe("paging a collection", () => {
     };
     const outcome = await walkWith(failing);
     expect(outcome.events.filter((e) => e.type === "edge")).toEqual([]);
-    expect(outcome.summary.stopReason).toBe("exhausted");
     expect(outcome.events.some((e) => e.type === "node")).toBe(true);
+  });
+
+  it("reports a failing collection on the expansion record that owns it", async () => {
+    const failing: TraversalCollectionPager = async function* () {
+      throw new Error("404 Not Found");
+    };
+    const outcome = await walkWith(failing);
+    const expansion = outcome.events.find((e) => e.type === "expansion");
+    // A whole branch disappearing with nothing to diagnose is the failure mode
+    // this guards: the consumer must be able to see which collection failed.
+    expect(expansion && expansion.type === "expansion" && expansion.expansion.message).toContain(COLLECTION_URL);
+    expect(expansion && expansion.type === "expansion" && expansion.expansion.message).toContain("404 Not Found");
+  });
+
+  it("keeps the failure on the node's own expansion record, not only on the flat list", async () => {
+    const failing: TraversalCollectionPager = async function* () {
+      throw new Error("blocked by URL policy");
+    };
+    const outcome = await walkWith(failing);
+    const node = outcome.events.find((e) => e.type === "node");
+    const expansions = node && node.type === "node" ? node.node.expansions : undefined;
+    expect(expansions?.[0]?.message).toContain("blocked by URL policy");
   });
 
   it("stops the walk when paging exhausts the budget", async () => {

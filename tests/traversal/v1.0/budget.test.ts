@@ -212,18 +212,33 @@ describe("no double charge", () => {
     // again — served from the budget's canonical cache.
     const second = await collectGraphV1(`${server.baseUrl}/answer.json`, options({ budget }));
 
-    // Every referenced target is a cache hit. The ROOT is the one exception: the
-    // shared cache is keyed by canonical `{id, normalizedUrl}` and a bare root
-    // URL has no id until it has been fetched, so there is nothing to look it up
-    // by. It still charges no node — `chargeNode` already dedupes it.
-    expect(server.requestLog.length).toBe(requestsAfterFirst + 1);
-    expect(server.requestLog.filter((p) => p === "/answer.json")).toHaveLength(2);
+    // Not one new request — the root included. A repeat visit to a node this
+    // budget already settled costs nothing, so reusing a budget can never change
+    // what a walk finds based on call history.
+    expect(server.requestLog.length).toBe(requestsAfterFirst);
+    expect(server.requestLog.filter((p) => p === "/answer.json")).toHaveLength(1);
     expect(server.requestLog.filter((p) => p === "/claim1.json")).toHaveLength(1);
-    expect(server.requestLog.filter((p) => p === "/claim2.json")).toHaveLength(1);
     expect(server.requestLog.filter((p) => p === "/evidence.json")).toHaveLength(1);
     expect(budget.nodesVisited).toBe(nodesAfterFirst);
     expect(second.edges.map((e) => e.outcome)).toEqual(first.edges.map((e) => e.outcome));
     expect(second.nodes.map((n) => n.key)).toEqual(first.nodes.map((n) => n.key));
+  });
+
+  it("completes a second identical walk with no request capacity left", async () => {
+    server = await startDiamondServer();
+    // Exactly enough requests for the first walk. If the second walk needed a
+    // single request — the root included — it would be stopped by the budget
+    // and report a different graph, making the result depend on call history.
+    const budget = createRelationsTraversalBudget({ maxRequests: 4 });
+    const first = await collectGraphV1(`${server.baseUrl}/answer.json`, options({ budget }));
+    expect(server.requestLog).toHaveLength(4);
+
+    const second = await collectGraphV1(`${server.baseUrl}/answer.json`, options({ budget }));
+    expect(server.requestLog).toHaveLength(4);
+    expect(second.summary.stopReason).toBe("exhausted");
+    expect(second.summary.partial).toBe(false);
+    expect(second.nodes.map((n) => n.key)).toEqual(first.nodes.map((n) => n.key));
+    expect(second.edges.map((e) => e.outcome)).toEqual(first.edges.map((e) => e.outcome));
   });
 
   it("does not write to budget.expandedTargets — expansion state is walk-local", async () => {

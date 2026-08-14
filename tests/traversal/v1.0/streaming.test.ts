@@ -226,6 +226,50 @@ describe("early return", () => {
     expect(await iterator.next()).toEqual({ value: undefined, done: true });
   });
 
+  it("settles return() without waiting for a fetch that is still pending", async () => {
+    // The failure this guards: an async generator queues `return()` behind an
+    // in-flight `next()`, so a consumer that breaks out would be held for as
+    // long as the request takes — potentially forever.
+    let releaseFetch: (() => void) | undefined;
+    const hanging: TraversalNodeResolver = (request) =>
+      request.url === url.claim
+        ? new Promise((resolve) => {
+            releaseFetch = () => resolve({ status: "resolved", entity: claimC1 });
+          })
+        : Promise.resolve({ status: "resolved", entity: evidenceE });
+
+    let cancelled = false;
+    const progress = createTraversalProgress();
+    const walk = walkTraversal(root, {
+      rootUrl: url.answer,
+      lookup,
+      resolve: hanging,
+      maxDepth: 3,
+      followCollections: false,
+      includeGeneratedSummarySources: false,
+      progress,
+    });
+    const iterator = streamTraversal(walk, {
+      maxBufferedEvents: 256,
+      progress,
+      // Stands in for the walk-local abort `traverseGraphV1` wires up: it ends
+      // this walk's own waiting without cancelling a shared fetch.
+      onCancel: () => {
+        cancelled = true;
+        releaseFetch?.();
+      },
+    });
+
+    await iterator.next(); // the root node; the claim fetch is now pending
+    const settled = await Promise.race([
+      iterator.return!().then(() => "returned" as const),
+      delay(200).then(() => "timed out" as const),
+    ]);
+
+    expect(settled).toBe("returned");
+    expect(cancelled).toBe(true);
+  });
+
   it("runs the walk's cleanup on early return", async () => {
     let cleanedUp = false;
     async function* generate(): AsyncGenerator<

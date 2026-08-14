@@ -35,7 +35,7 @@ import {
   UnsupportedAadpVersionError,
   BlockedUrlError,
 } from "../../client/v1.0/index.js";
-import { canonicalTargetKey, releaseNode } from "../relations/v1.0/client/budget.js";
+import { canonicalTargetKey, normalizeTargetUrl, releaseNode } from "../relations/v1.0/client/budget.js";
 import { resolutionContextDigest, type ResolutionContextOptions } from "./resolution-context.js";
 import type { EntityV1 } from "../../client/v1.0/types.js";
 import type { RelationTargetV1 } from "../relations/v1.0/types.js";
@@ -409,6 +409,56 @@ export function budgetResolutionStateFor(
     );
   }
   return state;
+}
+
+/**
+ * Replays an already-settled canonical outcome for a bare URL, when this budget
+ * has one — the case a caller who holds a URL but not yet an id cannot express
+ * through `resolveCanonicalTarget`, whose key needs both.
+ *
+ * This exists for exactly one caller shape: a traversal ROOT given as a URL. It
+ * has no referring occurrence to supply an id, so without this it would re-fetch
+ * on every walk sharing a budget, spending requests the accounting table says a
+ * repeat visit costs nothing. Keeping the lookup here — rather than letting a
+ * caller memoize URL→id on its own — is what stops a second canonical cache from
+ * appearing on one budget.
+ *
+ * The scan is over settled outcomes only: an in-flight fetch is deliberately not
+ * joined, because a URL alone cannot prove it is the same canonical target the
+ * pending fetch will produce. A normalized-URL match is unambiguous — one URL
+ * serves at most one entity, and the id half of the key comes from the document
+ * that URL actually returned.
+ */
+/**
+ * Records an outcome this budget obtained OUTSIDE `resolveCanonicalTarget` —
+ * again, only the traversal root, which is fetched before its id is known and
+ * so has no key to resolve under beforehand.
+ *
+ * Never overwrites: a canonical key settles once per budget, and letting a later
+ * writer replace it would reintroduce exactly the order-dependent result the
+ * shared cache exists to prevent.
+ */
+export function recordSettledOutcome(
+  state: BudgetResolutionState,
+  id: string,
+  url: string,
+  outcome: CanonicalOutcome
+): void {
+  const key = canonicalTargetKey(id, url);
+  if (!state.outcomes.has(key)) state.outcomes.set(key, outcome);
+}
+
+export function replaySettledOutcomeForUrl(
+  state: BudgetResolutionState,
+  url: string
+): CanonicalOutcome | undefined {
+  const normalized = normalizeTargetUrl(url);
+  for (const [key, outcome] of state.outcomes) {
+    // Key layout is `${id}\0${normalizedUrl}` — compare the URL half only.
+    const separator = key.indexOf("\0");
+    if (separator !== -1 && key.slice(separator + 1) === normalized) return outcome;
+  }
+  return undefined;
 }
 
 /**

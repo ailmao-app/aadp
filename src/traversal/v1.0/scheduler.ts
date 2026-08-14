@@ -18,6 +18,17 @@ export interface StreamTraversalOptions {
   maxBufferedEvents: number;
   progress: TraversalProgress;
   signal?: AbortSignal;
+  /**
+   * Cancels THIS walk's own waiting, called before the generator's cleanup is
+   * awaited on an early consumer return.
+   *
+   * Without it, `return()` would queue behind a `next()` already awaiting a
+   * fetch and could not settle until the network did — a consumer that `break`s
+   * out of a `for await` would be held for however long that request takes. The
+   * caller wires this to a walk-local abort that reaches only this walk's
+   * waiters: a fetch shared with another walk is never cancelled by it.
+   */
+  onCancel?: () => void;
 }
 
 /** An abort raised by the caller's signal, as opposed to a failure of the walk. */
@@ -147,6 +158,10 @@ export function streamTraversal(
     async return(): Promise<IteratorResult<GraphTraversalEventV1>> {
       cancelled = true;
       completed = true;
+      // Cancel this walk's own waiting FIRST. An async generator queues a
+      // `return()` behind a `next()` that is already in flight, so without this
+      // the await below would last as long as the pending fetch does.
+      options.onCancel?.();
       wakeProducer();
       wakeConsumer();
       await walk.return(undefined as never).catch(() => undefined);

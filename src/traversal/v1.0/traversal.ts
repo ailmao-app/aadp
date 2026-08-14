@@ -20,6 +20,8 @@ import { chargeNode, crossOriginAttemptHook } from "../../modules/relations/v1.0
 import { iterateRelationCollection } from "../../modules/relations/v1.0/index.js";
 import {
   budgetResolutionStateFor,
+  recordSettledOutcome,
+  replaySettledOutcomeForUrl,
   resolveCanonicalTarget,
   type CanonicalResolutionOptions,
 } from "../../modules/shared/canonical-resolution.js";
@@ -81,22 +83,42 @@ export function traverseGraphV1(
   const effective = resolveTraversalOptions(root, options);
   const budget = options.budget;
 
+  // A walk-local cancellation, combined with (never replacing) the caller's own
+  // signal. The shared resolution layer races a waiter's signal against the
+  // fetch WITHOUT cancelling the fetch, so aborting this one only ends this
+  // walk's waiting — a request another walk on the same budget is still
+  // waiting on survives.
+  const walkCancel = new AbortController();
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, walkCancel.signal])
+    : walkCancel.signal;
+
   // Every fetch in this walk is made with the SAME request-affecting options,
   // which is what the shared layer's resolution-context digest pins: a budget
   // may not be reused across calls whose credentials, URL policy or size caps
   // differ.
-  const requestOptions: CanonicalResolutionOptions = { ...options, rootOrigin: effective.rootOrigin, budget };
+  const requestOptions: CanonicalResolutionOptions = {
+    ...options,
+    rootOrigin: effective.rootOrigin,
+    budget,
+    signal,
+  };
   const resolutionState = budgetResolutionStateFor(budget, requestOptions);
 
   const resolve: TraversalNodeResolver = async (request) => {
-    // A URL root has no declared id, so it cannot go through the shared layer,
-    // which is keyed by canonical `{id, normalizedUrl}`: there is nothing to
-    // look it up by until it has been fetched once. A second walk on the same
-    // budget therefore re-fetches the ROOT (every referenced target is still a
-    // cache hit), and `chargeNode` still dedupes its node charge. Caching it by
-    // URL here would mean a second canonical cache on one budget — precisely
-    // what the shared layer exists to prevent.
+    // A URL root has no declared id, so it cannot be looked up by canonical key
+    // the way a referenced target is. It is still a node of this budget: once
+    // some walk has settled it, a later walk replays that outcome instead of
+    // paying for the request again (the accounting table's "second walk meets an
+    // old node" row). The replay lives in the shared layer, so no second cache
+    // appears on one budget.
     if (request.declaredId === undefined) {
+      const replayed = replaySettledOutcomeForUrl(resolutionState, request.url);
+      if (replayed) {
+        return replayed.ok
+          ? { status: "resolved", entity: replayed.entity }
+          : { status: replayed.status, ...(replayed.message ? { message: replayed.message } : {}) };
+      }
       try {
         const entity = await fetchEntity(
           request.url,
@@ -119,6 +141,10 @@ export function traverseGraphV1(
         // later edge back to the same {id, url} then sees an already-visited
         // target instead of paying for it twice.
         chargeNode(budget, entity.id, request.url, `${CONTEXT} root`);
+        // Now that the id is known, the root becomes an ordinary canonical
+        // target of this budget, so a later walk replays it rather than
+        // re-requesting it.
+        recordSettledOutcome(resolutionState, entity.id, request.url, { ok: true, entity });
         return { status: "resolved", entity };
       } catch (err) {
         if (isAbort(err)) throw err;
@@ -140,7 +166,7 @@ export function traverseGraphV1(
       // through one `stopped` channel. They are different terminal states —
       // `budget` is a result, an abort is the caller's own decision — so they
       // are told apart here rather than collapsed into one stop reason.
-      if (options.signal?.aborted) throw new AbortedError(resolution.message);
+      if (signal.aborted) throw new AbortedError(resolution.message);
       return { status: "budget-exhausted", message: resolution.message };
     }
     const { outcome } = resolution;
@@ -171,5 +197,6 @@ export function traverseGraphV1(
     maxBufferedEvents: effective.maxBufferedEvents,
     progress,
     signal: options.signal,
+    onCancel: () => walkCancel.abort(),
   });
 }

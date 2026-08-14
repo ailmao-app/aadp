@@ -113,18 +113,38 @@ adapter may plan edges out of this extension field".
    through an INTERNAL `planCollections` capability and the scheduler pages it
    with the released `iterateRelationCollection`. The public `TraversalAdapter`
    contract frozen by ADR-0011 was deliberately not widened for it.
-2. **A URL root cannot be served from the canonical cache.** That cache is keyed
-   by `{id, normalizedUrl}` and a bare root URL has no id until it is fetched, so
-   a second walk on one budget re-fetches the root (every referenced target is
-   still a cache hit, and `chargeNode` still dedupes the node). Caching it by URL
-   would mean a second canonical cache on one budget.
+2. **A URL root is replayed by the shared layer, not by traversal.** The
+   canonical cache is keyed by `{id, normalizedUrl}` and a bare root URL has no
+   id until it is fetched, so the shared layer gained two internal entry points
+   — `recordSettledOutcome` (the root becomes an ordinary canonical target once
+   its id is known) and `replaySettledOutcomeForUrl` (a later walk replays it by
+   URL). A repeat walk on one budget therefore makes **no** request at all, per
+   the accounting table, and no second cache exists on that budget. The
+   URL-keyed replay deliberately does not join an in-flight fetch: a URL alone
+   cannot prove it is the same canonical target the pending fetch will produce.
 3. **`already-expanded` outranks the type-mismatch verdict.** A blocked edge
    carries no status by contract, so an occurrence that declares the wrong
    `target_type` for a target already expanded elsewhere reports
    `already-expanded` rather than `invalid`.
 4. **`summary.requests` counts canonical target resolutions**, not HTTP hops: one
    collection page carries many items. The authoritative per-hop count is the
-   budget's own.
+   budget's own. **Open for maintainer decision before release:** whether the
+   published field should instead count hops, which would make it agree with
+   `budget.requestsMade` at the cost of no longer counting logical resolutions.
+5. **A collection that cannot be paged is reported, never dropped.** A 404, a
+   blocked URL, a malformed page or a cursor cycle stops that one collection and
+   is recorded on the expansion record that owns it (`message`), while the node
+   and every other edge continue. **Open for maintainer decision before
+   release:** whether such a walk should also be `partial`. It cannot be today —
+   `stopReason` has only `exhausted`/`budget`/`aborted`, and `partial` is defined
+   as "any stop reason other than exhausted", so marking it partial would need a
+   vocabulary change that ADR-0011 froze.
+6. **Early consumer return cancels only this walk's waiting.** `traverseGraphV1`
+   combines the caller's signal with a walk-local abort and hands the scheduler a
+   cancel hook, because an async generator queues `return()` behind an in-flight
+   `next()` — without it, breaking out of a `for await` would block for as long
+   as the pending fetch. A fetch another walk on the same budget is still waiting
+   on is never cancelled by it.
 
 ## Open gate — Phase 6, neutral interoperability
 

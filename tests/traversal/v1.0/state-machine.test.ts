@@ -371,6 +371,44 @@ describe("emission order", () => {
   });
 });
 
+describe("per-node diagnostics", () => {
+  it("carries every declared module and one expansion record per extension on the node", async () => {
+    const root = entityOf({
+      id: "answer:a",
+      type: "answer",
+      canonical_url: url.answer,
+      x_answer: answerWrapper({
+        related_entities: [{ target_type: "claim", target: { id: "claim:c1", url: url.claim } }],
+      }),
+      x_vendor: { module: "vendor:thing", version: "9.9" },
+    });
+    const outcome = await walk(root, { [url.claim]: claimC1, [url.evidence]: evidenceE });
+    const node = outcome.events.find((e) => e.type === "node");
+    const payload = node && node.type === "node" ? node.node : undefined;
+
+    expect(payload?.modules).toEqual([
+      { id: "aadp:answer", version: "1.0", extensionField: "x_answer" },
+      { id: "vendor:thing", version: "9.9", extensionField: "x_vendor" },
+    ]);
+    expect(payload?.expansions?.map((e) => [e.extensionField, e.outcome])).toEqual([
+      ["x_answer", "planned"],
+      ["x_vendor", "unsupported-module"],
+    ]);
+  });
+
+  it("leaves both fields absent on a node that was never expanded", async () => {
+    // Rooted at the claim, the evidence entity is reached only through a leaf
+    // edge, so it is resolved and emitted but never expanded — and an empty
+    // list would claim it had an extension story it was never asked for.
+    const outcome = await walk(claimC1, { [url.evidence]: evidenceE });
+    const leaf = outcome.events.find((e) => e.type === "node" && e.node.key.includes("evidence:e"));
+    const payload = leaf && leaf.type === "node" ? leaf.node : undefined;
+    expect(payload?.status).toBe("resolved");
+    expect(payload?.modules).toBeUndefined();
+    expect(payload?.expansions).toBeUndefined();
+  });
+});
+
 describe("root-level references", () => {
   it("records one reference per root occurrence that reached a resolution", async () => {
     const outcome = await walk(answerRoot(), { [url.claim]: claimC1, [url.evidence]: evidenceE });
