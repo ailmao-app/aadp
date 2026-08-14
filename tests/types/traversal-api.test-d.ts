@@ -23,7 +23,11 @@ import type {
   RelationsTraversalBudgetState,
 } from "../../src/modules/relations/v1.0/index.js";
 import type { AnswerTargetResolutionStatus } from "../../src/modules/answer/v1.0/index.js";
-import { registerBuiltinTraversalAdapters } from "../../src/traversal/v1.0/index.js";
+import {
+  collectGraphV1,
+  registerBuiltinTraversalAdapters,
+  traverseGraphV1,
+} from "../../src/traversal/v1.0/index.js";
 import type {
   CrossModuleGraphV1,
   EdgeExpansionOutcomeV1,
@@ -43,19 +47,11 @@ import type {
 } from "../../src/traversal/v1.0/index.js";
 
 /* ------------------------------------------------------------------------- *
- * Not yet implemented: Phase 3 owns the two streaming entry points and Phase 5
- * owns the conformance runner. They stay type-only declarations here rather
- * than becoming stubs in `src/traversal/**` written to satisfy this gate.
+ * Not yet implemented: Phase 5 owns the conformance runner. It stays a
+ * type-only declaration here rather than becoming a stub in
+ * `src/traversal/**` written to satisfy this gate.
  * ------------------------------------------------------------------------- */
 
-export declare function traverseGraphV1(
-  root: string | EntityV1,
-  options: GraphTraversalOptions,
-): AsyncIterableIterator<GraphTraversalEventV1>;
-export declare function collectGraphV1(
-  root: string | EntityV1,
-  options: GraphTraversalOptions,
-): Promise<CrossModuleGraphV1>;
 export declare function runGraphTraversalConformance(
   options: GraphTraversalConformanceOptions,
 ): Promise<GraphTraversalConformanceReport>;

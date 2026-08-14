@@ -303,7 +303,16 @@ describe("per-occurrence verdicts", () => {
 describe("emission order", () => {
   it("emits a node before its edges and its expansions after them", async () => {
     const outcome = await walk(answerRoot(), { [url.claim]: claimC1, [url.evidence]: evidenceE });
-    expect(kinds(outcome.events).slice(0, 4)).toEqual(["node", "edge", "edge", "expansion"]);
+    // Each root-level edge is followed by its `reference` — the same occurrence
+    // seen from the root's point of view — and the node's expansions come last.
+    expect(kinds(outcome.events).slice(0, 6)).toEqual([
+      "node",
+      "edge",
+      "reference",
+      "edge",
+      "reference",
+      "expansion",
+    ]);
   });
 
   it("orders edges by edge-group rank, not by adapter registration or property order", async () => {

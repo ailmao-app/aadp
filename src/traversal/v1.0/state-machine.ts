@@ -38,6 +38,8 @@ export interface TraversalNodeRequest {
   url: string;
   /** The id the referring occurrence declared, when there is a referrer. */
   declaredId?: string;
+  /** The `target_type` the referring occurrence declared. Seeds the fetch; never the verdict. */
+  declaredTargetType?: string;
   depth: number;
 }
 
@@ -125,16 +127,57 @@ interface GraphTraversalState {
   expandedKeys: Set<string>;
   /** Canonical outcome per key for this walk: fan-in resolves once. */
   resolutions: Map<string, TraversalNodeResolution>;
+  /**
+   * Resolutions started but not yet settled, so a prefetch and the sequential
+   * settle of the same key join ONE call instead of racing into two.
+   */
+  inFlight: Map<string, Promise<TraversalNodeResolution>>;
   /** Nodes already emitted, so fan-in does not emit a second node event. */
   emittedNodes: Set<string>;
   discoveryIndex: number;
-  requests: number;
-  unsupportedModules: Record<string, number>;
-  events: GraphTraversalEventV1[];
   references: GraphReferenceV1[];
+  progress: TraversalProgress;
+}
+
+/**
+ * Live counters of a walk in flight. Shared with the caller so a walk that is
+ * aborted part-way can still report what it did before it stopped — a summary
+ * only available on normal completion would leave every aborted walk claiming
+ * zero work.
+ */
+export interface TraversalProgress {
   nodes: number;
   edges: number;
+  requests: number;
+  unsupportedModules: Record<string, number>;
 }
+
+export function createTraversalProgress(): TraversalProgress {
+  return { nodes: 0, edges: 0, requests: 0, unsupportedModules: {} };
+}
+
+/** Freezes the current counters into a terminal summary. `partial` follows `stopReason`. */
+export function summaryFrom(
+  progress: TraversalProgress,
+  stopReason: GraphTraversalSummaryV1["stopReason"]
+): GraphTraversalSummaryV1 {
+  return {
+    stopReason,
+    partial: stopReason !== "exhausted",
+    nodes: progress.nodes,
+    edges: progress.edges,
+    requests: progress.requests,
+    unsupportedModules: progress.unsupportedModules,
+  };
+}
+
+/**
+ * How many target resolutions may be in flight at once. An internal scheduling
+ * constant, deliberately NOT a public option at 1.0 (ADR-0011 §12.2): it
+ * changes only how fast a walk runs, never what it produces, and exposing it
+ * would freeze an implementation detail into the SemVer surface.
+ */
+const FETCH_CONCURRENCY = 4;
 
 export interface TraversalWalkOptions {
   rootUrl: string;
@@ -143,6 +186,8 @@ export interface TraversalWalkOptions {
   maxDepth: number;
   followCollections: boolean;
   includeGeneratedSummarySources: boolean;
+  /** Counters the caller can read while the walk is still running. */
+  progress?: TraversalProgress;
 }
 
 export interface TraversalWalkOutcome {
@@ -194,31 +239,34 @@ function edgeOf(occurrence: Occurrence, outcome: EdgeExpansionOutcomeV1, message
 }
 
 /**
- * Runs one walk to exhaustion, breadth-first over a queue ordered by the
- * schedule key `(depth, parentDiscoveryIndex, edgeGroupRank, edgeIndex)`.
+ * Walks the graph breadth-first over a queue ordered by the schedule key
+ * `(depth, parentDiscoveryIndex, edgeGroupRank, edgeIndex)`, yielding each
+ * event as soon as its position in that order is decided.
  *
- * Emission order per node is `node` → its `edge`s → its `expansion`s, which is
- * the rule the streaming phase preserves once it resolves several targets
- * concurrently: order follows the schedule key, never completion timing.
+ * Emission order per node is `node` → its `edge`s → its `expansion`s. Several
+ * targets may be in flight at once (`prefetchBatch`), but an event is only ever
+ * yielded at its scheduled position — completion timing never reorders the
+ * stream, which is what makes the same input produce the same sequence.
  *
- * Budget exhaustion and abort are Phase 3/4 concerns; this phase always
- * terminates with `stopReason: "exhausted"`.
+ * The generator is the backpressure boundary: nothing past the consumer's
+ * current pull is computed, so a slow consumer slows the walk instead of
+ * accumulating the graph in memory.
+ *
+ * Budget exhaustion is a Phase 4 concern; this walk ends `exhausted` and the
+ * streaming layer above rewrites the terminal summary when it aborts.
  */
-export async function runTraversalWalk(
+export async function* walkTraversal(
   root: string | EntityV1,
   options: TraversalWalkOptions
-): Promise<TraversalWalkOutcome> {
+): AsyncGenerator<GraphTraversalEventV1, { summary: GraphTraversalSummaryV1; references: GraphReferenceV1[] }> {
   const state: GraphTraversalState = {
     expandedKeys: new Set(),
     resolutions: new Map(),
+    inFlight: new Map(),
     emittedNodes: new Set(),
     discoveryIndex: 0,
-    requests: 0,
-    unsupportedModules: {},
-    events: [],
     references: [],
-    nodes: 0,
-    edges: 0,
+    progress: options.progress ?? createTraversalProgress(),
   };
 
   const queue: PendingNode[] = [await resolveRoot(root, options, state)];
@@ -229,8 +277,8 @@ export async function runTraversalWalk(
 
     if (!state.emittedNodes.has(node.key)) {
       state.emittedNodes.add(node.key);
-      state.nodes += 1;
-      state.events.push({ type: "node", node: buildNode(node, resolution) });
+      state.progress.nodes += 1;
+      yield { type: "node", node: buildNode(node, resolution) };
     }
 
     if (!node.expand || resolution.status !== "resolved" || !resolution.entity) continue;
@@ -255,20 +303,27 @@ export async function runTraversalWalk(
       targetKey: canonicalTargetKey(planned.plan.target.id, planned.plan.target.url),
     }));
     scheduled.sort(compareSchedule);
+    prefetchBatch(scheduled, options, state);
 
     for (const occurrence of scheduled) {
-      state.edges += 1;
+      state.progress.edges += 1;
       const edge = await settleEdge(occurrence, options, state);
-      state.events.push({ type: "edge", edge });
+      yield { type: "edge", edge };
+      // A root-level occurrence that reached a verdict is also a `reference`:
+      // the root's own references are what a consumer of a single entity asks
+      // for, and they carry the per-occurrence status the edge carries. Blocked
+      // occurrences have no verdict, so they produce no reference.
       if (node.depth === 0 && edge.status !== undefined) {
-        state.references.push({
+        const reference: GraphReferenceV1 = {
           index: edge.index,
           edgeGroup: edge.edgeGroup,
           key: edge.to,
           declaredTargetType: edge.declaredTargetType,
           status: edge.status,
           ...(edge.message ? { message: edge.message } : {}),
-        });
+        };
+        state.references.push(reference);
+        yield { type: "reference", reference };
       }
       // Every occurrence that reached a resolution contributes a node — a leaf
       // target and an unresolvable one are both real nodes of the graph — but
@@ -289,25 +344,32 @@ export async function runTraversalWalk(
       if (expansion.outcome === "unsupported-module") {
         const declared = declaredModuleId(resolution.entity, expansion);
         if (declared) {
-          state.unsupportedModules[declared] = (state.unsupportedModules[declared] ?? 0) + 1;
+          state.progress.unsupportedModules[declared] = (state.progress.unsupportedModules[declared] ?? 0) + 1;
         }
       }
-      state.events.push({ type: "expansion", expansion });
+      yield { type: "expansion", expansion };
     }
   }
 
-  return {
-    events: state.events,
-    references: state.references,
-    summary: {
-      stopReason: "exhausted",
-      partial: false,
-      nodes: state.nodes,
-      edges: state.edges,
-      requests: state.requests,
-      unsupportedModules: state.unsupportedModules,
-    },
-  };
+  return { references: state.references, summary: summaryFrom(state.progress, "exhausted") };
+}
+
+/**
+ * Drains `walkTraversal` into one outcome. The streaming entry point uses the
+ * generator directly; this is for callers that want the whole walk at once.
+ */
+export async function runTraversalWalk(
+  root: string | EntityV1,
+  options: TraversalWalkOptions
+): Promise<TraversalWalkOutcome> {
+  const events: GraphTraversalEventV1[] = [];
+  const walk = walkTraversal(root, options);
+  let step = await walk.next();
+  while (!step.done) {
+    events.push(step.value);
+    step = await walk.next();
+  }
+  return { events, references: step.value.references, summary: step.value.summary };
 }
 
 /** The declared module id of an extension traversal could not dispatch, for the summary tally. */
@@ -364,7 +426,12 @@ async function settleEdge(
   const target = occurrence.planned.plan.target;
   const resolution = await resolveKey(
     occurrence.targetKey,
-    { url: target.url, declaredId: target.id, depth: occurrence.landingDepth },
+    {
+      url: target.url,
+      declaredId: target.id,
+      declaredTargetType: occurrence.planned.plan.declaredTargetType,
+      depth: occurrence.landingDepth,
+    },
     options,
     state
   );
@@ -397,18 +464,83 @@ async function settleEdge(
 }
 
 /** Resolves a canonical key at most once per walk — fan-in never fetches twice. */
-async function resolveKey(
+function resolveKey(
   key: string,
   request: TraversalNodeRequest,
   options: TraversalWalkOptions,
   state: GraphTraversalState
 ): Promise<TraversalNodeResolution> {
   const cached = state.resolutions.get(key);
-  if (cached) return cached;
-  state.requests += 1;
-  const resolution = await options.resolve(request);
-  state.resolutions.set(key, resolution);
-  return resolution;
+  if (cached) return Promise.resolve(cached);
+  const started = state.inFlight.get(key);
+  if (started) return started;
+
+  state.progress.requests += 1;
+  const pending = Promise.resolve(options.resolve(request)).then((resolution) => {
+    state.resolutions.set(key, resolution);
+    state.inFlight.delete(key);
+    return resolution;
+  });
+  pending.catch(() => state.inFlight.delete(key));
+  state.inFlight.set(key, pending);
+  return pending;
+}
+
+/**
+ * Starts up to `FETCH_CONCURRENCY` resolutions for the occurrences this node is
+ * about to settle, so several targets are in flight while the walk still
+ * settles them strictly in schedule order.
+ *
+ * Only occurrences that pass the pre-fetch guards are started, and only one per
+ * distinct canonical key — exactly the set a sequential walk would have
+ * fetched. Nothing here can change a classification: depth and the ancestor
+ * path are fixed for the batch, and an expansion claim made mid-batch can only
+ * block another occurrence with the SAME key, which the dedup already collapsed
+ * into the one fetch it would have made anyway.
+ */
+function prefetchBatch(
+  scheduled: readonly Occurrence[],
+  options: TraversalWalkOptions,
+  state: GraphTraversalState
+): void {
+  const queue: Occurrence[] = [];
+  const seen = new Set<string>();
+  for (const occurrence of scheduled) {
+    if (occurrence.landingDepth > options.maxDepth) continue;
+    if (isOnAncestorPath(occurrence, occurrence.targetKey)) continue;
+    if (state.expandedKeys.has(occurrence.targetKey)) continue;
+    if (state.resolutions.has(occurrence.targetKey) || state.inFlight.has(occurrence.targetKey)) continue;
+    if (seen.has(occurrence.targetKey)) continue;
+    seen.add(occurrence.targetKey);
+    queue.push(occurrence);
+  }
+
+  let active = 0;
+  const pump = (): void => {
+    while (active < FETCH_CONCURRENCY && queue.length > 0) {
+      const occurrence = queue.shift()!;
+      const target = occurrence.planned.plan.target;
+      active += 1;
+      const done = (): void => {
+        active -= 1;
+        pump();
+      };
+      // The awaiting `settleEdge` owns the outcome and any rejection; this
+      // handle exists only to keep the pool at its concurrency limit.
+      resolveKey(
+        occurrence.targetKey,
+        {
+          url: target.url,
+          declaredId: target.id,
+          declaredTargetType: occurrence.planned.plan.declaredTargetType,
+          depth: occurrence.landingDepth,
+        },
+        options,
+        state
+      ).then(done, done);
+    }
+  };
+  pump();
 }
 
 /**
@@ -429,7 +561,7 @@ async function resolveRoot(
     return { key, depth: 0, discoveryIndex: 0, expand: true };
   }
 
-  state.requests += 1;
+  state.progress.requests += 1;
   const resolution = await options.resolve({ url: options.rootUrl, depth: 0 });
   const key = canonicalTargetKey(resolution.entity?.id ?? "", options.rootUrl);
   state.resolutions.set(key, resolution);
